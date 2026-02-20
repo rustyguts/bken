@@ -22,12 +22,11 @@ services:
       - XAUTHORITY=/tmp/.Xauthority
       - WEBKIT_DISABLE_COMPOSITING_MODE=1
       - WEBKIT_DISABLE_DMABUF_RENDERER=1
+      - WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
       - LIBGL_ALWAYS_SOFTWARE=1
-      - WEBKIT_FORCE_SANDBOX=0
       - GDK_BACKEND=x11
       - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
       - BKEN_ADDR=localhost:4433
-      - BKEN_TEST_USER=1
     volumes:
       - ./client:/app
       - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro

@@ -7,7 +7,9 @@
 // prevent silence amplification from going wild.
 package agc
 
-import "math"
+import (
+	"client/internal/vad"
+)
 
 const (
 	// DefaultTarget is the desired RMS level (linear, ~-14 dBFS).
@@ -61,7 +63,7 @@ func (a *AGC) Process(frame []float32) []float32 {
 		return frame
 	}
 
-	rms := computeRMS(frame)
+	rms := float64(vad.RMS(frame))
 
 	// Apply current gain before updating, so the listener hears the result.
 	for i, s := range frame {
@@ -104,12 +106,3 @@ func (a *AGC) Gain() float64 { return a.gain }
 
 // Reset resets the gain to unity without changing the target.
 func (a *AGC) Reset() { a.gain = 1.0 }
-
-// computeRMS returns the root-mean-square of a float32 slice.
-func computeRMS(frame []float32) float64 {
-	var sum float64
-	for _, s := range frame {
-		sum += float64(s) * float64(s)
-	}
-	return math.Sqrt(sum / float64(len(frame)))
-}

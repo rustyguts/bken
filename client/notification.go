@@ -41,7 +41,7 @@ func (ae *AudioEngine) PlayNotification(sound NotificationSound) {
 	}()
 }
 
-// generateNotificationFrames returns a slice of frameSize float32 PCM frames
+// generateNotificationFrames returns a slice of FrameSize float32 PCM frames
 // for the requested sound.
 func generateNotificationFrames(sound NotificationSound) [][]float32 {
 	type tone struct {
@@ -75,7 +75,7 @@ func generateNotificationFrames(sound NotificationSound) [][]float32 {
 
 // generateSineTone generates PCM frames for a sine tone at freq Hz lasting
 // durationMs milliseconds. The signal uses a linear fade-in and fade-out
-// envelope (5 ms each) to avoid clicks. The output is chunked into frameSize
+// envelope (5 ms each) to avoid clicks. The output is chunked into FrameSize
 // slices ready to push onto notifCh.
 func generateSineTone(freq float64, durationMs int) [][]float32 {
 	totalSamples := sampleRate * durationMs / 1000
@@ -100,17 +100,17 @@ func generateSineTone(freq float64, durationMs int) [][]float32 {
 		raw[i] = s * env * notifVolume
 	}
 
-	// Chunk into frameSize slices.
+	// Chunk into FrameSize slices.
 	var frames [][]float32
-	for off := 0; off < len(raw); off += frameSize {
-		end := off + frameSize
+	for off := 0; off < len(raw); off += FrameSize {
+		end := off + FrameSize
 		if end > len(raw) {
 			// Pad final partial frame with silence.
-			frame := make([]float32, frameSize)
+			frame := make([]float32, FrameSize)
 			copy(frame, raw[off:])
 			frames = append(frames, frame)
 		} else {
-			frame := make([]float32, frameSize)
+			frame := make([]float32, FrameSize)
 			copy(frame, raw[off:end])
 			frames = append(frames, frame)
 		}

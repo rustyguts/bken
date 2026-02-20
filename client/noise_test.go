@@ -3,6 +3,8 @@ package main
 import (
 	"math/rand"
 	"testing"
+
+	"client/internal/vad"
 )
 
 func TestNoiseCancellerBypass(t *testing.T) {
@@ -12,11 +14,11 @@ func TestNoiseCancellerBypass(t *testing.T) {
 	nc.SetEnabled(true)
 	nc.SetLevel(0.0) // dry signal — output must equal input exactly
 
-	buf := make([]float32, frameSize)
+	buf := make([]float32, FrameSize)
 	for i := range buf {
-		buf[i] = float32(i) / float32(frameSize)
+		buf[i] = float32(i) / float32(FrameSize)
 	}
-	original := make([]float32, frameSize)
+	original := make([]float32, FrameSize)
 	copy(original, buf)
 
 	nc.Process(buf)
@@ -35,11 +37,11 @@ func TestNoiseCancellerDisabled(t *testing.T) {
 	nc.SetEnabled(false)
 	nc.SetLevel(1.0) // full suppression requested but enabled=false
 
-	buf := make([]float32, frameSize)
+	buf := make([]float32, FrameSize)
 	for i := range buf {
 		buf[i] = rand.Float32()*2 - 1
 	}
-	original := make([]float32, frameSize)
+	original := make([]float32, FrameSize)
 	copy(original, buf)
 
 	nc.Process(buf)
@@ -62,7 +64,7 @@ func TestNoiseCancellerReducesWhiteNoise(t *testing.T) {
 
 	// Warm up RNNoise with several frames so its internal state stabilises.
 	const warmupFrames = 10
-	warmup := make([]float32, frameSize)
+	warmup := make([]float32, FrameSize)
 	for f := 0; f < warmupFrames; f++ {
 		for i := range warmup {
 			warmup[i] = rng.Float32()*2 - 1
@@ -73,15 +75,15 @@ func TestNoiseCancellerReducesWhiteNoise(t *testing.T) {
 	// Now measure suppression over 20 frames.
 	const testFrames = 20
 	var inputRMS, outputRMS float64
-	buf := make([]float32, frameSize)
+	buf := make([]float32, FrameSize)
 	for f := 0; f < testFrames; f++ {
 		for i := range buf {
 			buf[i] = rng.Float32()*2 - 1
 		}
-		inputRMS += float64(computeRMS(buf))
+		inputRMS += float64(vad.RMS(buf))
 
 		nc.Process(buf)
-		outputRMS += float64(computeRMS(buf))
+		outputRMS += float64(vad.RMS(buf))
 	}
 	inputRMS /= testFrames
 	outputRMS /= testFrames

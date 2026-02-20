@@ -20,7 +20,7 @@ func TestOpusEncodeDecodeRoundTrip(t *testing.T) {
 	}
 
 	// Generate a 440Hz sine wave (20ms frame).
-	pcmIn := make([]int16, frameSize)
+	pcmIn := make([]int16, FrameSize)
 	for i := range pcmIn {
 		pcmIn[i] = int16(math.Sin(2*math.Pi*440*float64(i)/float64(sampleRate)) * 16000)
 	}
@@ -36,16 +36,16 @@ func TestOpusEncodeDecodeRoundTrip(t *testing.T) {
 	}
 
 	encoded := opusBuf[:n]
-	t.Logf("encoded %d samples to %d bytes (%.1f kbps)", frameSize, n, float64(n)*8*50/1000)
+	t.Logf("encoded %d samples to %d bytes (%.1f kbps)", FrameSize, n, float64(n)*8*50/1000)
 
 	// Decode.
-	pcmOut := make([]int16, frameSize)
+	pcmOut := make([]int16, FrameSize)
 	samplesDecoded, err := dec.Decode(encoded, pcmOut)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if samplesDecoded != frameSize {
-		t.Errorf("expected %d decoded samples, got %d", frameSize, samplesDecoded)
+	if samplesDecoded != FrameSize {
+		t.Errorf("expected %d decoded samples, got %d", FrameSize, samplesDecoded)
 	}
 
 	// Verify the decoded signal is reasonable (not silence).
@@ -78,9 +78,9 @@ func TestOpusMultipleFrames(t *testing.T) {
 
 	// Encode and decode 10 frames.
 	for frame := 0; frame < 10; frame++ {
-		pcm := make([]int16, frameSize)
+		pcm := make([]int16, FrameSize)
 		for i := range pcm {
-			pcm[i] = int16(math.Sin(2*math.Pi*440*float64(i+frame*frameSize)/float64(sampleRate)) * 16000)
+			pcm[i] = int16(math.Sin(2*math.Pi*440*float64(i+frame*FrameSize)/float64(sampleRate)) * 16000)
 		}
 
 		buf := make([]byte, 1024)
@@ -89,7 +89,7 @@ func TestOpusMultipleFrames(t *testing.T) {
 			t.Fatalf("frame %d encode: %v", frame, err)
 		}
 
-		out := make([]int16, frameSize)
+		out := make([]int16, FrameSize)
 		_, err = dec.Decode(buf[:n], out)
 		if err != nil {
 			t.Fatalf("frame %d decode: %v", frame, err)

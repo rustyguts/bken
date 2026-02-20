@@ -14,63 +14,28 @@ This is a client/server voice over ip application. Clients running the bken desk
 ### Workflow
 
 - If there are uncommited git changes then commit them and push
-- Work on your feature
+- Work on your feature, use docker compose to run the stack
 - Write tests for your feature
 - Run all tests and linting for the repo
 - Commit and push
-- Move the item to done
+- Move the item to done section of this file (.claude/commands/turn-off-the-lights.md)
 
-### Things to work on in no particular order
+### Things to work on
 
-- Basic roles for the server. Owner / Member.
-  - ✅ Owners can kick members from the server — see Done section
-  - ✅ Owners can create channels in the server and CRUD the channels — see Done section
-  - ✅ Owners can set the name of the server — see Done section
-- Server should have more state. Recommend embedded sqlite database.
-  - ✅ Foundation is done — see Done section
-- Client should follow daisy ui for all UI styling
-- ✅ Users can move between channels — see Done section
-- Users should be able to connect to multiple servers and switch between them
-  - ✅ Server list management done — see Done section
-- UI: The inteface should always remain simple, clean, modern
-- Server owners should be able to generate invite links from the servers public endpoint. When openened in a browser this should open the app and automatically connect you to the server
-- ✅ Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat) — see Done section
-- UI: The UI should be modular and customizable. Certain elements should be movable. Users should be able to unlock the UI and then move panels around to suite their needs
-- Performance is critical, analyze slow parts of the code and improve performance (ongoing)
-- UI: Small icons can be uploaded and set per channel
-- UI: A server icon can be uploaded and set
-- Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast. (ongoing)
-- Code quality and readability
-- Repo structure and organization
+- Set a default global username. Right now users cant join a server unless their username is set. Generate one if one is not defined. Store the global username in the client state db
+- Bug: I can hear voice from people in other channels. You should only receive voice packets for the channel that you are in
+- Bug: Pressing disconnect stops voice but the UI does not update. It still shows that you are connected to the channel
+- Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in
+- Error states when you can't connect to the server or get disconnected
+- Join voice button sometimes does not work.
+- Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
+- Server invite links - You could send these to people and they can join a server, would require external web service
+- File uploading in chatroom. Max size 10mb. Drag and drop should work. Or a Plus button with droptop (open top) and "Upload file"
+- Rich link previews
+- Notifications when you miss messages
+- Admin can drag users into a different channel (or right click and move them)
+- Admin can create new channels (Right click on server in sidebar create channel)
+- Differentiate the idea of being "Connected" to the server vs being connected via voice. When the user clicks on the server in the sidebar they are connected over WebTransport and start getting messages. The disconnect button only disconnects them from the voice channel that they are currently in. But they are still connected to the server itself so that they can chat, browse, do other things. Switching between other servers does truly disconnect and connect to another server instance
 
 ### Done
 
-- UI: Users should be able to switch between all the different daisy UI themes
-- Client should have a frameless GUI frame
-- Client should have smooth transitions
-- Client should also have state (JSON config file at ~/.config/bken/config.json)
-- Reliable connection and disconnection between client and server
-- Optimized Opus audio transmission rate based on connection speed to server
-- Users can mute other users locally (client-side, no server involvement)
-- Users hear notification tones for app events (connect, join, leave, mute, unmute)
-- Voice: Automatic gain control (software AGC, enabled by default, configurable target level)
-- Voice: Noise suppression enabled by default; all audio settings applied on startup (not just when settings panel opens)
-- Voice: Ability to set volume (volume slider in settings panel)
-- UI: Beautiful settings page (grouped cards with icons for Input, Output, Voice Processing, Appearance)
-- Voice: Voice Activity Detection — silent frames skipped to save CPU and bandwidth (enabled by default, configurable sensitivity)
-- Server: Echo v4 REST API on :8080 — GET /health (status + client count), GET /api/room (user list); -api-addr flag to configure or disable
-- Voice: Echo cancellation — NLMS adaptive filter (40 ms bulk delay, 10 ms taps), enabled by default, toggle in Voice Processing settings
-- UI: Responsive layout — MinWidth=400/MinHeight=300; left info panel hides below 768 px; ServerBrowser/AudioSettings/RoomBrowser use responsive padding; user cards centred
-- Performance: AEC hot path — pre-allocated refBuf eliminates 285 KB/s GC pressure; FeedFarEnd/Process reference extraction use bulk copy (0 allocs/op on both benchmarks)
-- Server state: embedded SQLite (modernc.org/sqlite, no CGO) with versioned migration runner; settings table with GET/PUT /api/settings; server_name defaults to "bken server"; -db flag for DB path
-- Voice reliability: atomic.Bool for connected flag (fixes data race); sendLoop triggers reconnect on SendAudio error; pongTimeout 10s→6s (faster disconnect detection); StartReceiving captures session once (no per-datagram mutex)
-- Chat: global server-level text chat over existing control stream; "chat" ControlMsg type; server stamps username/ID/timestamp (anti-spoofing); 500-char limit; Voice/Chat tabs in Room panel; ChatPanel.vue with auto-scroll; SendChat Wails bridge; unread badge on Chat tab when on Voice tab
-- Server name in title bar: server sends name (from SQLite settings) in user_list handshake; client shows "bken › <name>" in TitleBar while connected; clears on disconnect; PUT /api/settings live-updates connected clients via server_info broadcast
-- Server browser management: add server (name + host:port form, persisted to config.json) and remove server (trash icon); empty-state guidance; changes survive app restart
-- Code quality: Client.ctrl refactored to io.Writer (matches session DatagramSender pattern); processControl extracted from handleClient read loop; 10 unit tests in client_test.go cover SendControl, ping/pong, chat fan-out, spoofing prevention, length limits, unknown message types
-- Basic room ownership + kick: first client becomes owner; owner can kick members (server enforces); ownership transfers to lowest-ID client when owner leaves; "kicked" message closes connection; 4 kick tests + 4 ownership tests; kick button reveals on hover in UserCard (owner-only, not on self)
-- Owner can rename server: pencil icon hover-reveals in TitleBar (owner-only); inline input (max 50 chars, trim whitespace); Enter/confirm-button confirms, Escape/blur cancels; rename ControlMsg → server validates owner, updates SQLite via callback, broadcasts server_info to all clients; 5 rename tests in client_test.go + 2 in room_test.go
-- API validation consistency: PUT /api/settings trims whitespace + enforces 50-char max (mirrors in-session rename); GET /api/room now includes owner_id (0 when empty); 8 new tests covering too-long, whitespace-only, trim, malformed JSON, owner_id presence
-- Owner channel CRUD: SQLite migration v2 adds channels table; store exposes GetChannels/CreateChannel/RenameChannel/DeleteChannel/ChannelCount; REST API GET/POST/PUT/DELETE /api/channels with trim+50-char validation; "General" channel seeded on first run; 9 store tests + 9 API tests
-- Users move between channels: server sends channel_list in handshake + after API mutations; join_channel ControlMsg → server updates channelID + broadcasts user_channel to all; Room caches channel list; RoomBrowser shows channel-grouped view (click header to join, lobby for channel 0); 5 new tests; UserInfo includes channel_id
-- Channel-scoped chat: BroadcastToChannel fans out only to same-channel clients; server stamps ChannelID from sender's real channelID (anti-spoofing); lobby senders fall back to global broadcast; 6 new tests (3 server, 3 client); SendChannelChat Go method + Wails bridge; Channel tab in Room.vue visible only when in a channel, with unread badge; server Chat tab shows channelId===0 messages; auto-switches to Voice tab on leaving channel

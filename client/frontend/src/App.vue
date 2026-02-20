@@ -1,128 +1,168 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Connect, Disconnect, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig } from './config'
+import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
-import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
+import SettingsPage from './SettingsPage.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
 import TitleBar from './TitleBar.vue'
-import type { User, UserJoinedEvent, UserLeftEvent, SpeakingEvent, LogEvent, ConnectPayload, ChatMessage, Channel } from './types'
+import { useReconnect } from './composables/useReconnect'
+import { useSpeakingUsers } from './composables/useSpeakingUsers'
+import type { User, UserJoinedEvent, UserLeftEvent, ConnectPayload, ChatMessage, Channel, SpeakingEvent } from './types'
+
+type AppRoute = 'room' | 'settings'
 
 const connected = ref(false)
-const serverBrowserRef = ref<InstanceType<typeof ServerBrowser> | null>(null)
 const users = ref<User[]>([])
-const logEvents = ref<LogEvent[]>([])
 const chatMessages = ref<ChatMessage[]>([])
 const serverName = ref('')
 const ownerID = ref(0)
 const myID = ref(0)
 const channels = ref<Channel[]>([])
-/** Maps userID → channelID (0 = lobby). Updated by user:list, user:joined, user:left, channel:user_moved. */
+/** Maps userID -> channelID (0 = lobby). Updated by user:list, user:joined, user:left, channel:user_moved. */
 const userChannels = ref<Record<number, number>>({})
-const speakingUsers = ref<Set<number>>(new Set())
-const speakingTimers = new Map<number, ReturnType<typeof setTimeout>>()
-let eventIdCounter = 0
 let chatIdCounter = 0
 
-// Reconnect state
-const reconnecting = ref(false)
-const reconnectAttempt = ref(0)
-const reconnectSecondsLeft = ref(0)
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let countdownTimer: ReturnType<typeof setInterval> | null = null
-let lastAddr = ''
-let lastUsername = ''
+const connectError = ref('')
+const startupAddrHint = ref('')
+const currentRoute = ref<AppRoute>('room')
+const globalUsername = ref('')
+
+const { reconnecting, reconnectAttempt, reconnectSecondsLeft, startReconnect, cancelReconnect, clearTimers, setLastCredentials } = useReconnect()
+const { speakingUsers, setSpeaking, clearSpeaking, cleanup: cleanupSpeaking } = useSpeakingUsers()
 
 /** The WebTransport address the client is currently connected to. Exposed to TitleBar so the owner can generate an invite link. */
 const connectedAddr = ref('')
 
-/** Exponential backoff delays in seconds. */
-const BACKOFF = [1, 2, 4, 8, 16, 30] as const
-
-function addEvent(text: string, type: LogEvent['type']): void {
-  const d = new Date()
-  const time = d.toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  logEvents.value.push({ id: ++eventIdCounter, time, text, type })
+function parseRoute(hash: string): AppRoute {
+  return hash === '#/settings' ? 'settings' : 'room'
 }
 
-function setSpeaking(id: number): void {
-  const next = new Set(speakingUsers.value)
-  next.add(id)
-  speakingUsers.value = next
-  const existing = speakingTimers.get(id)
-  if (existing) clearTimeout(existing)
-  speakingTimers.set(id, setTimeout(() => {
-    const updated = new Set(speakingUsers.value)
-    updated.delete(id)
-    speakingUsers.value = updated
-    speakingTimers.delete(id)
-  }, 500))
+function syncRouteFromHash(): void {
+  currentRoute.value = parseRoute(window.location.hash)
 }
 
-function clearSpeaking(): void {
-  speakingTimers.forEach(t => clearTimeout(t))
-  speakingTimers.clear()
-  speakingUsers.value = new Set()
+function goToRoute(route: AppRoute): void {
+  const hash = route === 'settings' ? '#/settings' : '#/'
+  if (window.location.hash !== hash) {
+    window.location.hash = hash
+    return
+  }
+  currentRoute.value = route
 }
 
-function clearReconnectTimers(): void {
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+function openSettingsPage(): void {
+  goToRoute('settings')
 }
 
-function scheduleReconnect(): void {
-  const delay = BACKOFF[Math.min(reconnectAttempt.value, BACKOFF.length - 1)]
-  reconnectSecondsLeft.value = delay
-
-  countdownTimer = setInterval(() => {
-    reconnectSecondsLeft.value = Math.max(0, reconnectSecondsLeft.value - 1)
-  }, 1000)
-
-  reconnectTimer = setTimeout(async () => {
-    clearInterval(countdownTimer!)
-    countdownTimer = null
-    reconnectAttempt.value++
-    addEvent(`Reconnecting... (attempt ${reconnectAttempt.value})`, 'info')
-
-    const err = await Connect(lastAddr, lastUsername)
-    if (!err) {
-      reconnecting.value = false
-      reconnectAttempt.value = 0
-      connected.value = true
-      addEvent('Reconnected', 'join')
-    } else {
-      scheduleReconnect()
-    }
-  }, delay * 1000)
+function closeSettingsPage(): void {
+  goToRoute('room')
 }
 
 function resetState(): void {
   connected.value = false
   connectedAddr.value = ''
   users.value = []
-  logEvents.value = []
   chatMessages.value = []
   serverName.value = ''
   ownerID.value = 0
   myID.value = 0
   channels.value = []
   userChannels.value = {}
-  clearSpeaking()
+}
+
+function normaliseUsername(name: string): string {
+  return name.trim()
+}
+
+function normaliseAddr(addr: string): string {
+  const cleaned = addr.trim()
+  return cleaned.startsWith('bken://') ? cleaned.slice('bken://'.length) : cleaned
+}
+
+function hostFromAddr(addr: string): string {
+  const clean = normaliseAddr(addr)
+  if (!clean) return ''
+  if (clean.startsWith('[')) {
+    const end = clean.indexOf(']')
+    if (end > 1) return clean.slice(1, end)
+  }
+  const firstColon = clean.indexOf(':')
+  return firstColon === -1 ? clean : clean.slice(0, firstColon)
+}
+
+function isLocalDevAddr(addr: string): boolean {
+  const host = hostFromAddr(addr).toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0'
+}
+
+async function connectToServer(addr: string, username: string): Promise<boolean> {
+  const targetAddr = normaliseAddr(addr)
+  const user = normaliseUsername(username)
+  if (!targetAddr) {
+    connectError.value = 'Server address is required.'
+    return false
+  }
+  if (!user) {
+    connectError.value = 'Set a global username first (right-click your name in User Controls).'
+    return false
+  }
+
+  if (connected.value && connectedAddr.value === targetAddr) {
+    return true
+  }
+
+  if (connected.value && connectedAddr.value !== targetAddr) {
+    await Disconnect()
+    resetState()
+  }
+
+  setLastCredentials(targetAddr, user)
+  connectError.value = ''
+
+  const err = await Connect(targetAddr, user)
+  if (err && err !== 'already connected') {
+    connectError.value = err
+    return false
+  }
+
+  connected.value = true
+  connectedAddr.value = targetAddr
+  connectError.value = ''
+  startupAddrHint.value = ''
+  return true
 }
 
 async function handleConnect(payload: ConnectPayload): Promise<void> {
-  lastAddr = payload.addr
-  lastUsername = payload.username
-  users.value = []
-  logEvents.value = []
-  const err = await Connect(payload.addr, payload.username)
+  await connectToServer(payload.addr, payload.username)
+}
+
+async function handleActivateChannel(payload: { addr: string; channelID: number }): Promise<void> {
+  const ok = await connectToServer(payload.addr, globalUsername.value)
+  if (!ok) return
+
+  const err = await JoinChannel(payload.channelID)
   if (err) {
-    serverBrowserRef.value?.setError(err)
-  } else {
-    connected.value = true
-    connectedAddr.value = payload.addr
-    addEvent('Connected', 'info')
+    connectError.value = err
+    return
+  }
+  connectError.value = ''
+}
+
+async function handleRenameGlobalUsername(name: string): Promise<void> {
+  const next = normaliseUsername(name)
+  if (!next) {
+    connectError.value = 'Username cannot be empty.'
+    return
+  }
+
+  const cfg = await GetConfig()
+  await SaveConfig({ ...cfg, username: next })
+  globalUsername.value = next
+
+  if (connectError.value.includes('username')) {
+    connectError.value = ''
   }
 }
 
@@ -134,52 +174,60 @@ async function handleSendChannelChat(channelID: number, message: string): Promis
   await SendChannelChat(channelID, message)
 }
 
+async function handleDisconnectVoice(): Promise<void> {
+  const err = await DisconnectVoice()
+  if (err) {
+    connectError.value = err
+  }
+  clearSpeaking()
+}
+
 async function handleDisconnect(): Promise<void> {
-  clearReconnectTimers()
-  reconnecting.value = false
-  reconnectAttempt.value = 0
+  clearTimers()
+  cancelReconnect()
+  connectError.value = ''
+  closeSettingsPage()
+  clearSpeaking()
   resetState()
   await Disconnect()
 }
 
 async function handleCancelReconnect(): Promise<void> {
-  clearReconnectTimers()
-  reconnecting.value = false
-  reconnectAttempt.value = 0
+  cancelReconnect()
+  connectError.value = ''
+  closeSettingsPage()
   resetState()
   await Disconnect()
 }
 
 onMounted(async () => {
+  syncRouteFromHash()
+  window.addEventListener('hashchange', syncRouteFromHash)
+
   EventsOn('connection:lost', () => {
-    if (reconnecting.value) return
-    clearSpeaking()
-    reconnecting.value = true
-    addEvent('Connection lost', 'leave')
-    scheduleReconnect()
+    connected.value = false
+    startReconnect(
+      () => { connected.value = true; connectError.value = '' },
+      () => {},
+    )
   })
 
   EventsOn('user:list', (data: User[]) => {
     users.value = data || []
-    // Rebuild userChannels from the snapshot; each user now carries channel_id.
     const map: Record<number, number> = {}
     for (const u of (data || [])) map[u.id] = u.channel_id ?? 0
     userChannels.value = map
-    if (data?.length) addEvent(`${data.length} user${data.length !== 1 ? 's' : ''} in room`, 'info')
   })
 
   EventsOn('user:joined', (data: UserJoinedEvent) => {
     users.value = [...users.value, { id: data.id, username: data.username }]
     userChannels.value = { ...userChannels.value, [data.id]: 0 }
-    addEvent(`${data.username} joined`, 'join')
   })
 
   EventsOn('user:left', (data: UserLeftEvent) => {
-    const user = users.value.find(u => u.id === data.id)
     users.value = users.value.filter(u => u.id !== data.id)
     const { [data.id]: _, ...rest } = userChannels.value
     userChannels.value = rest
-    addEvent(`${user?.username ?? 'Someone'} left`, 'leave')
   })
 
   EventsOn('channel:list', (data: Channel[]) => {
@@ -188,10 +236,6 @@ onMounted(async () => {
 
   EventsOn('channel:user_moved', (data: { user_id: number; channel_id: number }) => {
     userChannels.value = { ...userChannels.value, [data.user_id]: data.channel_id }
-  })
-
-  EventsOn('audio:speaking', (data: SpeakingEvent) => {
-    setSpeaking(data.id)
   })
 
   EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number }) => {
@@ -213,11 +257,14 @@ onMounted(async () => {
     myID.value = data.id
   })
 
+  EventsOn('audio:speaking', (data: SpeakingEvent) => {
+    setSpeaking(data.id)
+  })
+
   EventsOn('connection:kicked', () => {
-    addEvent('You were kicked from the server', 'leave')
-    clearReconnectTimers()
-    reconnecting.value = false
-    reconnectAttempt.value = 0
+    connectError.value = 'Disconnected by server owner'
+    cancelReconnect()
+    closeSettingsPage()
     resetState()
   })
 
@@ -225,58 +272,112 @@ onMounted(async () => {
   // AGC, and volume are active even if the user never opens the settings panel.
   await ApplyConfig()
 
-  // Priority: env-var auto-login > bken:// invite link > normal server browser.
+  const cfg = await GetConfig()
+  globalUsername.value = cfg.username?.trim() ?? ''
+
+  // Priority: env-var auto-login > bken:// invite link > sidebar server browser.
   const [auto, startupAddr] = await Promise.all([GetAutoLogin(), GetStartupAddr()])
   if (auto.username) {
-    await handleConnect({ username: auto.username, addr: auto.addr })
+    globalUsername.value = auto.username
+  }
+
+  if (auto.username && !isLocalDevAddr(auto.addr)) {
+    await connectToServer(auto.addr, auto.username)
   } else if (startupAddr) {
-    const cfg = await GetConfig()
-    if (cfg.username) {
-      // Saved username + invite link — connect immediately.
-      await handleConnect({ username: cfg.username, addr: startupAddr })
+    if (globalUsername.value) {
+      // Saved username + invite link -- connect immediately.
+      await connectToServer(startupAddr, globalUsername.value)
     } else {
-      // No username yet — pre-populate the server browser with the invited server.
-      serverBrowserRef.value?.setStartupAddr(startupAddr)
+      startupAddrHint.value = startupAddr
+      if (!cfg.servers?.some(s => s.addr === startupAddr)) {
+        await SaveConfig({
+          ...cfg,
+          servers: [...(cfg.servers ?? []), { name: 'Invited Server', addr: startupAddr }],
+        })
+      }
     }
   }
 })
 
 onBeforeUnmount(() => {
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved')
-  clearReconnectTimers()
-  speakingTimers.forEach(t => clearTimeout(t))
+  window.removeEventListener('hashchange', syncRouteFromHash)
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking')
+  clearTimers()
+  cleanupSpeaking()
 })
 </script>
 
 <template>
-  <main class="flex flex-col h-full">
-    <TitleBar :server-name="serverName" :is-owner="ownerID !== 0 && ownerID === myID" :server-addr="connectedAddr" />
-    <Transition name="slide-down">
-      <ReconnectBanner
-        v-if="reconnecting"
-        :attempt="reconnectAttempt"
-        :seconds-until-retry="reconnectSecondsLeft"
-        @cancel="handleCancelReconnect"
-      />
-    </Transition>
-    <Transition name="fade" mode="out-in">
-      <Room
-        v-if="connected || reconnecting"
-        key="room"
-        :users="users"
-        :speaking-users="speakingUsers"
-        :log-events="logEvents"
-        :chat-messages="chatMessages"
-        :owner-id="ownerID"
-        :my-id="myID"
-        :channels="channels"
-        :user-channels="userChannels"
-        class="flex-1 min-h-0"
-        @disconnect="handleDisconnect"
-        @send-chat="handleSendChat"
-        @send-channel-chat="handleSendChannelChat"
-      />
-      <ServerBrowser v-else key="browser" ref="serverBrowserRef" class="flex-1 min-h-0" @connect="handleConnect" />
-    </Transition>
+  <main class="app-grid h-full">
+    <TitleBar class="app-title" :server-name="serverName" :is-owner="ownerID !== 0 && ownerID === myID" :server-addr="connectedAddr" />
+
+    <div class="app-banner">
+      <Transition name="slide-down">
+        <ReconnectBanner
+          v-if="reconnecting"
+          :attempt="reconnectAttempt"
+          :seconds-until-retry="reconnectSecondsLeft"
+          @cancel="handleCancelReconnect"
+        />
+      </Transition>
+    </div>
+
+    <div class="app-content min-h-0">
+      <Transition name="fade" mode="out-in">
+        <SettingsPage
+          v-if="currentRoute === 'settings'"
+          key="settings"
+          class="h-full min-h-0"
+          @back="closeSettingsPage"
+        />
+
+        <Room
+          v-else
+          key="room"
+          class="h-full min-h-0"
+          :connected="connected"
+          :reconnecting="reconnecting"
+          :connected-addr="connectedAddr"
+          :connect-error="connectError"
+          :startup-addr="startupAddrHint"
+          :global-username="globalUsername"
+          :server-name="serverName"
+          :users="users"
+          :chat-messages="chatMessages"
+          :owner-id="ownerID"
+          :my-id="myID"
+          :channels="channels"
+          :user-channels="userChannels"
+          :speaking-users="speakingUsers"
+          @connect="handleConnect"
+          @activate-channel="handleActivateChannel"
+          @rename-global-username="handleRenameGlobalUsername"
+          @open-settings="openSettingsPage"
+          @disconnect="handleDisconnect"
+          @disconnect-voice="handleDisconnectVoice"
+          @send-chat="handleSendChat"
+          @send-channel-chat="handleSendChannelChat"
+        />
+      </Transition>
+    </div>
   </main>
 </template>
+
+<style scoped>
+.app-grid {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.app-title {
+  grid-row: 1;
+}
+
+.app-banner {
+  grid-row: 2;
+}
+
+.app-content {
+  grid-row: 3;
+}
+</style>

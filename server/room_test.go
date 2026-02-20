@@ -61,6 +61,51 @@ func TestRoomAddRemoveClient(t *testing.T) {
 	}
 }
 
+func TestRoomAddOrReplaceClientReplacesDuplicateUsername(t *testing.T) {
+	room := NewRoom()
+
+	original := newTestClient("alice")
+	originalID := room.AddClient(original)
+
+	replacement := newTestClient("Alice") // case-insensitive duplicate
+	newID, replaced, replacedID := room.AddOrReplaceClient(replacement)
+
+	if replaced == nil {
+		t.Fatal("expected duplicate username to replace existing client")
+	}
+	if replacedID != originalID {
+		t.Fatalf("replacedID: got %d, want %d", replacedID, originalID)
+	}
+	if replaced != original {
+		t.Fatal("expected replaced pointer to be the original client")
+	}
+	if newID == 0 || replacement.ID != newID {
+		t.Fatalf("replacement ID assignment failed: newID=%d client.ID=%d", newID, replacement.ID)
+	}
+	if room.ClientCount() != 1 {
+		t.Fatalf("expected exactly 1 client after replacement, got %d", room.ClientCount())
+	}
+
+	users := room.Clients()
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user in snapshot, got %d", len(users))
+	}
+	if users[0].ID != newID {
+		t.Fatalf("snapshot ID: got %d, want %d", users[0].ID, newID)
+	}
+	if users[0].Username != "Alice" {
+		t.Fatalf("snapshot username: got %q, want %q", users[0].Username, "Alice")
+	}
+}
+
+func TestRoomRemoveClientReturnsFalseWhenMissing(t *testing.T) {
+	room := NewRoom()
+
+	if removed := room.RemoveClient(12345); removed {
+		t.Fatal("expected RemoveClient to return false for missing ID")
+	}
+}
+
 func TestRoomStatsResetAfterRead(t *testing.T) {
 	room := NewRoom()
 
@@ -266,7 +311,7 @@ func TestRoomTransferOwnershipEmptyRoom(t *testing.T) {
 func TestRoomRenameFiresCallback(t *testing.T) {
 	room := NewRoom()
 	var called []string
-	room.SetOnRename(func(name string) { called = append(called, name) })
+	room.SetOnRename(func(name string) error { called = append(called, name); return nil })
 
 	room.Rename("First Name")
 	room.Rename("Second Name")

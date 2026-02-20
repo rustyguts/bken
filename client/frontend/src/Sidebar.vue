@@ -1,101 +1,238 @@
 <script setup lang="ts">
-defineProps<{
-  settingsOpen: boolean
-  muted: boolean
-  deafened: boolean
+import { onMounted, ref, watch } from 'vue'
+import { GetConfig, SaveConfig } from './config'
+import type { ServerEntry } from './config'
+import type { ConnectPayload } from './types'
+
+const props = defineProps<{
+  activeServerAddr: string
+  connectedAddr: string
+  connectError: string
+  startupAddr: string
+  globalUsername: string
 }>()
 
 const emit = defineEmits<{
-  'settings-toggle': []
-  'mute-toggle': []
-  'deafen-toggle': []
-  'server-browser': []
-  disconnect: []
+  connect: [payload: ConnectPayload]
+  selectServer: [addr: string]
 }>()
+
+const browserOpen = ref(false)
+const connectingAddr = ref('')
+
+const newName = ref('')
+const newAddr = ref('')
+const browserError = ref('')
+
+const servers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:4433' }])
+
+function normalizeAddr(raw: string): string {
+  let addr = raw.trim()
+  if (addr.startsWith('bken://')) addr = addr.slice('bken://'.length)
+  return addr
+}
+
+function normalizeServers(entries: ServerEntry[]): ServerEntry[] {
+  const out: ServerEntry[] = []
+  const seen = new Set<string>()
+  for (const server of entries) {
+    const addr = normalizeAddr(server.addr)
+    if (!addr || seen.has(addr)) continue
+    seen.add(addr)
+    out.push({
+      name: server.name?.trim() || addr,
+      addr,
+    })
+  }
+  return out.length ? out : [{ name: 'Local Dev', addr: 'localhost:4433' }]
+}
+
+async function loadConfig(): Promise<void> {
+  const cfg = await GetConfig()
+  if (cfg.servers?.length) {
+    servers.value = normalizeServers(cfg.servers)
+  }
+}
+
+async function saveConfig(): Promise<void> {
+  const cfg = await GetConfig()
+  await SaveConfig({
+    ...cfg,
+    servers: normalizeServers(servers.value),
+  })
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '??'
+  const a = parts[0][0] ?? ''
+  const b = parts[1]?.[0] ?? parts[0][1] ?? ''
+  return `${a}${b}`.toUpperCase()
+}
+
+function nameHue(name: string): number {
+  let hash = 0
+  for (const char of name.toLowerCase()) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 360
+  }
+  return hash
+}
+
+function serverButtonStyle(name: string, active: boolean): Record<string, string> {
+  const hue = nameHue(name)
+  if (active) {
+    return {
+      backgroundColor: `hsl(${hue} 65% 45%)`,
+      borderColor: `hsl(${hue} 70% 28%)`,
+      color: 'white',
+    }
+  }
+  return {
+    backgroundColor: `hsl(${hue} 65% 86%)`,
+    borderColor: `hsl(${hue} 45% 64%)`,
+    color: `hsl(${hue} 60% 24%)`,
+  }
+}
+
+function selectServer(addr: string): void {
+  emit('selectServer', normalizeAddr(addr))
+}
+
+async function connectToNewServer(): Promise<void> {
+  const user = props.globalUsername.trim()
+  const addr = normalizeAddr(newAddr.value)
+  const name = newName.value.trim() || addr
+
+  if (!user) {
+    browserError.value = 'Set your global username in User Controls first.'
+    return
+  }
+  if (!addr) {
+    browserError.value = 'Server address is required'
+    return
+  }
+
+  const idx = servers.value.findIndex(s => s.addr === addr)
+  if (idx >= 0) {
+    const updated = [...servers.value]
+    updated[idx] = { ...updated[idx], name: updated[idx].name || name }
+    servers.value = updated
+  } else {
+    servers.value = [...servers.value, { name, addr }]
+  }
+
+  browserError.value = ''
+  connectingAddr.value = addr
+  await saveConfig()
+
+  emit('selectServer', addr)
+  emit('connect', { username: user, addr })
+}
+
+async function ensureStartupAddr(addr: string): Promise<void> {
+  const clean = normalizeAddr(addr)
+  if (!clean || servers.value.some(s => s.addr === clean)) return
+  servers.value = [...servers.value, { name: 'Invited Server', addr: clean }]
+  await saveConfig()
+  if (!newAddr.value.trim()) newAddr.value = clean
+}
+
+watch(() => props.connectedAddr, () => {
+  connectingAddr.value = ''
+  browserOpen.value = false
+})
+
+watch(() => props.connectError, (msg) => {
+  if (msg) connectingAddr.value = ''
+})
+
+watch(() => props.startupAddr, (addr) => {
+  void ensureStartupAddr(addr)
+})
+
+onMounted(async () => {
+  await loadConfig()
+  await ensureStartupAddr(props.startupAddr)
+})
 </script>
 
 <template>
-  <nav class="flex flex-col items-center py-3 gap-1 border-r border-base-content/10 bg-base-300 w-[52px] min-w-[52px]" aria-label="Main navigation">
+  <div class="h-full min-h-0">
+    <aside class="relative flex flex-col items-center border-r border-base-content/10 bg-base-300 py-3 px-2 gap-2 w-[64px] min-w-[64px] max-w-[64px] h-full overflow-x-hidden">
+      <button
+        class="btn btn-ghost btn-square btn-sm"
+        aria-label="Server browser"
+        :class="browserOpen ? 'text-primary' : 'opacity-70 hover:opacity-100'"
+        @click="browserOpen = true"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
+        </svg>
+      </button>
 
-    <!-- Server Browser -->
-    <button
-      class="btn btn-ghost btn-sm btn-square tooltip tooltip-right opacity-60 hover:opacity-100 mb-2"
-      data-tip="Server Browser"
-      aria-label="Server browser"
-      @click="emit('server-browser')"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
-      </svg>
-    </button>
+      <div class="w-full border-t border-base-content/20 my-1" />
 
-    <div class="flex-1" />
+      <div class="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden">
+        <div class="flex flex-col items-center gap-2 mt-1">
+          <button
+            v-for="server in servers"
+            :key="server.addr"
+            class="relative w-8 h-8 rounded-full border text-[9px] font-mono font-semibold transition-all hover:scale-105"
+            :style="serverButtonStyle(server.name, normalizeAddr(server.addr) === normalizeAddr(activeServerAddr))"
+            :title="`${server.name} (${server.addr})`"
+            :aria-label="`Open ${server.name}`"
+            :class="normalizeAddr(server.addr) === normalizeAddr(activeServerAddr) ? 'ring-2 ring-offset-1 ring-base-content/35' : ''"
+            @click="selectServer(server.addr)"
+          >
+            {{ initials(server.name) }}
+            <span
+              v-if="normalizeAddr(server.addr) === normalizeAddr(connectedAddr)"
+              class="absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full bg-success border border-base-100"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </div>
+    </aside>
 
-    <!-- Mute -->
-    <button
-      class="btn btn-ghost btn-sm btn-square tooltip tooltip-right"
-      :data-tip="muted ? 'Unmute' : 'Mute'"
-      :aria-label="muted ? 'Unmute microphone' : 'Mute microphone'"
-      :aria-pressed="muted"
-      :class="muted ? 'text-error opacity-100' : 'opacity-60 hover:opacity-100'"
-      @click="emit('mute-toggle')"
-    >
-      <!-- Mic on -->
-      <svg v-if="!muted" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-      </svg>
-      <!-- Mic off (slashed) -->
-      <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-        <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
-      </svg>
-    </button>
+    <dialog class="modal" :class="{ 'modal-open': browserOpen }">
+      <div class="modal-box w-11/12 max-w-md">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-semibold uppercase tracking-wider opacity-70">Connect To New Server</h3>
+          <button class="btn btn-ghost btn-xs" aria-label="Close server browser" @click="browserOpen = false">✕</button>
+        </div>
 
-    <!-- Deafen -->
-    <button
-      class="btn btn-ghost btn-sm btn-square tooltip tooltip-right"
-      :data-tip="deafened ? 'Undeafen' : 'Deafen'"
-      :aria-label="deafened ? 'Undeafen audio' : 'Deafen audio'"
-      :aria-pressed="deafened"
-      :class="deafened ? 'text-error opacity-100' : 'opacity-60 hover:opacity-100'"
-      @click="emit('deafen-toggle')"
-    >
-      <!-- Audio on -->
-      <svg v-if="!deafened" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M14.463 10.29a3.75 3.75 0 010 3.42M9.537 13.71a3.75 3.75 0 010-3.42M4.886 18.364a9 9 0 010-12.728M12 12h.008v.008H12V12z" />
-      </svg>
-      <!-- Audio off (slashed) -->
-      <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M14.463 10.29a3.75 3.75 0 010 3.42M9.537 13.71a3.75 3.75 0 010-3.42M4.886 18.364a9 9 0 010-12.728M12 12h.008v.008H12V12z" />
-        <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
-      </svg>
-    </button>
+        <p class="text-xs opacity-60 mb-3">Connects with your global username: <span class="font-semibold">{{ globalUsername || 'not set' }}</span></p>
 
-    <!-- Settings -->
-    <button
-      class="btn btn-ghost btn-sm btn-square tooltip tooltip-right"
-      data-tip="Settings"
-      aria-label="Toggle settings"
-      :aria-pressed="settingsOpen"
-      :class="settingsOpen ? 'text-primary' : 'opacity-60 hover:opacity-100'"
-      @click="emit('settings-toggle')"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    </button>
+        <div class="space-y-2">
+          <input
+            v-model="newName"
+            type="text"
+            placeholder="Server name (optional)"
+            class="input input-sm input-bordered w-full"
+          />
+          <input
+            v-model="newAddr"
+            type="text"
+            placeholder="host:port or bken:// link"
+            class="input input-sm input-bordered w-full font-mono"
+            @keydown.enter.prevent="connectToNewServer"
+          />
+        </div>
 
-    <!-- Disconnect -->
-    <button
-      class="btn btn-ghost btn-sm btn-square tooltip tooltip-right opacity-60 hover:text-error hover:opacity-100 mb-1"
-      data-tip="Disconnect"
-      aria-label="Disconnect from server"
-      @click="emit('disconnect')"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-      </svg>
-    </button>
-  </nav>
+        <div v-if="connectError" class="alert alert-error py-2 text-sm mt-2">{{ connectError }}</div>
+        <div v-else-if="browserError" class="alert alert-error py-2 text-sm mt-2">{{ browserError }}</div>
+
+        <div class="mt-3 flex gap-2">
+          <button class="btn btn-primary btn-sm flex-1" @click="connectToNewServer">
+            {{ connectingAddr ? 'Connecting…' : 'Connect' }}
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="browserOpen = false">Close</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="browserOpen = false">
+        <button>close</button>
+      </form>
+    </dialog>
+  </div>
 </template>

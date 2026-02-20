@@ -69,10 +69,11 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	defer func() {
 		cancel()
 		if client.ID != 0 {
-			room.RemoveClient(client.ID)
-			room.BroadcastControl(ControlMsg{Type: "user_left", ID: client.ID}, 0)
-			if newOwner, changed := room.TransferOwnership(client.ID); changed {
-				room.BroadcastControl(ControlMsg{Type: "owner_changed", OwnerID: newOwner}, 0)
+			if room.RemoveClient(client.ID) {
+				room.BroadcastControl(ControlMsg{Type: "user_left", ID: client.ID}, 0)
+				if newOwner, changed := room.TransferOwnership(client.ID); changed {
+					room.BroadcastControl(ControlMsg{Type: "owner_changed", OwnerID: newOwner}, 0)
+				}
 			}
 		}
 		sess.CloseWithError(0, "bye")
@@ -106,7 +107,21 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 		return
 	}
 	client.Username = username
-	room.AddClient(client)
+
+	_, replaced, replacedID := room.AddOrReplaceClient(client)
+	if replaced != nil {
+		if replaced.cancel != nil {
+			replaced.cancel()
+		}
+		if replaced.closer != nil {
+			replaced.closer.Close() //nolint:errcheck // best-effort close of replaced duplicate session
+		}
+		room.BroadcastControl(ControlMsg{Type: "user_left", ID: replacedID}, client.ID)
+		if newOwner, changed := room.TransferOwnership(replacedID); changed {
+			room.BroadcastControl(ControlMsg{Type: "owner_changed", OwnerID: newOwner}, 0)
+		}
+		log.Printf("[client %d] replaced duplicate username %q (old client %d)", client.ID, client.Username, replacedID)
+	}
 
 	if room.ClaimOwnership(client.ID) {
 		log.Printf("[client %d] %s claimed room ownership", client.ID, client.Username)
@@ -115,10 +130,8 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	// Send the current user list (and server name) to the new client.
 	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName(), OwnerID: room.OwnerID()})
 
-	// Send the current channel list to the new client.
-	if channels := room.GetChannelList(); len(channels) > 0 {
-		client.SendControl(ControlMsg{Type: "channel_list", Channels: channels})
-	}
+	// Always send the channel list so the frontend receives the event even if empty.
+	client.SendControl(ControlMsg{Type: "channel_list", Channels: room.GetChannelList()})
 
 	// Notify all other clients that this user joined (channel 0 = not in any channel).
 	room.BroadcastControl(
@@ -157,10 +170,10 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		client.SendControl(ControlMsg{Type: "pong", Timestamp: msg.Timestamp})
 	case "chat":
 		// Relay to all clients (including sender) so everyone sees the message.
-		// Server stamps the authoritative username, timestamp, and channel_id to
-		// prevent spoofing.  When the client requests a channel-scoped message
-		// (ChannelID != 0), the server uses the SENDER'S actual channelID —
-		// ignoring the client-supplied value — so clients cannot fake routing.
+		// Server stamps the authoritative username and timestamp to prevent spoofing.
+		// All chat messages (server-wide and channel-scoped) are broadcast to every
+		// client; the frontend filters by channel_id on the receiving end so users
+		// can read and send messages in any channel without being voice-connected.
 		if msg.Message == "" || len(msg.Message) > MaxChatLength {
 			return
 		}
@@ -170,16 +183,9 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			Username:  client.Username,
 			Message:   msg.Message,
 			Timestamp: time.Now().UnixMilli(),
+			ChannelID: msg.ChannelID, // 0 = server-wide, non-zero = channel-scoped
 		}
-		chID := client.channelID.Load()
-		if msg.ChannelID != 0 && chID != 0 {
-			// Channel-scoped: fan out only to users in the sender's current channel.
-			out.ChannelID = chID
-			room.BroadcastToChannel(chID, out)
-		} else {
-			// Server-level: fan out to everyone.
-			room.BroadcastControl(out, 0)
-		}
+		room.BroadcastControl(out, 0)
 	case "kick":
 		// Only the room owner may kick. Owners cannot kick themselves.
 		if room.OwnerID() != client.ID || msg.ID == 0 || msg.ID == client.ID {
@@ -204,7 +210,10 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		if err != nil {
 			return
 		}
-		room.Rename(name)
+		if err := room.Rename(name); err != nil {
+			log.Printf("[client %d] rename persist error: %v", client.ID, err)
+			return
+		}
 		room.BroadcastControl(ControlMsg{Type: "server_info", ServerName: name}, 0)
 		log.Printf("[client %d] %s renamed server to %q", client.ID, client.Username, name)
 	case "join_channel":

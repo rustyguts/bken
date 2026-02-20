@@ -1,65 +1,69 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Disconnect, SetMuted, SetDeafened } from '../wailsjs/go/main/App'
+import { SetMuted, SetDeafened } from '../wailsjs/go/main/App'
 import Sidebar from './Sidebar.vue'
-import EventLog from './EventLog.vue'
-import MetricsBar from './MetricsBar.vue'
-import RoomBrowser from './RoomBrowser.vue'
-import AudioSettings from './AudioSettings.vue'
-import ChatPanel from './ChatPanel.vue'
-import type { User, LogEvent, ChatMessage, Channel } from './types'
+import ServerChannels from './ServerChannels.vue'
+import UserControls from './UserControls.vue'
+import ChannelChatroom from './ChannelChatroom.vue'
+import type { User, ChatMessage, Channel, ConnectPayload } from './types'
 
 const props = defineProps<{
+  connected: boolean
+  reconnecting: boolean
+  connectedAddr: string
+  connectError: string
+  startupAddr: string
+  globalUsername: string
+  serverName: string
   users: User[]
-  speakingUsers: Set<number>
-  logEvents: LogEvent[]
   chatMessages: ChatMessage[]
   ownerId: number
   myId: number
   channels: Channel[]
   userChannels: Record<number, number>
+  speakingUsers: Set<number>
 }>()
 
 const emit = defineEmits<{
+  connect: [payload: ConnectPayload]
+  activateChannel: [payload: { addr: string; channelID: number }]
+  renameGlobalUsername: [username: string]
+  openSettings: []
   disconnect: []
+  disconnectVoice: []
   sendChat: [message: string]
   sendChannelChat: [channelID: number, message: string]
 }>()
 
-const settingsOpen = ref(false)
 const muted = ref(false)
 const deafened = ref(false)
-const activeTab = ref<'voice' | 'chat' | 'channel'>('voice')
-const unreadChat = ref(0)
-const unreadChannel = ref(0)
+const selectedChannelId = ref(0)
+const selectedServerAddr = ref('')
 
-/** The channel the current user is in (0 = lobby). */
 const myChannelId = computed(() => props.userChannels[props.myId] ?? 0)
 
-/** Messages scoped to the server (channelId === 0). */
-const serverMessages = computed(() => props.chatMessages.filter(m => m.channelId === 0))
-
-/** Messages scoped to the user's current channel. */
-const channelMessages = computed(() => props.chatMessages.filter(m => m.channelId === myChannelId.value && myChannelId.value !== 0))
-
-watch(
-  () => props.chatMessages.length,
-  () => {
-    const last = props.chatMessages[props.chatMessages.length - 1]
-    if (!last) return
-    if (last.channelId === 0 && activeTab.value !== 'chat') unreadChat.value++
-    if (last.channelId !== 0 && last.channelId === myChannelId.value && activeTab.value !== 'channel') unreadChannel.value++
-  },
-)
-watch(activeTab, (tab) => {
-  if (tab === 'chat') unreadChat.value = 0
-  if (tab === 'channel') unreadChannel.value = 0
-})
-// When leaving a channel, switch away from channel tab.
 watch(myChannelId, (id) => {
-  if (id === 0 && activeTab.value === 'channel') activeTab.value = 'voice'
-  unreadChannel.value = 0
+  selectedChannelId.value = id
+}, { immediate: true })
+
+watch(() => props.channels, () => {
+  if (selectedChannelId.value === 0) return
+  if (!props.channels.some(ch => ch.id === selectedChannelId.value)) {
+    selectedChannelId.value = 0
+  }
 })
+
+watch(() => props.connectedAddr, (addr) => {
+  if (addr) {
+    selectedServerAddr.value = addr
+  }
+}, { immediate: true })
+
+watch(() => props.startupAddr, (addr) => {
+  if (!selectedServerAddr.value && addr) {
+    selectedServerAddr.value = addr.startsWith('bken://') ? addr.slice('bken://'.length) : addr
+  }
+}, { immediate: true })
 
 async function handleMuteToggle(): Promise<void> {
   muted.value = !muted.value
@@ -71,95 +75,119 @@ async function handleDeafenToggle(): Promise<void> {
   await SetDeafened(deafened.value)
 }
 
-async function handleDisconnect(): Promise<void> {
-  await Disconnect()
-  emit('disconnect')
+function handleDisconnectVoice(): void {
+  emit('disconnectVoice')
+}
+
+async function handleJoinChannel(channelID: number): Promise<void> {
+  const targetAddr = selectedServerAddr.value || props.connectedAddr
+  if (!targetAddr) return
+  emit('activateChannel', { addr: targetAddr, channelID })
+}
+
+function handleSelectChannel(channelID: number): void {
+  selectedChannelId.value = channelID
+}
+
+function handleSelectServer(addr: string): void {
+  selectedServerAddr.value = addr
+  selectedChannelId.value = 0
+
+  // Opening another server from the sidebar should not keep the current server connection active.
+  if (props.connected && props.connectedAddr !== addr) {
+    emit('disconnect')
+  }
+}
+
+function handleSendMessage(message: string): void {
+  if (selectedChannelId.value === 0) {
+    emit('sendChat', message)
+    return
+  }
+  emit('sendChannelChat', selectedChannelId.value, message)
 }
 </script>
 
 <template>
-  <div class="flex h-full overflow-hidden">
+  <div class="room-grid h-full min-h-0 overflow-hidden">
     <Sidebar
-      :settings-open="settingsOpen"
-      :muted="muted"
-      :deafened="deafened"
-      @settings-toggle="settingsOpen = !settingsOpen"
-      @mute-toggle="handleMuteToggle"
-      @deafen-toggle="handleDeafenToggle"
-      @server-browser="handleDisconnect"
-      @disconnect="handleDisconnect"
+      class="room-sidebar"
+      :active-server-addr="selectedServerAddr"
+      :connected-addr="connectedAddr"
+      :connect-error="connectError"
+      :startup-addr="startupAddr"
+      :global-username="globalUsername"
+      @connect="emit('connect', $event)"
+      @select-server="handleSelectServer"
     />
 
-    <!-- Left panel: event log + metrics.
-         Hidden below md (768 px) so narrow windows give the main panel full width. -->
-    <div class="hidden md:flex flex-col border-r border-base-content/10 min-h-0 w-[220px] min-w-[220px]">
-      <EventLog :events="logEvents" class="flex-1 min-h-0" />
-      <MetricsBar />
-    </div>
+    <ServerChannels
+      class="room-channels border-r border-base-content/10 bg-base-100"
+      :channels="channels"
+      :users="users"
+      :user-channels="userChannels"
+      :my-id="myId"
+      :selected-channel-id="selectedChannelId"
+      :server-name="serverName"
+      :speaking-users="speakingUsers"
+      @join="handleJoinChannel"
+      @select="handleSelectChannel"
+    />
 
-    <!-- Right panel: settings overlay or tabbed voice/chat -->
-    <div class="flex-1 min-w-0 relative">
-      <Transition name="fade" mode="out-in">
-        <AudioSettings v-if="settingsOpen" key="settings" class="absolute inset-0" />
-        <div v-else key="main" class="absolute inset-0 flex flex-col">
-          <!-- Tab bar -->
-          <div role="tablist" class="tabs tabs-bordered shrink-0 px-2 pt-1">
-            <button
-              role="tab"
-              class="tab"
-              :class="{ 'tab-active': activeTab === 'voice' }"
-              @click="activeTab = 'voice'"
-            >
-              Voice
-            </button>
-            <button
-              role="tab"
-              class="tab"
-              :class="{ 'tab-active': activeTab === 'chat' }"
-              @click="activeTab = 'chat'"
-            >
-              Chat
-              <span v-if="unreadChat > 0" class="badge badge-xs badge-primary ml-1">{{ unreadChat }}</span>
-            </button>
-            <button
-              v-if="myChannelId !== 0"
-              role="tab"
-              class="tab"
-              :class="{ 'tab-active': activeTab === 'channel' }"
-              @click="activeTab = 'channel'"
-            >
-              Channel
-              <span v-if="unreadChannel > 0" class="badge badge-xs badge-secondary ml-1">{{ unreadChannel }}</span>
-            </button>
-          </div>
+    <ChannelChatroom
+      class="room-chatroom"
+      :messages="chatMessages"
+      :channels="channels"
+      :selected-channel-id="selectedChannelId"
+      :my-channel-id="myChannelId"
+      :connected="connected"
+      @select-channel="handleSelectChannel"
+      @send="handleSendMessage"
+    />
 
-          <!-- Tab content -->
-          <div class="flex-1 min-h-0">
-            <RoomBrowser
-              v-if="activeTab === 'voice'"
-              :users="users"
-              :speaking-users="speakingUsers"
-              :owner-id="props.ownerId"
-              :my-id="props.myId"
-              :channels="props.channels"
-              :user-channels="props.userChannels"
-              class="h-full"
-            />
-            <ChatPanel
-              v-else-if="activeTab === 'chat'"
-              :messages="serverMessages"
-              class="h-full"
-              @send="emit('sendChat', $event)"
-            />
-            <ChatPanel
-              v-else-if="activeTab === 'channel'"
-              :messages="channelMessages"
-              class="h-full"
-              @send="emit('sendChannelChat', myChannelId, $event)"
-            />
-          </div>
-        </div>
-      </Transition>
-    </div>
+    <UserControls
+      class="room-controls border-r border-base-content/10"
+      :username="globalUsername"
+      :muted="muted"
+      :deafened="deafened"
+      :connected="connected"
+      @rename-username="emit('renameGlobalUsername', $event)"
+      @open-settings="emit('openSettings')"
+      @mute-toggle="handleMuteToggle"
+      @deafen-toggle="handleDeafenToggle"
+      @disconnect="handleDisconnectVoice"
+    />
   </div>
 </template>
+
+<style scoped>
+.room-grid {
+  display: grid;
+  grid-template-columns: 64px minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.room-sidebar {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+}
+
+.room-channels {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+}
+
+.room-chatroom {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  min-height: 0;
+}
+
+.room-controls {
+  grid-column: 1 / span 2;
+  grid-row: 2;
+  min-width: 0;
+}
+</style>

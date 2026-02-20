@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +17,7 @@ import (
 const (
 	sampleRate  = 48000
 	channels    = 1
-	frameSize   = 960 // 20ms @ 48kHz
+	FrameSize   = 960 // 20ms @ 48kHz — exported so other packages can reference it
 	opusBitrate = 32000
 
 	captureChannelBuf  = 100
@@ -71,7 +70,7 @@ type AudioEngine struct {
 	CaptureOut chan []byte
 	// PlaybackIn carries encoded Opus frames received from the network.
 	PlaybackIn chan []byte
-	// notifCh carries pre-chunked raw PCM float32 frames (frameSize each)
+	// notifCh carries pre-chunked raw PCM float32 frames (FrameSize each)
 	// synthesised by PlayNotification. Mixed into the output after voice decoding.
 	notifCh chan []float32
 
@@ -104,7 +103,7 @@ func NewAudioEngine() *AudioEngine {
 		inputDeviceID:  -1,
 		outputDeviceID: -1,
 		volume:         1.0,
-		aecProc:        aec.New(frameSize),
+		aecProc:        aec.New(FrameSize),
 		agcProc:        agc.New(),
 		vadProc:        vad.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
@@ -275,7 +274,7 @@ func (ae *AudioEngine) Start() error {
 		return err
 	}
 
-	captureBuf := make([]float32, frameSize)
+	captureBuf := make([]float32, FrameSize)
 	captureParams := portaudio.StreamParameters{
 		Input: portaudio.StreamDeviceParameters{
 			Device:   inputDev,
@@ -283,14 +282,14 @@ func (ae *AudioEngine) Start() error {
 			Latency:  inputDev.DefaultLowInputLatency,
 		},
 		SampleRate:      sampleRate,
-		FramesPerBuffer: frameSize,
+		FramesPerBuffer: FrameSize,
 	}
 	captureStream, err := portaudio.OpenStream(captureParams, captureBuf)
 	if err != nil {
 		return err
 	}
 
-	playbackBuf := make([]float32, frameSize)
+	playbackBuf := make([]float32, FrameSize)
 	playbackParams := portaudio.StreamParameters{
 		Output: portaudio.StreamDeviceParameters{
 			Device:   outputDev,
@@ -298,7 +297,7 @@ func (ae *AudioEngine) Start() error {
 			Latency:  outputDev.DefaultLowOutputLatency,
 		},
 		SampleRate:      sampleRate,
-		FramesPerBuffer: frameSize,
+		FramesPerBuffer: FrameSize,
 	}
 	playbackStream, err := portaudio.OpenStream(playbackParams, playbackBuf)
 	if err != nil {
@@ -387,15 +386,6 @@ func (ae *AudioEngine) Stop() {
 	}
 }
 
-// computeRMS returns the root-mean-square of buf.
-func computeRMS(buf []float32) float32 {
-	var sum float32
-	for _, s := range buf {
-		sum += s * s
-	}
-	return float32(math.Sqrt(float64(sum / float32(len(buf)))))
-}
-
 // zeroFloat32 zeroes all elements of buf.
 func zeroFloat32(buf []float32) {
 	for i := range buf {
@@ -416,7 +406,7 @@ func clampFloat32(v float32) float32 {
 
 func (ae *AudioEngine) captureLoop(buf []float32) {
 	// Reuse allocations across frames.
-	pcm := make([]int16, frameSize)
+	pcm := make([]int16, FrameSize)
 	opusBuf := make([]byte, opusMaxPacketBytes)
 	var lastSpeakEmit time.Time
 
@@ -494,7 +484,7 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 }
 
 func (ae *AudioEngine) playbackLoop(buf []float32) {
-	pcm := make([]int16, frameSize)
+	pcm := make([]int16, FrameSize)
 
 	for {
 		// Check for stop before every write cycle.
@@ -592,7 +582,7 @@ func (ae *AudioEngine) EncodeFrame(pcm []int16) ([]byte, error) {
 
 // DecodeFrame decodes an Opus frame to PCM int16. Exported for testing.
 func (ae *AudioEngine) DecodeFrame(data []byte) ([]int16, error) {
-	pcm := make([]int16, frameSize)
+	pcm := make([]int16, FrameSize)
 	n, err := ae.decoder.Decode(data, pcm)
 	if err != nil {
 		return nil, err

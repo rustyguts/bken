@@ -23,7 +23,6 @@ type App struct {
 	transport   Transporter
 	nc          *NoiseCanceller
 	connected   atomic.Bool // true while a voice session is active; safe for concurrent access
-	testUser    *TestUser   // non-nil when BKEN_TEST_USER is configured
 	startupAddr string      // host:port extracted from a bken:// CLI argument, if any
 
 	// Metrics cache: updated every 5 s by adaptBitrateLoop; read by GetMetrics.
@@ -197,6 +196,10 @@ func (a *App) Connect(addr, username string) string {
 		return "already connected"
 	}
 
+	// Defensive cleanup in case a stale transport session survived a prior
+	// failed/partial teardown while connected=false.
+	a.transport.Disconnect()
+
 	a.wireCallbacks()
 
 	if err := a.transport.Connect(context.Background(), addr, username); err != nil {
@@ -213,10 +216,6 @@ func (a *App) Connect(addr, username string) string {
 	go a.adaptBitrateLoop(a.audio.Done())
 
 	a.audio.PlayNotification(SoundConnect)
-
-	if err := a.startTestUser(addr); err != nil {
-		log.Printf("[app] test user: %v", err)
-	}
 
 	a.connected.Store(true)
 	log.Printf("[app] connected to %s as %s", addr, username)
@@ -292,41 +291,52 @@ func (a *App) wireCallbacks() {
 	}
 }
 
-// startTestUser connects a virtual bot peer if BKEN_TEST_USER is set.
-// "1" or "true" uses the default name "TestUser"; any other value is the bot name.
-func (a *App) startTestUser(addr string) error {
-	name := os.Getenv("BKEN_TEST_USER")
-	if name == "" {
-		return nil
-	}
-	if name == "1" || name == "true" {
-		name = "TestUser"
-	}
-	tu := newTestUser()
-	if err := tu.start(addr, name); err != nil {
-		return err
-	}
-	a.testUser = tu
-	log.Printf("[app] test user %q connected to %s", name, addr)
-	return nil
-}
-
 // Disconnect ends the voice session.
 func (a *App) Disconnect() {
-	if !a.connected.Load() {
-		return
+	wasConnected := a.connected.Swap(false)
+	if wasConnected {
+		log.Println("[app] disconnecting...")
 	}
-	a.connected.Store(false)
 	a.audio.Stop()
 	a.transport.Disconnect()
-	if a.testUser != nil {
-		a.testUser.stop()
-		a.testUser = nil
-	}
 	a.metricsMu.Lock()
 	a.cachedMetrics = Metrics{}
 	a.metricsMu.Unlock()
-	log.Println("[app] disconnected")
+	if wasConnected {
+		log.Println("[app] disconnected")
+	}
+}
+
+// DisconnectVoice stops audio capture/playback and moves the user to the
+// lobby (channel 0) but keeps the WebTransport session alive so chat and
+// control messages continue to flow.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) DisconnectVoice() string {
+	a.audio.Stop()
+	if err := a.transport.JoinChannel(0); err != nil {
+		return err.Error()
+	}
+	a.audio.PlayNotification(SoundUserLeft)
+	log.Println("[app] disconnected from voice (session still active)")
+	return ""
+}
+
+// ConnectVoice restarts audio capture/playback and joins the given channel.
+// Call this after DisconnectVoice to rejoin voice in a channel.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) ConnectVoice(channelID int) string {
+	if err := a.audio.Start(); err != nil {
+		return err.Error()
+	}
+	a.transport.StartReceiving(context.Background(), a.audio.PlaybackIn)
+	go a.sendLoop()
+	go a.adaptBitrateLoop(a.audio.Done())
+	if err := a.transport.JoinChannel(int64(channelID)); err != nil {
+		return err.Error()
+	}
+	a.audio.PlayNotification(SoundConnect)
+	log.Printf("[app] reconnected voice in channel %d", channelID)
+	return ""
 }
 
 // GetMetrics returns the most recently cached connection quality metrics.

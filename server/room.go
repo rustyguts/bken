@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -17,9 +18,9 @@ type DatagramSender interface {
 type Room struct {
 	mu         sync.RWMutex
 	clients    map[uint16]*Client
-	serverName string        // protected by mu
-	ownerID    uint16        // ID of the current room owner; 0 = no owner; protected by mu
-	onRename   func(string)  // optional persistence callback, fired after Rename; protected by mu
+	serverName string              // protected by mu
+	ownerID    uint16              // ID of the current room owner; 0 = no owner; protected by mu
+	onRename   func(string) error // optional persistence callback, fired after Rename; protected by mu
 	channels   []ChannelInfo // cached channel list sent to newly-connecting clients; protected by mu
 	nextID     atomic.Uint32
 
@@ -50,21 +51,24 @@ func (r *Room) ServerName() string {
 
 // SetOnRename registers a callback invoked after a successful Rename.
 // Intended for persisting the name to a store; called outside the mutex.
-func (r *Room) SetOnRename(fn func(string)) {
+func (r *Room) SetOnRename(fn func(string) error) {
 	r.mu.Lock()
 	r.onRename = fn
 	r.mu.Unlock()
 }
 
 // Rename updates the server name and fires the onRename callback if set.
-func (r *Room) Rename(name string) {
+// Returns an error if the persistence callback fails; in that case the
+// in-memory name is still updated.
+func (r *Room) Rename(name string) error {
 	r.mu.Lock()
 	r.serverName = name
 	cb := r.onRename
 	r.mu.Unlock()
 	if cb != nil {
-		cb(name)
+		return cb(name)
 	}
+	return nil
 }
 
 // ClaimOwnership sets id as the room owner if no owner is currently set.
@@ -125,13 +129,50 @@ func (r *Room) AddClient(c *Client) uint16 {
 	return id
 }
 
-// RemoveClient unregisters a client by ID.
-func (r *Room) RemoveClient(id uint16) {
+// AddOrReplaceClient registers c and atomically removes any existing client
+// with the same username (case-insensitive). It always assigns a fresh ID to c.
+// Returns the new ID, plus the replaced client and ID if a replacement occurred.
+func (r *Room) AddOrReplaceClient(c *Client) (id uint16, replaced *Client, replacedID uint16) {
+	id = uint16(r.nextID.Add(1))
+	c.ID = id
+
 	r.mu.Lock()
-	delete(r.clients, id)
+	for existingID, existing := range r.clients {
+		if strings.EqualFold(existing.Username, c.Username) {
+			replaced = existing
+			replacedID = existingID
+			delete(r.clients, existingID)
+			break
+		}
+	}
+	r.clients[id] = c
+	total := len(r.clients)
 	r.mu.Unlock()
 
-	log.Printf("[room] client %d left, total=%d", id, r.ClientCount())
+	if replaced != nil {
+		log.Printf("[room] replaced client %d (%s) with %d (%s), total=%d",
+			replacedID, replaced.Username, id, c.Username, total)
+	} else {
+		log.Printf("[room] client %d (%s) joined, total=%d", id, c.Username, total)
+	}
+
+	return id, replaced, replacedID
+}
+
+// RemoveClient unregisters a client by ID.
+func (r *Room) RemoveClient(id uint16) bool {
+	r.mu.Lock()
+	_, existed := r.clients[id]
+	if existed {
+		delete(r.clients, id)
+	}
+	total := len(r.clients)
+	r.mu.Unlock()
+
+	if existed {
+		log.Printf("[room] client %d left, total=%d", id, total)
+	}
+	return existed
 }
 
 // Broadcast sends a datagram to every client except the sender.

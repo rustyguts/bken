@@ -175,7 +175,7 @@ func TestProcessControlChatStampsServerUsername(t *testing.T) {
 
 // --- processControl: channel-scoped chat ---
 
-func TestProcessControlChatChannelScopedOnlyReachesChannel(t *testing.T) {
+func TestProcessControlChatBroadcastsToAllClients(t *testing.T) {
 	room := NewRoom()
 
 	sender, senderBuf := newCtrlClient("alice")
@@ -194,53 +194,59 @@ func TestProcessControlChatChannelScopedOnlyReachesChannel(t *testing.T) {
 	// lobby.channelID = 0
 	room.AddClient(lobby)
 
-	// Send with ChannelID != 0 to request channel-scoped routing.
+	// All chat is broadcast to every client with the client-supplied channelID.
 	processControl(ControlMsg{Type: "chat", Message: "channel hello", ChannelID: 99}, sender, room)
 
-	// Sender and in-channel peer both receive it.
+	// Every client receives the message.
 	if senderBuf.Len() == 0 {
-		t.Error("sender should receive their own channel message")
+		t.Error("sender should receive their own message")
 	}
 	got := decodeControl(t, senderBuf)
-	if got.ChannelID != 1 {
-		t.Errorf("channel_id should be server-stamped to sender's channel (1), got %d", got.ChannelID)
+	if got.ChannelID != 99 {
+		t.Errorf("channel_id should be the client-supplied value (99), got %d", got.ChannelID)
 	}
 	if inBuf.Len() == 0 {
 		t.Error("peer in same channel should receive the message")
 	}
-	if otherBuf.Len() != 0 {
-		t.Error("client in different channel should NOT receive the message")
+	if otherBuf.Len() == 0 {
+		t.Error("client in different channel should receive the message (cross-channel chat)")
 	}
-	if lobbyBuf.Len() != 0 {
-		t.Error("lobby client should NOT receive channel-scoped message")
+	if lobbyBuf.Len() == 0 {
+		t.Error("lobby client should receive the message (cross-channel chat)")
 	}
 }
 
-func TestProcessControlChatChannelSpoofingPrevented(t *testing.T) {
+func TestProcessControlChatCrossChannelAllowed(t *testing.T) {
 	room := NewRoom()
 
-	// Client is in channel 1 but tries to claim they're sending to channel 2.
-	sender, _ := newCtrlClient("alice")
+	// Client is in channel 1 and sends to channel 2 — this is allowed (cross-channel chat).
+	sender, senderBuf := newCtrlClient("alice")
 	sender.channelID.Store(1)
 	room.AddClient(sender)
 
 	target, targetBuf := newCtrlClient("bob")
-	target.channelID.Store(2) // attacker's intended victim
+	target.channelID.Store(2)
 	room.AddClient(target)
 
-	processControl(ControlMsg{Type: "chat", Message: "spoofed", ChannelID: 2}, sender, room)
+	processControl(ControlMsg{Type: "chat", Message: "cross channel", ChannelID: 2}, sender, room)
 
-	// Server stamps channelID from sender's actual channel (1), not the spoofed value (2).
-	// Since target is in channel 2 and sender is in channel 1, target should NOT receive it.
-	if targetBuf.Len() != 0 {
-		t.Error("channel spoofing should be prevented: target in channel 2 should not receive message from sender in channel 1")
+	// Both clients receive the message with the client-supplied channelID.
+	if senderBuf.Len() == 0 {
+		t.Error("sender should receive their own message")
+	}
+	if targetBuf.Len() == 0 {
+		t.Error("target should receive the cross-channel message")
+	}
+	got := decodeControl(t, targetBuf)
+	if got.ChannelID != 2 {
+		t.Errorf("channel_id should be preserved as client-supplied (2), got %d", got.ChannelID)
 	}
 }
 
-func TestProcessControlChatChannelRequiresSenderInChannel(t *testing.T) {
+func TestProcessControlChatFromLobbyPreservesChannelID(t *testing.T) {
 	room := NewRoom()
 
-	// Client is in the lobby (channelID=0) but requests channel-scoped chat.
+	// Client is in the lobby (channelID=0) but sends to channel 1 — allowed.
 	sender, senderBuf := newCtrlClient("alice")
 	// sender.channelID = 0 (default)
 	room.AddClient(sender)
@@ -249,19 +255,18 @@ func TestProcessControlChatChannelRequiresSenderInChannel(t *testing.T) {
 	observer.channelID.Store(1)
 	room.AddClient(observer)
 
-	// Requesting channel chat while in lobby should fall back to global.
-	processControl(ControlMsg{Type: "chat", Message: "fallback", ChannelID: 1}, sender, room)
+	processControl(ControlMsg{Type: "chat", Message: "from lobby", ChannelID: 1}, sender, room)
 
-	// Both sender and observer should receive it (global broadcast).
+	// Both receive it with the client-supplied channelID preserved.
 	if senderBuf.Len() == 0 {
-		t.Error("sender should receive the message (global fallback)")
+		t.Error("sender should receive the message")
 	}
 	got := decodeControl(t, senderBuf)
-	if got.ChannelID != 0 {
-		t.Errorf("channel_id should be 0 (global) when sender is in lobby, got %d", got.ChannelID)
+	if got.ChannelID != 1 {
+		t.Errorf("channel_id should be preserved as client-supplied (1), got %d", got.ChannelID)
 	}
 	if observerBuf.Len() == 0 {
-		t.Error("observer should receive global message")
+		t.Error("observer should receive the message")
 	}
 }
 
@@ -365,7 +370,7 @@ func TestProcessControlKickUnknownTarget(t *testing.T) {
 func TestProcessControlRenameByOwner(t *testing.T) {
 	room := NewRoom()
 	var persisted string
-	room.SetOnRename(func(name string) { persisted = name })
+	room.SetOnRename(func(name string) error { persisted = name; return nil })
 
 	owner, _ := newCtrlClient("alice")
 	room.AddClient(owner)
@@ -391,7 +396,7 @@ func TestProcessControlRenameByNonOwner(t *testing.T) {
 	room.Rename("Original")
 
 	var renameCalled bool
-	room.SetOnRename(func(_ string) { renameCalled = true })
+	room.SetOnRename(func(_ string) error { renameCalled = true; return nil })
 
 	processControl(ControlMsg{Type: "rename", ServerName: "Hacked"}, attacker, room)
 

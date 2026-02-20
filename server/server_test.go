@@ -41,14 +41,14 @@ func getFreePort() int {
 func startTestServer(t *testing.T) (string, context.CancelFunc) {
 	t.Helper()
 
-	tlsConfig, _ := generateTLSConfig()
+	tlsConfig, _ := generateTLSConfig(24 * time.Hour)
 	room := NewRoom()
 
 	port := getFreePort()
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	srv := NewServer(addr, tlsConfig, room)
+	srv := NewServer(addr, tlsConfig, room, 30*time.Second)
 
 	go func() {
 		srv.Run(ctx)
@@ -161,9 +161,12 @@ func TestPingPong(t *testing.T) {
 
 	reader := bufio.NewReader(ctrl)
 
-	// Drain the initial user_list.
+	// Drain the initial user_list and channel_list.
 	if _, err := reader.ReadBytes('\n'); err != nil {
 		t.Fatalf("read user_list: %v", err)
+	}
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		t.Fatalf("read channel_list: %v", err)
 	}
 
 	// Send a ping with a known timestamp.
@@ -212,7 +215,7 @@ func TestServerControlMessages(t *testing.T) {
 	sess1, ctrl1 := dialTestClient(t, addr, "alice")
 	defer sess1.CloseWithError(0, "test done")
 
-	// Read user_list for client 1.
+	// Read user_list and channel_list for client 1.
 	reader1 := bufio.NewReader(ctrl1)
 	line, err := reader1.ReadBytes('\n')
 	if err != nil {
@@ -225,6 +228,10 @@ func TestServerControlMessages(t *testing.T) {
 	}
 	if msg.Type != "user_list" {
 		t.Errorf("expected user_list, got %s", msg.Type)
+	}
+
+	if _, err := reader1.ReadBytes('\n'); err != nil {
+		t.Fatalf("read channel_list: %v", err)
 	}
 
 	// Connect client 2 - client 1 should get user_joined.

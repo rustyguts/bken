@@ -9,14 +9,14 @@ func TestGenerateSineToneFrameCount(t *testing.T) {
 	durationMs := 100
 	frames := generateSineTone(440, durationMs)
 	totalSamples := sampleRate * durationMs / 1000
-	// Ceiling division: how many frameSize chunks do we need?
-	wantFrames := (totalSamples + frameSize - 1) / frameSize
+	// Ceiling division: how many FrameSize chunks do we need?
+	wantFrames := (totalSamples + FrameSize - 1) / FrameSize
 	if len(frames) != wantFrames {
 		t.Errorf("frame count: got %d, want %d", len(frames), wantFrames)
 	}
 	for i, f := range frames {
-		if len(f) != frameSize {
-			t.Errorf("frame %d length: got %d, want %d", i, len(f), frameSize)
+		if len(f) != FrameSize {
+			t.Errorf("frame %d length: got %d, want %d", i, len(f), FrameSize)
 		}
 	}
 }
@@ -57,8 +57,8 @@ func TestGenerateSineToneFadeEnds(t *testing.T) {
 	lastNonZero := float32(0)
 	durationMs := 100
 	totalSamples := sampleRate * durationMs / 1000
-	lastRealFrame := (totalSamples - 1) / frameSize
-	lastRealOffset := (totalSamples - 1) % frameSize
+	lastRealFrame := (totalSamples - 1) / FrameSize
+	lastRealOffset := (totalSamples - 1) % FrameSize
 	if lastRealFrame < len(frames) {
 		lastNonZero = frames[lastRealFrame][lastRealOffset]
 	} else {
@@ -85,8 +85,8 @@ func TestGenerateNotificationFramesAllSounds(t *testing.T) {
 			continue
 		}
 		for i, f := range frames {
-			if len(f) != frameSize {
-				t.Errorf("sound %d frame %d: length %d, want %d", s, i, len(f), frameSize)
+			if len(f) != FrameSize {
+				t.Errorf("sound %d frame %d: length %d, want %d", s, i, len(f), FrameSize)
 			}
 		}
 	}

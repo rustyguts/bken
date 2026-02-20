@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -41,12 +42,12 @@ type ControlMsg struct {
 	Username   string        `json:"username,omitempty"`
 	ID         uint16        `json:"id,omitempty"`
 	Users      []UserInfo    `json:"users,omitempty"`
-	Ts         int64         `json:"ts,omitempty"`           // ping/pong timestamp (Unix ms)
-	Message    string        `json:"message,omitempty"`      // chat: body text
-	ServerName string        `json:"server_name,omitempty"`  // user_list: human-readable server name
-	OwnerID    uint16        `json:"owner_id,omitempty"`     // user_list/owner_changed: current room owner
-	ChannelID  int64         `json:"channel_id,omitempty"`   // join_channel/user_channel: target channel
-	Channels   []ChannelInfo `json:"channels,omitempty"`     // channel_list: full list of channels
+	Ts         int64         `json:"ts,omitempty"`          // ping/pong timestamp (Unix ms)
+	Message    string        `json:"message,omitempty"`     // chat: body text
+	ServerName string        `json:"server_name,omitempty"` // user_list: human-readable server name
+	OwnerID    uint16        `json:"owner_id,omitempty"`    // user_list/owner_changed: current room owner
+	ChannelID  int64         `json:"channel_id,omitempty"`  // join_channel/user_channel: target channel
+	Channels   []ChannelInfo `json:"channels,omitempty"`    // channel_list: full list of channels
 }
 
 // UserInfo describes a connected peer.
@@ -111,12 +112,12 @@ type Transport struct {
 	lastMetricsTime time.Time
 
 	// Callbacks — set via setters before calling Connect.
-	cbMu            sync.RWMutex
-	onUserList      func([]UserInfo)
-	onUserJoined    func(uint16, string)
-	onUserLeft      func(uint16)
-	onAudioReceived func(uint16)
-	onDisconnected  func()
+	cbMu                 sync.RWMutex
+	onUserList           func([]UserInfo)
+	onUserJoined         func(uint16, string)
+	onUserLeft           func(uint16)
+	onAudioReceived      func(uint16)
+	onDisconnected       func()
 	onChatMessage        func(username, message string, ts int64)
 	onChannelChatMessage func(channelID int64, username, message string, ts int64)
 	onServerInfo         func(name string)
@@ -247,8 +248,8 @@ func (t *Transport) JoinChannel(id int64) error {
 // only to users currently in the sender's channel. If the caller is not in a
 // channel, the server falls back to global broadcast.
 func (t *Transport) SendChannelChat(channelID int64, message string) error {
-	if message == "" || len(message) > 500 {
-		return nil
+	if err := validateChat(message); err != nil {
+		return err
 	}
 	t.writeCtrl(ControlMsg{Type: "chat", Message: message, ChannelID: channelID})
 	return nil
@@ -256,10 +257,21 @@ func (t *Transport) SendChannelChat(channelID int64, message string) error {
 
 // SendChat sends a chat message to the server for fan-out to all participants.
 func (t *Transport) SendChat(message string) error {
-	if message == "" || len(message) > 500 {
-		return nil
+	if err := validateChat(message); err != nil {
+		return err
 	}
 	t.writeCtrl(ControlMsg{Type: "chat", Message: message})
+	return nil
+}
+
+// validateChat returns an error if the message is empty or too long.
+func validateChat(message string) error {
+	if message == "" {
+		return fmt.Errorf("message must not be empty")
+	}
+	if len(message) > 500 {
+		return fmt.Errorf("message must not exceed 500 characters")
+	}
 	return nil
 }
 
@@ -267,6 +279,7 @@ func (t *Transport) SendChat(message string) error {
 func (t *Transport) writeCtrl(msg ControlMsg) {
 	data, err := json.Marshal(msg)
 	if err != nil {
+		log.Printf("[transport] marshal error: %v", err)
 		return
 	}
 	data = append(data, '\n')
@@ -336,6 +349,13 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 
 // Disconnect closes the WebTransport session.
 func (t *Transport) Disconnect() {
+	t.ctrlMu.Lock()
+	if t.ctrl != nil {
+		t.ctrl.Close() //nolint:errcheck // best-effort close for fast server-side teardown
+		t.ctrl = nil
+	}
+	t.ctrlMu.Unlock()
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -347,6 +367,7 @@ func (t *Transport) Disconnect() {
 		t.session.CloseWithError(0, "disconnect")
 		t.session = nil
 	}
+	t.myID = 0
 }
 
 // SendAudio sends an encoded Opus frame as an unreliable datagram.

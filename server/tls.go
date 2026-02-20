@@ -18,7 +18,8 @@ import (
 
 // generateTLSConfig creates a self-signed TLS certificate for the WebTransport server.
 // Returns the tls.Config (configured for HTTP/3) and the SHA-256 fingerprint.
-func generateTLSConfig() (*tls.Config, string) {
+// validity controls how long the certificate is valid for.
+func generateTLSConfig(validity time.Duration) (*tls.Config, string) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		log.Fatalf("[tls] generate key: %v", err)
@@ -33,7 +34,7 @@ func generateTLSConfig() (*tls.Config, string) {
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: "bken"},
 		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(24 * time.Hour),
+		NotAfter:              time.Now().Add(validity),
 		IsCA:                  true,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},

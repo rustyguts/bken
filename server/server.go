@@ -14,17 +14,19 @@ import (
 
 // Server holds the WebTransport server and room state.
 type Server struct {
-	addr      string
-	tlsConfig *tls.Config
-	room      *Room
-	wt        *webtransport.Server
+	addr        string
+	tlsConfig   *tls.Config
+	room        *Room
+	idleTimeout time.Duration
+	wt          *webtransport.Server
 }
 
-func NewServer(addr string, tlsConfig *tls.Config, room *Room) *Server {
+func NewServer(addr string, tlsConfig *tls.Config, room *Room, idleTimeout time.Duration) *Server {
 	return &Server{
-		addr:      addr,
-		tlsConfig: tlsConfig,
-		room:      room,
+		addr:        addr,
+		tlsConfig:   tlsConfig,
+		room:        room,
+		idleTimeout: idleTimeout,
 	}
 }
 
@@ -41,7 +43,7 @@ func (s *Server) Run(ctx context.Context) error {
 			// This reclaims resources from clients that disappear without a
 			// clean disconnect (e.g. crash, network change, power loss).
 			QUICConfig: &quic.Config{
-				MaxIdleTimeout: 30 * time.Second,
+				MaxIdleTimeout: s.idleTimeout,
 			},
 		},
 		CheckOrigin: func(r *http.Request) bool { return true },

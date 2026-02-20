@@ -39,6 +39,7 @@ func NewAPIServer(room *Room, st *store.Store) *APIServer {
 		},
 	}))
 	e.Use(middleware.Recover())
+	e.HTTPErrorHandler = jsonErrorHandler
 
 	s := &APIServer{room: room, store: st, echo: e}
 	s.registerRoutes()
@@ -294,4 +295,27 @@ func (s *APIServer) refreshChannels() {
 		return
 	}
 	s.room.SetChannels(convertChannels(chs))
+}
+
+// jsonErrorHandler ensures all error responses have a consistent JSON body:
+//
+//	{"error": "message"}
+//
+// This replaces Echo's default handler which varies between text and JSON.
+func jsonErrorHandler(err error, c echo.Context) {
+	code := http.StatusInternalServerError
+	msg := err.Error()
+	if he, ok := err.(*echo.HTTPError); ok {
+		code = he.Code
+		if m, ok := he.Message.(string); ok {
+			msg = m
+		}
+	}
+	if !c.Response().Committed {
+		if c.Request().Method == http.MethodHead {
+			c.NoContent(code) //nolint:errcheck
+		} else {
+			c.JSON(code, map[string]string{"error": msg}) //nolint:errcheck
+		}
+	}
 }

@@ -49,16 +49,15 @@ function formatTime(ts: number): string {
     </div>
 
     <!-- Input area -->
-    <div class="border-t border-base-content/10 p-2 flex gap-2 shrink-0">
+    <div class="border-t border-base-content/10 p-2 shrink-0">
       <input
         v-model="input"
         type="text"
         placeholder="Send a message…"
         maxlength="500"
-        class="input input-sm input-bordered flex-1 min-w-0"
+        class="input input-sm input-bordered w-full"
         @keydown.enter.prevent="send"
       />
-      <button class="btn btn-sm btn-primary" :disabled="!input.trim()" @click="send">Send</button>
     </div>
   </div>
 </template>

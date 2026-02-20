@@ -12,9 +12,12 @@ import (
 )
 
 func main() {
-	addr    := flag.String("addr",     ":4433",    "WebTransport listen address")
-	apiAddr := flag.String("api-addr", ":8080",    "REST API listen address (empty to disable)")
-	dbPath  := flag.String("db",       "bken.db",  "SQLite database path")
+	addr          := flag.String("addr",          ":4433",   "WebTransport listen address")
+	apiAddr       := flag.String("api-addr",      ":8080",   "REST API listen address (empty to disable)")
+	dbPath        := flag.String("db",            "bken.db", "SQLite database path")
+	idleTimeout   := flag.Duration("idle-timeout", 30*time.Second, "QUIC connection idle timeout")
+	certValidity  := flag.Duration("cert-validity", 24*time.Hour,  "self-signed TLS certificate validity")
+	testUser      := flag.String("test-user",     "",        "name for a virtual test bot that emits a 440 Hz tone (empty to disable)")
 	flag.Parse()
 
 	// Open persistent store; seed defaults on first run.
@@ -25,7 +28,7 @@ func main() {
 	defer st.Close()
 	seedDefaults(st)
 
-	tlsConfig, fingerprint := generateTLSConfig()
+	tlsConfig, fingerprint := generateTLSConfig(*certValidity)
 	log.Printf("[server] TLS certificate fingerprint: %s", fingerprint)
 
 	room := NewRoom()
@@ -36,10 +39,8 @@ func main() {
 	}
 
 	// Persist server name to SQLite whenever a connected owner renames the room.
-	room.SetOnRename(func(name string) {
-		if err := st.SetSetting("server_name", name); err != nil {
-			log.Printf("[store] persist server_name: %v", err)
-		}
+	room.SetOnRename(func(name string) error {
+		return st.SetSetting("server_name", name)
 	})
 
 	// Seed room's channel cache so newly-connecting clients receive the list.
@@ -62,6 +63,11 @@ func main() {
 	// Start metrics logging.
 	go RunMetrics(ctx, room, 5*time.Second)
 
+	// Start virtual test bot if configured.
+	if *testUser != "" {
+		go RunTestBot(ctx, room, *testUser)
+	}
+
 	// Start REST API server if an address is configured.
 	if *apiAddr != "" {
 		api := NewAPIServer(room, st)
@@ -69,7 +75,7 @@ func main() {
 		log.Printf("[api] listening on %s", *apiAddr)
 	}
 
-	srv := NewServer(*addr, tlsConfig, room)
+	srv := NewServer(*addr, tlsConfig, room, *idleTimeout)
 	if err := srv.Run(ctx); err != nil {
 		log.Fatalf("[server] %v", err)
 	}
