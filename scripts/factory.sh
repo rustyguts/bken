@@ -43,8 +43,7 @@ while true; do
   (
     claude --dangerously-skip-permissions \
       --print \
-      --continue \
-      --model claude-sonnet-4-6  \
+      --model claude-opus-4-6  \
       --output-format stream-json \
       --verbose \
       --include-partial-messages \
