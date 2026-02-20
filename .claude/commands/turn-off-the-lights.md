@@ -23,7 +23,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 ### Things to work on in no particular order
 
 - Basic roles for the server. Owner / Member.
-  - Owners can kick members from the server
+  - ✅ Owners can kick members from the server — see Done section
   - Owners can create channels in the server and CRUD the channels
   - Owners can set the name of the server
 - Server should have more state. Recommend embedded sqlite database.
@@ -69,3 +69,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Server name in title bar: server sends name (from SQLite settings) in user_list handshake; client shows "bken › <name>" in TitleBar while connected; clears on disconnect; PUT /api/settings live-updates connected clients via server_info broadcast
 - Server browser management: add server (name + host:port form, persisted to config.json) and remove server (trash icon); empty-state guidance; changes survive app restart
 - Code quality: Client.ctrl refactored to io.Writer (matches session DatagramSender pattern); processControl extracted from handleClient read loop; 10 unit tests in client_test.go cover SendControl, ping/pong, chat fan-out, spoofing prevention, length limits, unknown message types
+- Basic room ownership + kick: first client becomes owner; owner can kick members (server enforces); ownership transfers to lowest-ID client when owner leaves; "kicked" message closes connection; 4 kick tests + 4 ownership tests; kick button reveals on hover in UserCard (owner-only, not on self)
