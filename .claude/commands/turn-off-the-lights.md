@@ -26,8 +26,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Don't use cards for channel ui. Increase the size slightly of the user avatars.
 - Allow admins to delete channels
 - Allow admins to set a channel emoji
-- Allow users to edit and delete their own messages, not other peoples messages. Show icons on hover only
-- Allow owners to delete any message. Show the trash icon on hover
 - Admin: Owners can edit channel names.
 - Owners can see a server settings page which control settings on the server side. Move server name edit to this new server settings panel. Put the settings icon next to the create channel icon
 - The client should generate a private/public key pair. The server uses the public key to know who the user is. Plumb this up with role based authentication. There is "OWNER" and "USER"
@@ -69,3 +67,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Condense chat room UI (compact inline message layout with username/time/message on same line; reduced padding and spacing throughout)
 - DaisyUI soft buttons globally (btn-soft btn-primary applied across all components: UserControls, ServerBrowser, Sidebar, ServerChannels, ChannelChatroom)
 - Default channel protection — last remaining channel cannot be deleted (Room.ChannelCount() guard in delete_channel handler; 2 new server tests for last-channel rejection + multi-channel deletion)
+- Message edit and delete with hover-only action icons (users can edit/delete their own messages; room owners can delete any message; server tracks message ownership via bounded map with 10k entry eviction; edit_message/delete_message control messages with sender-only edit auth and sender+owner delete auth; frontend shows pencil/trash icons on hover only with inline editing, (edited) indicator, and "message deleted" placeholder; 16 new server tests for authorization, edge cases, and ownership eviction)
