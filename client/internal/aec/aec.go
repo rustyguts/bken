@@ -53,6 +53,10 @@ type AEC struct {
 	bufLen    int
 	delayLen  int
 	frameSize int
+
+	// Pre-allocated reference window (frameSize+tapLen-1 samples) used in
+	// Process. Avoids a heap allocation on every captured frame.
+	refBuf []float32
 }
 
 // New creates an AEC for the given PCM frame size (in samples).
@@ -68,6 +72,7 @@ func New(frameSize int) *AEC {
 		bufLen:    bufLen,
 		delayLen:  DefaultDelay,
 		frameSize: frameSize,
+		refBuf:    make([]float32, frameSize+DefaultTaps-1),
 	}
 }
 
@@ -88,9 +93,18 @@ func (a *AEC) SetEnabled(enabled bool) {
 // Call this from the playback goroutine after filling the output buffer.
 func (a *AEC) FeedFarEnd(frame []float32) {
 	a.mu.Lock()
-	for _, s := range frame {
-		a.farBuf[a.farHead] = s
-		a.farHead = (a.farHead + 1) % a.bufLen
+	n := len(frame)
+	if a.farHead+n <= a.bufLen {
+		copy(a.farBuf[a.farHead:], frame)
+		a.farHead += n
+		if a.farHead == a.bufLen {
+			a.farHead = 0
+		}
+	} else {
+		first := a.bufLen - a.farHead
+		copy(a.farBuf[a.farHead:], frame[:first])
+		copy(a.farBuf, frame[first:])
+		a.farHead = n - first
 	}
 	a.mu.Unlock()
 }
@@ -110,17 +124,22 @@ func (a *AEC) Process(frame []float32) {
 		return
 	}
 
-	// Copy the reference window into a contiguous slice so NLMS runs outside
-	// the mutex. We need frameSize+tapLen−1 samples, starting at:
+	// Copy the reference window into the pre-allocated slice so NLMS runs
+	// outside the mutex. We need frameSize+tapLen−1 samples starting at:
 	//   startIdx = farHead − frameSize − delayLen − tapLen + 1
 	// For sample i, tap k: ref[i + tapLen − 1 − k].
+	//
+	// startIdx ∈ [-(bufLen-1), 0], so adding bufLen once normalises it to [1, bufLen].
 	refLen := a.frameSize + a.tapLen - 1
-	ref := make([]float32, refLen)
 	startIdx := a.farHead - a.frameSize - a.delayLen - a.tapLen + 1
-	for j := range refLen {
-		// Add 3*bufLen to guarantee a positive dividend before modulo.
-		idx := ((startIdx + j) % a.bufLen + 3*a.bufLen) % a.bufLen
-		ref[j] = a.farBuf[idx]
+	start := (startIdx + a.bufLen) % a.bufLen
+	ref := a.refBuf
+	if start+refLen <= a.bufLen {
+		copy(ref, a.farBuf[start:start+refLen])
+	} else {
+		first := a.bufLen - start
+		copy(ref[:first], a.farBuf[start:])
+		copy(ref[first:], a.farBuf[:refLen-first])
 	}
 	a.mu.Unlock()
 

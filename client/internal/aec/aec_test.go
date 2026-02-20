@@ -187,6 +187,36 @@ func TestProcessOutputBounded(t *testing.T) {
 	}
 }
 
+// BenchmarkAECProcess measures the hot-path cost of Process (reference copy +
+// NLMS update) for a single 20 ms frame.
+func BenchmarkAECProcess(b *testing.B) {
+	a := New(testFrameSize)
+	// Warm up the far-end buffer so the reference window has real data.
+	for i := range 10 {
+		a.FeedFarEnd(sinFrame(440, i))
+	}
+	frame := sinFrame(440, 0)
+	buf := make([]float32, testFrameSize)
+
+	b.ResetTimer()
+	for b.Loop() {
+		copy(buf, frame)
+		a.Process(buf)
+	}
+}
+
+// BenchmarkAECFeedFarEnd measures the cost of writing one 20 ms frame into
+// the circular far-end buffer.
+func BenchmarkAECFeedFarEnd(b *testing.B) {
+	a := New(testFrameSize)
+	frame := sinFrame(440, 0)
+
+	b.ResetTimer()
+	for b.Loop() {
+		a.FeedFarEnd(frame)
+	}
+}
+
 // TestNewDefaults verifies the AEC is created with correct defaults.
 func TestNewDefaults(t *testing.T) {
 	a := New(testFrameSize)
