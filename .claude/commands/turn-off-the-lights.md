@@ -40,7 +40,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Performance is critical, analyze slow parts of the code and improve performance
 - UI: Small icons can be uploaded and set per channel
 - UI: A server icon can be uploaded and set
-- Server: If possible, use the Echo web framework for server REST endpoints in addition to WebTransport
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
 - Code quality and readability
 - Repo structure and organization
@@ -60,3 +59,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice: Ability to set volume (volume slider in settings panel)
 - UI: Beautiful settings page (grouped cards with icons for Input, Output, Voice Processing, Appearance)
 - Voice: Voice Activity Detection — silent frames skipped to save CPU and bandwidth (enabled by default, configurable sensitivity)
+- Server: Echo v4 REST API on :8080 — GET /health (status + client count), GET /api/room (user list); -api-addr flag to configure or disable
