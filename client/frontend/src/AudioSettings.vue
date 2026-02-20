@@ -115,14 +115,11 @@ onMounted(async () => {
     localStorage.setItem('bken-theme', cfg.theme)
   }
 
-  // Apply saved audio settings
+  // Note: audio settings are applied on app startup via ApplyConfig() in App.vue.
+  // Here we only need to apply device selection since PortAudio devices are
+  // re-enumerated lazily and need to be set before the next Connect call.
   if (cfg.input_device_id !== -1) await SetInputDevice(cfg.input_device_id)
   if (cfg.output_device_id !== -1) await SetOutputDevice(cfg.output_device_id)
-  await SetVolume(cfg.volume)
-  await SetNoiseSuppression(cfg.noise_enabled)
-  await SetNoiseSuppressionLevel(cfg.noise_level)
-  await SetAGC(cfg.agc_enabled)
-  await SetAGCLevel(cfg.agc_level)
 })
 
 async function handleInputChange(): Promise<void> {

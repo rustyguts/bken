@@ -33,6 +33,7 @@ func Default() Config {
 	return Config{
 		Theme:          "dark",
 		Volume:         1.0,
+		NoiseEnabled:   true,
 		NoiseLevel:     80,
 		AGCEnabled:     true,
 		AGCLevel:       50,

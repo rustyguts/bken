@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Connect, Disconnect, GetAutoLogin } from '../wailsjs/go/main/App'
+import { Connect, Disconnect, GetAutoLogin, ApplyConfig } from '../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
@@ -150,6 +150,10 @@ onMounted(async () => {
   EventsOn('audio:speaking', (data: SpeakingEvent) => {
     setSpeaking(data.id)
   })
+
+  // Apply saved audio settings before doing anything else so noise suppression,
+  // AGC, and volume are active even if the user never opens the settings panel.
+  await ApplyConfig()
 
   // Auto-login if configured
   const auto = await GetAutoLogin()

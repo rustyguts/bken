@@ -22,6 +22,18 @@ func TestDefault(t *testing.T) {
 	if len(cfg.Servers) == 0 {
 		t.Error("expected at least one default server")
 	}
+	if !cfg.NoiseEnabled {
+		t.Error("expected noise suppression enabled by default")
+	}
+	if cfg.NoiseLevel <= 0 {
+		t.Errorf("expected positive default noise level, got %d", cfg.NoiseLevel)
+	}
+	if !cfg.AGCEnabled {
+		t.Error("expected AGC enabled by default")
+	}
+	if cfg.AGCLevel <= 0 {
+		t.Errorf("expected positive default AGC level, got %d", cfg.AGCLevel)
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -36,6 +48,8 @@ func TestSaveAndLoad(t *testing.T) {
 		Volume:         0.75,
 		NoiseEnabled:   true,
 		NoiseLevel:     60,
+		AGCEnabled:     true,
+		AGCLevel:       75,
 		Servers: []config.ServerEntry{
 			{Name: "Home", Addr: "192.168.1.10:4433"},
 		},
@@ -60,6 +74,12 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.NoiseEnabled != cfg.NoiseEnabled {
 		t.Errorf("noise enabled: want %v got %v", cfg.NoiseEnabled, loaded.NoiseEnabled)
+	}
+	if loaded.AGCEnabled != cfg.AGCEnabled {
+		t.Errorf("agc enabled: want %v got %v", cfg.AGCEnabled, loaded.AGCEnabled)
+	}
+	if loaded.AGCLevel != cfg.AGCLevel {
+		t.Errorf("agc level: want %d got %d", cfg.AGCLevel, loaded.AGCLevel)
 	}
 	if len(loaded.Servers) != 1 || loaded.Servers[0].Addr != "192.168.1.10:4433" {
 		t.Errorf("servers: unexpected value %+v", loaded.Servers)

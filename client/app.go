@@ -304,6 +304,24 @@ func (a *App) GetConfig() Config {
 	return LoadConfig()
 }
 
+// ApplyConfig reads the saved config from disk and applies all audio settings
+// to the engine. Call this once on startup so settings are active before the
+// user opens the settings panel for the first time.
+func (a *App) ApplyConfig() {
+	cfg := LoadConfig()
+	a.audio.SetVolume(cfg.Volume)
+	a.audio.SetAGC(cfg.AGCEnabled)
+	a.audio.SetAGCLevel(cfg.AGCLevel)
+	a.SetNoiseSuppression(cfg.NoiseEnabled)
+	a.SetNoiseSuppressionLevel(cfg.NoiseLevel)
+	if cfg.InputDeviceID >= 0 {
+		a.audio.SetInputDevice(cfg.InputDeviceID)
+	}
+	if cfg.OutputDeviceID >= 0 {
+		a.audio.SetOutputDevice(cfg.OutputDeviceID)
+	}
+}
+
 // SaveConfig persists the given user config to disk.
 func (a *App) SaveConfig(cfg Config) {
 	if err := SaveConfig(cfg); err != nil {
