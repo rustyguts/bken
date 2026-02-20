@@ -54,8 +54,10 @@ func iabs(x int) int {
 }
 
 // DefaultJitterDepth is the jitter buffer depth used when no jitter data is
-// available (e.g. before any packets are received). 3 frames = 60 ms.
-const DefaultJitterDepth = 3
+// available (e.g. before any packets are received). 1 frame = 20 ms — optimistic
+// for LAN where jitter is typically <5 ms. The adaptive loop will increase
+// depth within seconds if network conditions warrant it.
+const DefaultJitterDepth = 1
 
 const (
 	frameDurationMs = 20.0 // one Opus frame = 20 ms

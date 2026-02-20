@@ -396,48 +396,74 @@ func (a *App) GetMetrics() Metrics {
 	return a.cachedMetrics
 }
 
-// adaptInterval is how often the adaptation loop ticks (exported for tests).
+// adaptInterval is the steady-state adaptation interval (after warmup).
 const adaptInterval = 5 * time.Second
 
-// framesPerInterval is the approximate number of 20 ms audio frames in one
-// adaptation interval (50 fps × 5 s = 250).
-const framesPerInterval = 250.0
+// fastStartIntervals defines the adaptation loop intervals during the initial
+// warmup phase. Shorter intervals at startup let the system converge to
+// optimal jitter depth and bitrate faster — critical on LAN where the default
+// depth=1 needs quick validation. After these intervals are exhausted, the
+// loop uses the steady-state 5-second interval.
+var fastStartIntervals = []time.Duration{
+	1 * time.Second,
+	2 * time.Second,
+	3 * time.Second,
+}
 
-// adaptBitrateLoop polls transport metrics every 5 s, adapts the Opus encoder
-// bitrate and jitter buffer depth based on observed network conditions and
-// local frame drops, then caches the metrics for the frontend. It exits when
-// done is closed (i.e. when audio stops).
+const (
+	// lossAlpha is the steady-state EWMA weight for new loss samples.
+	lossAlpha = 0.3
+
+	// warmupLossAlpha is a higher EWMA weight used during the first few
+	// adaptation ticks so the smoothed loss converges faster from zero.
+	warmupLossAlpha = 0.5
+
+	// warmupTicks is the number of initial ticks that use warmupLossAlpha.
+	warmupTicks = 3
+
+	// framesPerSecond is the number of 20 ms audio frames per second.
+	framesPerSecond = 50.0
+)
+
+// adaptBitrateLoop polls transport metrics, adapts the Opus encoder bitrate
+// and jitter buffer depth based on observed network conditions and local frame
+// drops, then caches the metrics for the frontend. It exits when done is
+// closed (i.e. when audio stops).
+//
+// Fast-start: the first few ticks use shorter intervals (1s, 2s, 3s) and a
+// higher EWMA alpha so the system converges to optimal settings within ~6s
+// instead of ~15s. After warmup, it settles to a 5s steady-state cadence.
 func (a *App) adaptBitrateLoop(done <-chan struct{}) {
-	ticker := time.NewTicker(adaptInterval)
-	defer ticker.Stop()
-
-	const lossAlpha = 0.3 // EWMA weight for new loss sample
 	var smoothedLoss float64
+	var tick int
+
+	// Start with the first fast-start interval.
+	interval := fastStartIntervals[0]
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-done:
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			m := a.transport.GetMetrics()
 
 			// Collect local frame drops since the last tick.
-			// captureDrops: frames encoded but dropped because sendLoop couldn't
-			// drain CaptureOut fast enough (send-side congestion signal).
-			// playbackDropsLocal: frames dropped in the audio engine (always 0
-			// today; the transport holds the real counter returned in m).
 			captureDrops, playbackDropsLocal := a.audio.DroppedFrames()
 			m.CaptureDropped = captureDrops
-			m.PlaybackDropped += playbackDropsLocal // merge audio + transport drops
+			m.PlaybackDropped += playbackDropsLocal
 
-			// Smooth the raw loss with EWMA to prevent FEC oscillation.
-			smoothedLoss = adapt.SmoothLoss(smoothedLoss, m.PacketLoss, lossAlpha)
+			// Use higher EWMA alpha during warmup for faster convergence.
+			alpha := lossAlpha
+			if tick < warmupTicks {
+				alpha = warmupLossAlpha
+			}
+			smoothedLoss = adapt.SmoothLoss(smoothedLoss, m.PacketLoss, alpha)
 
-			// Treat capture drops as send-side loss: each dropped frame is a
-			// frame that peers will never hear, equivalent to a lost packet.
-			// Adding it to the effective loss ensures the bitrate ladder steps
-			// down when the local send path is congested (e.g. QUIC buffer full).
-			captureLoss := float64(captureDrops) / framesPerInterval
+			// Treat capture drops as send-side loss. Scale by actual interval.
+			framesInInterval := interval.Seconds() * framesPerSecond
+			captureLoss := float64(captureDrops) / framesInInterval
 			effectiveLoss := smoothedLoss + captureLoss
 
 			currentKbps := a.audio.CurrentBitrate()
@@ -447,7 +473,6 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 					currentKbps, nextKbps, m.PacketLoss*100, smoothedLoss*100, captureDrops, m.RTTMs)
 				a.audio.SetBitrate(nextKbps)
 			}
-			// Feed smoothed loss into the Opus encoder for FEC tuning.
 			a.audio.SetPacketLoss(int(smoothedLoss * 100))
 
 			// Adapt jitter buffer depth based on measured jitter and loss.
@@ -456,7 +481,7 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 
 			// Compute quality level including local drops.
 			totalDrops := captureDrops + m.PlaybackDropped
-			dropRate := float64(totalDrops) / adaptInterval.Seconds()
+			dropRate := float64(totalDrops) / interval.Seconds()
 
 			m.OpusTargetKbps = nextKbps
 			m.QualityLevel = qualityLevel(smoothedLoss, m.RTTMs, m.JitterMs, dropRate)
@@ -464,9 +489,16 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 			a.cachedMetrics = m
 			a.metricsMu.Unlock()
 
-			// Push quality event to the frontend so the UI can show
-			// a real-time indicator without polling.
 			wailsrt.EventsEmit(a.ctx, "voice:quality", m)
+
+			// Advance to next interval.
+			tick++
+			if tick < len(fastStartIntervals) {
+				interval = fastStartIntervals[tick]
+			} else {
+				interval = adaptInterval
+			}
+			timer.Reset(interval)
 		}
 	}
 }

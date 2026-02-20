@@ -525,9 +525,10 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 }
 
 // jitterDepth is the number of 20 ms frames the jitter buffer accumulates
-// before starting playback. 3 frames = 60 ms added latency — a good balance
-// between reorder tolerance and conversational responsiveness on a LAN.
-const jitterDepth = 3
+// before starting playback. 1 frame = 20 ms — optimistic for LAN where
+// jitter is typically <5 ms. The adaptive loop will increase depth within
+// seconds if network conditions require more buffering.
+const jitterDepth = 1
 
 // decoderPruneInterval controls how often per-sender decoders are pruned
 // for senders that have gone silent (every N playback cycles ≈ N*20 ms).

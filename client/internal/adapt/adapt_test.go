@@ -165,3 +165,42 @@ func TestSmoothLossSpikeDampened(t *testing.T) {
 		t.Errorf("spike should be dampened: got %f, want < 0.20", smoothed)
 	}
 }
+
+// --- LAN-optimistic default tests ---
+
+func TestDefaultJitterDepthLANOptimistic(t *testing.T) {
+	// bken is a LAN voice app — default should be 1 frame (20 ms) for
+	// minimal latency. The adaptive loop increases depth if needed.
+	if DefaultJitterDepth != 1 {
+		t.Errorf("DefaultJitterDepth = %d, want 1 (optimistic for LAN)", DefaultJitterDepth)
+	}
+}
+
+func TestTargetJitterDepthLowJitterConvergesToMinimal(t *testing.T) {
+	// On a LAN with 2 ms jitter and no loss, depth should be 2 (ceil(2/20)+1).
+	// This is close to the optimistic default and validates that the adaptive
+	// system won't increase depth unnecessarily on good networks.
+	got := TargetJitterDepth(2.0, 0)
+	if got != 2 {
+		t.Errorf("LAN jitter (2ms): got depth %d, want 2", got)
+	}
+}
+
+func TestSmoothLossWarmupConvergesFaster(t *testing.T) {
+	// Warmup alpha (0.5) should converge faster than steady-state alpha (0.3).
+	warmupSmoothed := 0.0
+	steadySmoothed := 0.0
+	target := 0.05
+
+	for i := 0; i < 3; i++ {
+		warmupSmoothed = SmoothLoss(warmupSmoothed, target, 0.5)
+		steadySmoothed = SmoothLoss(steadySmoothed, target, 0.3)
+	}
+
+	warmupError := math.Abs(warmupSmoothed - target)
+	steadyError := math.Abs(steadySmoothed - target)
+	if warmupError >= steadyError {
+		t.Errorf("warmup α=0.5 should converge faster than α=0.3: warmup=%.4f steady=%.4f target=%.4f",
+			warmupSmoothed, steadySmoothed, target)
+	}
+}
