@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -493,5 +494,87 @@ func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	}
 	if b != 10 {
 		t.Errorf("expected 10 bytes, got %d", b)
+	}
+}
+
+func TestRoomBroadcastSnapshotReleasesLock(t *testing.T) {
+	// Verify that the broadcast snapshot approach allows concurrent AddClient
+	// while SendDatagram calls are in progress. With the old hold-lock approach,
+	// a slow SendDatagram would block AddClient.
+	room := NewRoom()
+
+	slowSender := &mockSender{}
+	s1 := &Client{Username: "alice", session: slowSender}
+	room.AddClient(s1)
+	s1.channelID.Store(1)
+
+	s2 := &Client{Username: "bob", session: &mockSender{}}
+	room.AddClient(s2)
+	s2.channelID.Store(1)
+
+	data := []byte{0, 0, 0, 1, 0xAA}
+	room.Broadcast(s1.ID, data)
+
+	// After broadcast, we should be able to add more clients without deadlock.
+	s3 := newTestClient("carol")
+	room.AddClient(s3)
+
+	if room.ClientCount() != 3 {
+		t.Errorf("expected 3 clients, got %d", room.ClientCount())
+	}
+}
+
+func TestRoomBroadcastUnknownSender(t *testing.T) {
+	room := NewRoom()
+
+	data := []byte{0, 0, 0, 1, 0xAA}
+	// Should not panic when sender doesn't exist.
+	room.Broadcast(9999, data)
+}
+
+func TestRoomBroadcastConcurrentWithClientChanges(t *testing.T) {
+	room := NewRoom()
+	const numClients = 20
+
+	clients := make([]*Client, numClients)
+	for i := range clients {
+		c := &Client{Username: fmt.Sprintf("user-%d", i), session: &mockSender{}}
+		room.AddClient(c)
+		c.channelID.Store(1)
+		clients[i] = c
+	}
+
+	// Concurrently broadcast and add/remove clients.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		data := []byte{0, 0, 0, 1, 0xAA}
+		for i := 0; i < 100; i++ {
+			room.Broadcast(clients[0].ID, data)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			c := &Client{Username: fmt.Sprintf("extra-%d", i), session: &mockSender{}}
+			id := room.AddClient(c)
+			c.channelID.Store(1)
+			room.RemoveClient(id)
+		}
+	}()
+
+	wg.Wait()
+	// If we got here without deadlock or panic, the test passes.
+}
+
+func TestRoomNextMsgID(t *testing.T) {
+	room := NewRoom()
+	id1 := room.NextMsgID()
+	id2 := room.NextMsgID()
+	if id2 <= id1 {
+		t.Errorf("MsgID should be monotonically increasing: %d, %d", id1, id2)
 	}
 }

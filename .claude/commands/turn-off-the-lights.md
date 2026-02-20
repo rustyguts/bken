@@ -24,8 +24,9 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
 - Server invite links - You could send these to people and they can join a server, would require external web service
-- Rich link previews
 ### Done
+
+- Rich link previews (server extracts first URL from chat, async fetches OpenGraph metadata with 4s timeout, broadcasts link_preview control message keyed by MsgID; client renders preview cards with image/title/description/site name; 13 server tests)
 
 - Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in (frontend filters messages by channel_id via visibleMessages computed property)
 - Set a default global username. Right now users cant join a server unless their username is set. Generate one if one is not defined. Store the global username in the client state db

@@ -11,6 +11,7 @@ const (
 	MaxChatLength  = 500            // max bytes for a single chat message body
 	MaxFileSize    = 10 * 1024 * 1024 // max upload size (10 MB)
 	DatagramHeader = 4              // senderID(2) + seq(2) bytes prepended to every voice datagram
+	MaxDatagramSize = DatagramHeader + 1275 // max header + max Opus packet (RFC 6716)
 )
 
 // validateName trims whitespace from s and returns the trimmed string, or an

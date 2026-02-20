@@ -20,8 +20,8 @@ const (
 	FrameSize   = 960 // 20ms @ 48kHz — exported so other packages can reference it
 	opusBitrate = 32000
 
-	captureChannelBuf  = 100
-	playbackChannelBuf = 100
+	captureChannelBuf  = 30 // ~600ms @ 50 fps — low latency; drops if consumer falls behind
+	playbackChannelBuf = 30 // ~600ms @ 50 fps — low latency; silence fills gaps
 	opusMaxPacketBytes = 1275 // RFC 6716 max Opus packet size
 )
 

@@ -336,8 +336,8 @@ func readDatagrams(ctx context.Context, sess *webtransport.Session, room *Room, 
 			}
 			return
 		}
-		if len(data) < DatagramHeader {
-			continue // need at least senderID(2) + seq(2)
+		if len(data) < DatagramHeader || len(data) > MaxDatagramSize {
+			continue // need header; reject oversized packets
 		}
 		// Overwrite the client-supplied sender ID to prevent spoofing.
 		binary.BigEndian.PutUint16(data[:2], senderID)

@@ -24,8 +24,9 @@ type Room struct {
 	onRename   func(string) error // optional persistence callback, fired after Rename; protected by mu
 	channels   []ChannelInfo // cached channel list sent to newly-connecting clients; protected by mu
 	apiPort    int           // HTTP API port communicated to clients in user_list; protected by mu
-	nextID     atomic.Uint32
-	nextMsgID  atomic.Uint64
+	snapshotBuf []broadcastTarget // reusable buffer for Broadcast fan-out; protected by mu
+	nextID      atomic.Uint32
+	nextMsgID   atomic.Uint64
 
 	// Channel CRUD persistence callbacks — set via setters; called outside the mutex.
 	onCreateChannel func(name string) (int64, error)
@@ -198,6 +199,14 @@ func (r *Room) RemoveClient(id uint16) bool {
 	return existed
 }
 
+// broadcastTarget is a snapshot of a client's session for datagram fan-out.
+// Capturing these under the read lock lets us release the lock before calling
+// SendDatagram, preventing one slow client from blocking all others.
+type broadcastTarget struct {
+	id      uint16
+	session DatagramSender
+}
+
 // Broadcast sends a datagram to every client in the same channel as the sender,
 // excluding the sender itself. Clients in channel 0 (lobby) never send or
 // receive voice datagrams.
@@ -207,18 +216,20 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 	r.totalDatagrams.Add(1)
 	r.totalBytes.Add(uint64(len(data)))
 
+	// Snapshot targets under the read lock, then release before sending.
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	sender := r.clients[senderID]
 	if sender == nil {
+		r.mu.RUnlock()
 		return
 	}
 	senderChannel := sender.channelID.Load()
 	if senderChannel == 0 {
+		r.mu.RUnlock()
 		return // lobby users don't transmit voice
 	}
 
+	targets := r.snapshotBuf[:0]
 	for id, c := range r.clients {
 		if id == senderID {
 			continue
@@ -226,9 +237,15 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 		if c.channelID.Load() != senderChannel {
 			continue
 		}
-		if err := c.session.SendDatagram(data); err != nil {
+		targets = append(targets, broadcastTarget{id: id, session: c.session})
+	}
+	r.snapshotBuf = targets // keep backing array for next call
+	r.mu.RUnlock()
+
+	for _, t := range targets {
+		if err := t.session.SendDatagram(data); err != nil {
 			// UDP-like semantics: log and continue, never block the hot path.
-			log.Printf("[room] datagram to client %d dropped: %v", id, err)
+			log.Printf("[room] datagram to client %d dropped: %v", t.id, err)
 		}
 	}
 }

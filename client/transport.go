@@ -534,6 +534,8 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte
 		defer cancel()
 		speakTimers := make(map[uint16]time.Time)
 		lastSeq := make(map[uint16]uint16) // senderID → last received seq
+		lastSeen := make(map[uint16]time.Time) // senderID → last packet time
+		var pruneCounter int
 
 		for {
 			data, err := sess.ReceiveDatagram(rctx)
@@ -551,6 +553,8 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte
 				continue
 			}
 
+			now := time.Now()
+
 			// Sequence-gap packet loss accounting.
 			if prev, ok := lastSeq[userID]; ok {
 				diff := int(seq) - int(prev)
@@ -565,15 +569,30 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte
 				}
 			}
 			lastSeq[userID] = seq
+			lastSeen[userID] = now
 
 			// Speaking notification, throttled per user to ~80 ms.
 			t.cbMu.RLock()
 			onAudio := t.onAudioReceived
 			t.cbMu.RUnlock()
 			if onAudio != nil {
-				if last, ok := speakTimers[userID]; !ok || time.Since(last) > 80*time.Millisecond {
-					speakTimers[userID] = time.Now()
+				if last, ok := speakTimers[userID]; !ok || now.Sub(last) > 80*time.Millisecond {
+					speakTimers[userID] = now
 					onAudio(userID)
+				}
+			}
+
+			// Prune stale entries every ~500 packets (~10 s of audio) to prevent
+			// unbounded map growth from disconnected speakers.
+			pruneCounter++
+			if pruneCounter >= 500 {
+				pruneCounter = 0
+				for id, seen := range lastSeen {
+					if now.Sub(seen) > 30*time.Second {
+						delete(lastSeen, id)
+						delete(lastSeq, id)
+						delete(speakTimers, id)
+					}
 				}
 			}
 

@@ -219,6 +219,80 @@ func TestPingPong(t *testing.T) {
 	}
 }
 
+func TestMaxDatagramSizeConstant(t *testing.T) {
+	// Verify the constant is sensible: header(4) + max Opus(1275) = 1279.
+	if MaxDatagramSize != 1279 {
+		t.Errorf("MaxDatagramSize: got %d, want 1279", MaxDatagramSize)
+	}
+	if MaxDatagramSize != DatagramHeader+1275 {
+		t.Errorf("MaxDatagramSize should equal DatagramHeader + 1275, got %d", MaxDatagramSize)
+	}
+}
+
+func TestServerTooSmallDatagramDropped(t *testing.T) {
+	addr, cancel := startTestServer(t)
+	defer cancel()
+
+	sess1, ctrl1 := dialTestClient(t, addr, "alice")
+	defer sess1.CloseWithError(0, "test done")
+
+	sess2, ctrl2 := dialTestClient(t, addr, "bob")
+	defer sess2.CloseWithError(0, "test done")
+
+	// Drain control messages.
+	go func() {
+		scanner := bufio.NewScanner(ctrl1)
+		for scanner.Scan() {
+		}
+	}()
+	go func() {
+		scanner := bufio.NewScanner(ctrl2)
+		for scanner.Scan() {
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Both join the same channel.
+	joinCh := ControlMsg{Type: "join_channel", ChannelID: 1}
+	joinData, _ := json.Marshal(joinCh)
+	joinData = append(joinData, '\n')
+	ctrl1.Write(joinData)
+	ctrl2.Write(joinData)
+	time.Sleep(100 * time.Millisecond)
+
+	// Send a too-short datagram (< DatagramHeader bytes).
+	if err := sess1.SendDatagram([]byte{0x01, 0x02}); err != nil {
+		t.Fatalf("send short datagram: %v", err)
+	}
+
+	// Then send a valid datagram.
+	payload := []byte("valid-data")
+	dgram := make([]byte, 4+len(payload))
+	binary.BigEndian.PutUint16(dgram[0:2], 1)
+	binary.BigEndian.PutUint16(dgram[2:4], 2)
+	copy(dgram[4:], payload)
+	if err := sess1.SendDatagram(dgram); err != nil {
+		t.Fatalf("send valid datagram: %v", err)
+	}
+
+	// Client 2 should only receive the valid datagram.
+	ctx, rcvCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer rcvCancel()
+
+	received, err := sess2.ReceiveDatagram(ctx)
+	if err != nil {
+		t.Fatalf("receive datagram: %v", err)
+	}
+	if len(received) < 4 {
+		t.Fatalf("datagram too short: %d bytes", len(received))
+	}
+	receivedPayload := received[4:]
+	if string(receivedPayload) != string(payload) {
+		t.Errorf("payload: got %q, want %q", receivedPayload, payload)
+	}
+}
+
 func TestServerControlMessages(t *testing.T) {
 	addr, cancel := startTestServer(t)
 	defer cancel()
