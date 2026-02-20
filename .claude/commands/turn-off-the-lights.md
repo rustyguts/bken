@@ -34,8 +34,7 @@ This is a client/server voice over ip application. Clients running the bken desk
   - ✅ Server list management done — see Done section
 - UI: The inteface should always remain simple, clean, modern
 - Server owners should be able to generate invite links from the servers public endpoint. When openened in a browser this should open the app and automatically connect you to the server
-- Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat)
-  - ✅ Server-level global chat done — see Done section
+- ✅ Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat) — see Done section
 - UI: The UI should be modular and customizable. Certain elements should be movable. Users should be able to unlock the UI and then move panels around to suite their needs
 - Performance is critical, analyze slow parts of the code and improve performance (ongoing)
 - UI: Small icons can be uploaded and set per channel
@@ -74,3 +73,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - API validation consistency: PUT /api/settings trims whitespace + enforces 50-char max (mirrors in-session rename); GET /api/room now includes owner_id (0 when empty); 8 new tests covering too-long, whitespace-only, trim, malformed JSON, owner_id presence
 - Owner channel CRUD: SQLite migration v2 adds channels table; store exposes GetChannels/CreateChannel/RenameChannel/DeleteChannel/ChannelCount; REST API GET/POST/PUT/DELETE /api/channels with trim+50-char validation; "General" channel seeded on first run; 9 store tests + 9 API tests
 - Users move between channels: server sends channel_list in handshake + after API mutations; join_channel ControlMsg → server updates channelID + broadcasts user_channel to all; Room caches channel list; RoomBrowser shows channel-grouped view (click header to join, lobby for channel 0); 5 new tests; UserInfo includes channel_id
+- Channel-scoped chat: BroadcastToChannel fans out only to same-channel clients; server stamps ChannelID from sender's real channelID (anti-spoofing); lobby senders fall back to global broadcast; 6 new tests (3 server, 3 client); SendChannelChat Go method + Wails bridge; Channel tab in Room.vue visible only when in a channel, with unread badge; server Chat tab shows channelId===0 messages; auto-switches to Voice tab on leaving channel
