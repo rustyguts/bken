@@ -26,6 +26,8 @@ const userChannels = ref<Record<number, number>>({})
 let chatIdCounter = 0
 
 const activeChannelId = ref(0) // tracks the currently-viewed chatroom channel (for file drops)
+const viewedChannelId = ref(0) // tracks which channel's chat the user is currently viewing
+const unreadCounts = ref<Record<number, number>>({}) // channelId -> unread message count
 const connectError = ref('')
 const startupAddrHint = ref('')
 const currentRoute = ref<AppRoute>('room')
@@ -74,6 +76,8 @@ function resetState(): void {
   myID.value = 0
   channels.value = []
   userChannels.value = {}
+  viewedChannelId.value = 0
+  unreadCounts.value = {}
 }
 
 function normaliseUsername(name: string): string {
@@ -215,6 +219,14 @@ async function handleMoveUser(userID: number, channelID: number): Promise<void> 
   await MoveUserToChannel(userID, channelID)
 }
 
+function handleViewChannel(channelID: number): void {
+  viewedChannelId.value = channelID
+  if (unreadCounts.value[channelID]) {
+    const { [channelID]: _, ...rest } = unreadCounts.value
+    unreadCounts.value = rest
+  }
+}
+
 async function handleUploadFile(channelID: number): Promise<void> {
   activeChannelId.value = channelID
   const err = await UploadFile(channelID)
@@ -301,6 +313,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string }) => {
+    const channelId = data.channel_id ?? 0
     chatMessages.value = [
       ...chatMessages.value,
       {
@@ -308,13 +321,17 @@ onMounted(async () => {
         username: data.username,
         message: data.message,
         ts: data.ts,
-        channelId: data.channel_id ?? 0,
+        channelId,
         fileId: data.file_id,
         fileName: data.file_name,
         fileSize: data.file_size,
         fileUrl: data.file_url,
       },
     ]
+    // Increment unread count if the message is in a channel the user is not viewing.
+    if (channelId !== viewedChannelId.value) {
+      unreadCounts.value = { ...unreadCounts.value, [channelId]: (unreadCounts.value[channelId] ?? 0) + 1 }
+    }
   })
 
   EventsOn('server:info', (data: { name: string }) => {
@@ -444,6 +461,7 @@ onBeforeUnmount(() => {
           :channels="channels"
           :user-channels="userChannels"
           :speaking-users="speakingUsers"
+          :unread-counts="unreadCounts"
           @connect="handleConnect"
           @activate-channel="handleActivateChannel"
           @rename-global-username="handleRenameGlobalUsername"
@@ -458,6 +476,7 @@ onBeforeUnmount(() => {
           @move-user="handleMoveUser"
           @upload-file="handleUploadFile"
           @upload-file-from-path="handleUploadFileFromPath"
+          @view-channel="handleViewChannel"
         />
       </Transition>
     </div>

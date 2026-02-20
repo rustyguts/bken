@@ -12,6 +12,7 @@ const props = defineProps<{
   speakingUsers: Set<number>
   connectError: string
   isOwner: boolean
+  unreadCounts: Record<number, number>
 }>()
 
 const emit = defineEmits<{
@@ -228,6 +229,12 @@ const moveTargets = computed(() => {
             <span class="text-sm font-medium truncate">{{ channel.name }}</span>
           </template>
 
+          <span
+            v-if="unreadCounts[channel.id]"
+            class="badge badge-xs badge-error font-bold min-w-[16px]"
+          >
+            {{ unreadCounts[channel.id] > 99 ? '99+' : unreadCounts[channel.id] }}
+          </span>
           <span class="badge badge-ghost badge-xs ml-auto">{{ usersForChannel(channel.id).length }}</span>
         </div>
 

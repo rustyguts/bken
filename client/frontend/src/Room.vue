@@ -23,6 +23,7 @@ const props = defineProps<{
   channels: Channel[]
   userChannels: Record<number, number>
   speakingUsers: Set<number>
+  unreadCounts: Record<number, number>
 }>()
 
 const emit = defineEmits<{
@@ -40,6 +41,7 @@ const emit = defineEmits<{
   moveUser: [userID: number, channelID: number]
   uploadFile: [channelID: number]
   uploadFileFromPath: [channelID: number, path: string]
+  viewChannel: [channelID: number]
 }>()
 
 const muted = ref(false)
@@ -52,12 +54,14 @@ const isOwner = computed(() => props.ownerId !== 0 && props.ownerId === props.my
 
 watch(myChannelId, (id) => {
   selectedChannelId.value = id
+  emit('viewChannel', id)
 }, { immediate: true })
 
 watch(() => props.channels, () => {
   if (selectedChannelId.value === 0) return
   if (!props.channels.some(ch => ch.id === selectedChannelId.value)) {
     selectedChannelId.value = 0
+    emit('viewChannel', 0)
   }
 })
 
@@ -95,6 +99,7 @@ async function handleJoinChannel(channelID: number): Promise<void> {
 
 function handleSelectChannel(channelID: number): void {
   selectedChannelId.value = channelID
+  emit('viewChannel', channelID)
 }
 
 function handleSelectServer(addr: string): void {
@@ -140,6 +145,7 @@ function handleSendMessage(message: string): void {
       :speaking-users="speakingUsers"
       :connect-error="connectError"
       :is-owner="isOwner"
+      :unread-counts="unreadCounts"
       @join="handleJoinChannel"
       @select="handleSelectChannel"
       @create-channel="emit('createChannel', $event)"
@@ -155,6 +161,7 @@ function handleSendMessage(message: string): void {
       :selected-channel-id="selectedChannelId"
       :my-channel-id="myChannelId"
       :connected="connected"
+      :unread-counts="unreadCounts"
       @select-channel="handleSelectChannel"
       @send="handleSendMessage"
       @upload-file="emit('uploadFile', selectedChannelId)"

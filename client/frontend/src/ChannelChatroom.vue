@@ -8,6 +8,7 @@ const props = defineProps<{
   selectedChannelId: number
   myChannelId: number
   connected: boolean
+  unreadCounts: Record<number, number>
 }>()
 
 const emit = defineEmits<{
@@ -119,11 +120,17 @@ function isImageFile(name: string): boolean {
         <button
           v-for="channel in channelTabs"
           :key="channel.id"
-          class="btn btn-xs whitespace-nowrap"
+          class="btn btn-xs whitespace-nowrap relative"
           :class="channel.id === selectedChannelId ? 'btn-primary' : 'btn-ghost'"
           @click="emit('selectChannel', channel.id)"
         >
           {{ channel.name }}
+          <span
+            v-if="unreadCounts[channel.id]"
+            class="badge badge-xs badge-error absolute -top-1.5 -right-1.5 min-w-[16px] h-4 text-[10px] font-bold"
+          >
+            {{ unreadCounts[channel.id] > 99 ? '99+' : unreadCounts[channel.id] }}
+          </span>
         </button>
       </div>
     </header>

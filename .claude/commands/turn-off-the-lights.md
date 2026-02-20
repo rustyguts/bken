@@ -25,7 +25,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
 - Server invite links - You could send these to people and they can join a server, would require external web service
 - Rich link previews
-- Notifications when you miss messages
 ### Done
 
 - Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in (frontend filters messages by channel_id via visibleMessages computed property)
@@ -38,3 +37,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Admin can create new channels (owner sees "+" button in channel panel header to create; right-click on any channel for rename/delete context menu; channel CRUD via WebTransport control messages with owner-only auth; deleted channels move users back to lobby; 9 new server tests)
 - Admin can move users to a different channel (owner right-clicks user avatar in channel panel; context menu shows available channels; move_user control message with owner-only auth; 6 new server tests)
 - File uploading in chatroom (10MB max; "+" button opens native file picker; drag & drop via Wails DragAndDrop; server HTTP upload/download endpoints with SQLite metadata + disk storage; image preview for image files, download link for others; file metadata relayed via control stream chat messages; 10 new tests across server, API, and store)
+- Notifications when you miss messages (unread message count badges on channel tabs in chatroom and channel entries in sidebar; tracked per-channel in App.vue; incremented on incoming messages for non-viewed channels; cleared when user switches to view that channel)
