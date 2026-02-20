@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -94,12 +93,9 @@ func (s *APIServer) handlePutSettings(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	name := strings.TrimSpace(req.ServerName)
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "server_name must not be empty")
-	}
-	if len(name) > 50 {
-		return echo.NewHTTPError(http.StatusBadRequest, "server_name must not exceed 50 characters")
+	name, err := validateName(req.ServerName, MaxNameLength)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := s.store.SetSetting("server_name", name); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -172,12 +168,9 @@ func (s *APIServer) handleCreateChannel(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name must not be empty")
-	}
-	if len(name) > 50 {
-		return echo.NewHTTPError(http.StatusBadRequest, "name must not exceed 50 characters")
+	name, err := validateName(req.Name, MaxNameLength)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	id, err := s.store.CreateChannel(name)
 	if err != nil {
@@ -196,12 +189,9 @@ func (s *APIServer) handleRenameChannel(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name must not be empty")
-	}
-	if len(name) > 50 {
-		return echo.NewHTTPError(http.StatusBadRequest, "name must not exceed 50 characters")
+	name, err := validateName(req.Name, MaxNameLength)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := s.store.RenameChannel(id, name); err != nil {
 		if err == sql.ErrNoRows {
@@ -228,6 +218,15 @@ func (s *APIServer) handleDeleteChannel(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// convertChannels maps store channel records to the wire-protocol ChannelInfo slice.
+func convertChannels(chs []store.Channel) []ChannelInfo {
+	infos := make([]ChannelInfo, 0, len(chs))
+	for _, ch := range chs {
+		infos = append(infos, ChannelInfo{ID: ch.ID, Name: ch.Name})
+	}
+	return infos
+}
+
 // refreshChannels reloads the channel list from the store, updates the room
 // cache, and broadcasts a channel_list message to all connected clients.
 func (s *APIServer) refreshChannels() {
@@ -236,9 +235,5 @@ func (s *APIServer) refreshChannels() {
 		log.Printf("[api] reload channels: %v", err)
 		return
 	}
-	infos := make([]ChannelInfo, 0, len(chs))
-	for _, ch := range chs {
-		infos = append(infos, ChannelInfo{ID: ch.ID, Name: ch.Name})
-	}
-	s.room.SetChannels(infos)
+	s.room.SetChannels(convertChannels(chs))
 }

@@ -1,5 +1,30 @@
 package main
 
+import (
+	"fmt"
+	"strings"
+)
+
+// Wire-protocol limits.
+const (
+	MaxNameLength  = 50  // max UTF-8 bytes for server names, channel names, and usernames
+	MaxChatLength  = 500 // max bytes for a single chat message body
+	DatagramHeader = 4   // senderID(2) + seq(2) bytes prepended to every voice datagram
+)
+
+// validateName trims whitespace from s and returns the trimmed string, or an
+// error if the result is empty or exceeds maxLen bytes.
+func validateName(s string, maxLen int) (string, error) {
+	s = strings.TrimSpace(s)
+	switch {
+	case s == "":
+		return "", fmt.Errorf("name must not be empty")
+	case len(s) > maxLen:
+		return "", fmt.Errorf("name must not exceed %d characters", maxLen)
+	}
+	return s, nil
+}
+
 // ControlMsg is a JSON control message sent over the reliable bidirectional stream.
 type ControlMsg struct {
 	Type       string        `json:"type"`

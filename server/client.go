@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,6 +51,7 @@ func (s *sessionCloser) Close() error { return s.sess.CloseWithError(0, "") }
 func (c *Client) SendControl(msg ControlMsg) {
 	data, err := json.Marshal(msg)
 	if err != nil {
+		log.Printf("[ctrl] marshal error: %v", err)
 		return
 	}
 	c.sendRaw(append(data, '\n'))
@@ -100,7 +100,12 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 		return
 	}
 
-	client.Username = joinMsg.Username
+	username, err := validateName(joinMsg.Username, MaxNameLength)
+	if err != nil {
+		log.Printf("[client] join rejected: %v", err)
+		return
+	}
+	client.Username = username
 	room.AddClient(client)
 
 	if room.ClaimOwnership(client.ID) {
@@ -155,7 +160,7 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		// prevent spoofing.  When the client requests a channel-scoped message
 		// (ChannelID != 0), the server uses the SENDER'S actual channelID —
 		// ignoring the client-supplied value — so clients cannot fake routing.
-		if msg.Message == "" || len(msg.Message) > 500 {
+		if msg.Message == "" || len(msg.Message) > MaxChatLength {
 			return
 		}
 		out := ControlMsg{
@@ -194,8 +199,8 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		if room.OwnerID() != client.ID {
 			return
 		}
-		name := strings.TrimSpace(msg.ServerName)
-		if name == "" || len(name) > 50 {
+		name, err := validateName(msg.ServerName, MaxNameLength)
+		if err != nil {
 			return
 		}
 		room.Rename(name)
@@ -225,7 +230,7 @@ func readDatagrams(ctx context.Context, sess *webtransport.Session, room *Room, 
 			}
 			return
 		}
-		if len(data) < 4 {
+		if len(data) < DatagramHeader {
 			continue // need at least senderID(2) + seq(2)
 		}
 		// Overwrite the client-supplied sender ID to prevent spoofing.

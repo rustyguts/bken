@@ -161,6 +161,7 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 func (r *Room) BroadcastControl(msg ControlMsg, excludeID uint16) {
 	data, err := json.Marshal(msg)
 	if err != nil {
+		log.Printf("[room] BroadcastControl marshal error: %v", err)
 		return
 	}
 	data = append(data, '\n')
@@ -182,6 +183,7 @@ func (r *Room) BroadcastControl(msg ControlMsg, excludeID uint16) {
 func (r *Room) BroadcastToChannel(channelID int64, msg ControlMsg) {
 	data, err := json.Marshal(msg)
 	if err != nil {
+		log.Printf("[room] BroadcastToChannel marshal error: %v", err)
 		return
 	}
 	data = append(data, '\n')
