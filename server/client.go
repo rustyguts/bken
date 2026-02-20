@@ -22,7 +22,7 @@ type Client struct {
 	session DatagramSender
 
 	ctrlMu sync.Mutex
-	ctrl   *webtransport.Stream
+	ctrl   io.Writer // control stream; nil until the join handshake completes
 	cancel context.CancelFunc
 }
 
@@ -113,21 +113,27 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 		if err := json.Unmarshal(line, &msg); err != nil {
 			continue
 		}
-		switch msg.Type {
-		case "ping":
-			client.SendControl(ControlMsg{Type: "pong", Timestamp: msg.Timestamp})
-		case "chat":
-			// Relay to all clients (including sender) so everyone sees the message.
-			// Server stamps the authoritative username and timestamp to prevent spoofing.
-			if msg.Message != "" && len(msg.Message) <= 500 {
-				room.BroadcastControl(ControlMsg{
-					Type:      "chat",
-					ID:        client.ID,
-					Username:  client.Username,
-					Message:   msg.Message,
-					Timestamp: time.Now().UnixMilli(),
-				}, 0)
-			}
+		processControl(msg, client, room)
+	}
+}
+
+// processControl handles a single decoded control message from a client.
+// Extracted from the read loop so it can be unit-tested without a real WebTransport session.
+func processControl(msg ControlMsg, client *Client, room *Room) {
+	switch msg.Type {
+	case "ping":
+		client.SendControl(ControlMsg{Type: "pong", Timestamp: msg.Timestamp})
+	case "chat":
+		// Relay to all clients (including sender) so everyone sees the message.
+		// Server stamps the authoritative username and timestamp to prevent spoofing.
+		if msg.Message != "" && len(msg.Message) <= 500 {
+			room.BroadcastControl(ControlMsg{
+				Type:      "chat",
+				ID:        client.ID,
+				Username:  client.Username,
+				Message:   msg.Message,
+				Timestamp: time.Now().UnixMilli(),
+			}, 0)
 		}
 	}
 }
