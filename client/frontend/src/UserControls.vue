@@ -6,6 +6,7 @@ const props = defineProps<{
   muted: boolean
   deafened: boolean
   connected: boolean
+  voiceConnected: boolean
 }>()
 
 const emit = defineEmits<{
@@ -66,7 +67,7 @@ function confirmRename(): void {
         class="btn btn-ghost btn-sm"
         :class="muted ? 'text-error' : ''"
         :aria-pressed="muted"
-        :disabled="!connected"
+        :disabled="!voiceConnected"
         :title="muted ? 'Unmute' : 'Mute'"
         @click="emit('mute-toggle')"
       >
@@ -84,7 +85,7 @@ function confirmRename(): void {
         class="btn btn-ghost btn-sm"
         :class="deafened ? 'text-error' : ''"
         :aria-pressed="deafened"
-        :disabled="!connected"
+        :disabled="!voiceConnected"
         :title="deafened ? 'Undeafen' : 'Deafen'"
         @click="emit('deafen-toggle')"
       >
@@ -112,7 +113,7 @@ function confirmRename(): void {
       <!-- Disconnect -->
       <button
         class="btn btn-ghost btn-sm hover:text-error"
-        :disabled="!connected"
+        :disabled="!voiceConnected"
         title="Leave Voice"
         @click="emit('disconnect')"
       >

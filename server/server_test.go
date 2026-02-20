@@ -121,6 +121,18 @@ func TestServerTwoClientsExchangeDatagrams(t *testing.T) {
 	// Wait for both clients to be fully registered.
 	time.Sleep(200 * time.Millisecond)
 
+	// Both clients must join the same non-zero channel for voice to route.
+	joinCh := ControlMsg{Type: "join_channel", ChannelID: 1}
+	joinData, _ := json.Marshal(joinCh)
+	joinData = append(joinData, '\n')
+	if _, err := ctrl1.Write(joinData); err != nil {
+		t.Fatalf("write join_channel for client1: %v", err)
+	}
+	if _, err := ctrl2.Write(joinData); err != nil {
+		t.Fatalf("write join_channel for client2: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
 	// Client 1 sends a datagram.
 	payload := []byte("test-opus-data")
 	dgram := make([]byte, 4+len(payload))

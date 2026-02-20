@@ -187,6 +187,11 @@ func TestRoomBroadcastSkipsSender(t *testing.T) {
 	room.AddClient(c2)
 	room.AddClient(c3)
 
+	// All three must be in the same non-zero channel for voice to route.
+	c1.channelID.Store(1)
+	c2.channelID.Store(1)
+	c3.channelID.Store(1)
+
 	data := []byte{0, 0, 0, 1, 0xAA, 0xBB} // senderID placeholder + seq + payload
 	room.Broadcast(c1.ID, data)
 
@@ -210,6 +215,73 @@ func TestRoomBroadcastSkipsSender(t *testing.T) {
 	}
 	if rcv3 != 1 {
 		t.Errorf("carol should receive 1 datagram, got %d", rcv3)
+	}
+}
+
+func TestRoomBroadcastFiltersByChannel(t *testing.T) {
+	room := NewRoom()
+
+	s1 := &mockSender{}
+	s2 := &mockSender{}
+	s3 := &mockSender{}
+
+	c1 := &Client{Username: "alice", session: s1}
+	c2 := &Client{Username: "bob", session: s2}
+	c3 := &Client{Username: "carol", session: s3}
+
+	room.AddClient(c1)
+	room.AddClient(c2)
+	room.AddClient(c3)
+
+	// alice and bob in channel 1, carol in channel 2
+	c1.channelID.Store(1)
+	c2.channelID.Store(1)
+	c3.channelID.Store(2)
+
+	data := []byte{0, 0, 0, 1, 0xAA, 0xBB}
+	room.Broadcast(c1.ID, data)
+
+	s2.mu.Lock()
+	rcv2 := len(s2.received)
+	s2.mu.Unlock()
+
+	s3.mu.Lock()
+	rcv3 := len(s3.received)
+	s3.mu.Unlock()
+
+	if rcv2 != 1 {
+		t.Errorf("bob (same channel) should receive 1 datagram, got %d", rcv2)
+	}
+	if rcv3 != 0 {
+		t.Errorf("carol (different channel) should receive 0 datagrams, got %d", rcv3)
+	}
+}
+
+func TestRoomBroadcastLobbyDoesNotTransmit(t *testing.T) {
+	room := NewRoom()
+
+	s1 := &mockSender{}
+	s2 := &mockSender{}
+
+	c1 := &Client{Username: "alice", session: s1}
+	c2 := &Client{Username: "bob", session: s2}
+
+	room.AddClient(c1)
+	room.AddClient(c2)
+
+	// Both in lobby (channel 0) — no voice should be transmitted.
+	c1.channelID.Store(0)
+	c2.channelID.Store(0)
+
+	data := []byte{0, 0, 0, 1, 0xAA, 0xBB}
+	room.Broadcast(c1.ID, data)
+
+	s2.mu.Lock()
+	rcv2 := len(s2.received)
+	s2.mu.Unlock()
+
+	if rcv2 != 0 {
+		t.Errorf("lobby users should not receive voice datagrams, got %d", rcv2)
 	}
 }
 
@@ -403,11 +475,17 @@ func TestRoomBroadcastToChannelOnlySameChannel(t *testing.T) {
 func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	room := NewRoom()
 
-	c := newTestClient("user")
-	room.AddClient(c)
+	sender := newTestClient("sender")
+	receiver := newTestClient("receiver")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+
+	// Both must be in the same non-zero channel.
+	sender.channelID.Store(1)
+	receiver.channelID.Store(1)
 
 	data := make([]byte, 10)
-	room.Broadcast(999, data) // senderID=999 doesn't match any client, so all receive it
+	room.Broadcast(sender.ID, data)
 
 	d, b, _ := room.Stats()
 	if d != 1 {

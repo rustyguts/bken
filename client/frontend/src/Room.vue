@@ -9,6 +9,7 @@ import type { User, ChatMessage, Channel, ConnectPayload } from './types'
 
 const props = defineProps<{
   connected: boolean
+  voiceConnected: boolean
   reconnecting: boolean
   connectedAddr: string
   connectError: string
@@ -151,6 +152,7 @@ function handleSendMessage(message: string): void {
       :muted="muted"
       :deafened="deafened"
       :connected="connected"
+      :voice-connected="voiceConnected"
       @rename-username="emit('renameGlobalUsername', $event)"
       @open-settings="emit('openSettings')"
       @mute-toggle="handleMuteToggle"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import Room from './Room.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -14,6 +14,7 @@ import type { User, UserJoinedEvent, UserLeftEvent, ConnectPayload, ChatMessage,
 type AppRoute = 'room' | 'settings'
 
 const connected = ref(false)
+const voiceConnected = ref(false)
 const users = ref<User[]>([])
 const chatMessages = ref<ChatMessage[]>([])
 const serverName = ref('')
@@ -62,6 +63,7 @@ function closeSettingsPage(): void {
 
 function resetState(): void {
   connected.value = false
+  voiceConnected.value = false
   connectedAddr.value = ''
   users.value = []
   chatMessages.value = []
@@ -128,6 +130,7 @@ async function connectToServer(addr: string, username: string): Promise<boolean>
   }
 
   connected.value = true
+  voiceConnected.value = true
   connectedAddr.value = targetAddr
   connectError.value = ''
   startupAddrHint.value = ''
@@ -141,6 +144,18 @@ async function handleConnect(payload: ConnectPayload): Promise<void> {
 async function handleActivateChannel(payload: { addr: string; channelID: number }): Promise<void> {
   const ok = await connectToServer(payload.addr, globalUsername.value)
   if (!ok) return
+
+  // If voice audio was stopped (via DisconnectVoice), restart it.
+  if (!voiceConnected.value) {
+    const err = await ConnectVoice(payload.channelID)
+    if (err) {
+      connectError.value = err
+      return
+    }
+    voiceConnected.value = true
+    connectError.value = ''
+    return
+  }
 
   const err = await JoinChannel(payload.channelID)
   if (err) {
@@ -178,7 +193,9 @@ async function handleDisconnectVoice(): Promise<void> {
   const err = await DisconnectVoice()
   if (err) {
     connectError.value = err
+    return
   }
+  voiceConnected.value = false
   clearSpeaking()
 }
 
@@ -206,8 +223,9 @@ onMounted(async () => {
 
   EventsOn('connection:lost', () => {
     connected.value = false
+    voiceConnected.value = false
     startReconnect(
-      () => { connected.value = true; connectError.value = '' },
+      () => { connected.value = true; voiceConnected.value = true; connectError.value = '' },
       () => {},
     )
   })
@@ -275,6 +293,16 @@ onMounted(async () => {
   const cfg = await GetConfig()
   globalUsername.value = cfg.username?.trim() ?? ''
 
+  // Generate a default username if none is configured.
+  if (!globalUsername.value) {
+    const hex = Array.from(crypto.getRandomValues(new Uint8Array(2)))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+    const generated = `User-${hex}`
+    await SaveConfig({ ...cfg, username: generated })
+    globalUsername.value = generated
+  }
+
   // Priority: env-var auto-login > bken:// invite link > sidebar server browser.
   const [auto, startupAddr] = await Promise.all([GetAutoLogin(), GetStartupAddr()])
   if (auto.username) {
@@ -336,6 +364,7 @@ onBeforeUnmount(() => {
           key="room"
           class="h-full min-h-0"
           :connected="connected"
+          :voice-connected="voiceConnected"
           :reconnecting="reconnecting"
           :connected-addr="connectedAddr"
           :connect-error="connectError"

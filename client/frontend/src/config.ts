@@ -106,6 +106,10 @@ export function JoinChannel(id: number): Promise<string> {
   return bridge()['JoinChannel'](id)
 }
 
+export function ConnectVoice(channelID: number): Promise<string> {
+  return bridge()['ConnectVoice'](channelID)
+}
+
 export function SendChannelChat(channelID: number, message: string): Promise<string> {
   return bridge()['SendChannelChat'](channelID, message)
 }

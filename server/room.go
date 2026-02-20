@@ -175,7 +175,9 @@ func (r *Room) RemoveClient(id uint16) bool {
 	return existed
 }
 
-// Broadcast sends a datagram to every client except the sender.
+// Broadcast sends a datagram to every client in the same channel as the sender,
+// excluding the sender itself. Clients in channel 0 (lobby) never send or
+// receive voice datagrams.
 // It overwrites bytes [0:2] with senderID before fan-out (anti-spoofing is done
 // by the caller in readDatagrams, so the slice is already stamped here).
 func (r *Room) Broadcast(senderID uint16, data []byte) {
@@ -185,8 +187,20 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	sender := r.clients[senderID]
+	if sender == nil {
+		return
+	}
+	senderChannel := sender.channelID.Load()
+	if senderChannel == 0 {
+		return // lobby users don't transmit voice
+	}
+
 	for id, c := range r.clients {
 		if id == senderID {
+			continue
+		}
+		if c.channelID.Load() != senderChannel {
 			continue
 		}
 		if err := c.session.SendDatagram(data); err != nil {
