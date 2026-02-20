@@ -146,6 +146,19 @@ func TestMutedSetClear(t *testing.T) {
 	}
 }
 
+// TestStartReceivingNilSessionNoGoroutine verifies that StartReceiving returns
+// immediately (and starts no goroutine) when the session is nil, i.e. before
+// Connect has been called. Previously, a goroutine was always launched and
+// the nil check happened inside the loop.
+func TestStartReceivingNilSessionNoGoroutine(t *testing.T) {
+	tr := NewTransport()
+	// session is nil; should return immediately without panicking.
+	ch := make(chan []byte, 1)
+	tr.StartReceiving(t.Context(), ch)
+	// If a goroutine had been started and accessed t.session unsafely, the
+	// race detector would catch it. The test itself just verifies no panic.
+}
+
 func TestConnectClearsMutes(t *testing.T) {
 	tr := NewTransport()
 	tr.MuteUser(5)

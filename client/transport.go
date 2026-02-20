@@ -279,20 +279,21 @@ func (t *Transport) MyID() uint16 {
 
 // StartReceiving pumps incoming datagrams to playbackCh in a background goroutine.
 // Each datagram payload is the raw Opus bytes (header stripped).
+// The session is captured once at call time; the goroutine exits when the
+// session is closed (ReceiveDatagram returns an error).
 func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte) {
+	t.mu.Lock()
+	sess := t.session
+	t.mu.Unlock()
+	if sess == nil {
+		return
+	}
+
 	go func() {
 		speakTimers := make(map[uint16]time.Time)
 		lastSeq := make(map[uint16]uint16) // senderID → last received seq
 
 		for {
-			t.mu.Lock()
-			sess := t.session
-			t.mu.Unlock()
-
-			if sess == nil {
-				return
-			}
-
 			data, err := sess.ReceiveDatagram(ctx)
 			if err != nil {
 				return
@@ -377,8 +378,8 @@ func (t *Transport) GetMetrics() Metrics {
 }
 
 // pongTimeout is the maximum time allowed between pongs before the connection
-// is considered dead and the client disconnects. 5 missed pings at 2 s each.
-const pongTimeout = 10 * time.Second
+// is considered dead and the client disconnects. 3 missed pings at 2 s each.
+const pongTimeout = 6 * time.Second
 
 // pingLoop sends a ping every 2 s for RTT measurement and enforces a pong
 // deadline. If no pong arrives within pongTimeout, the session is closed.

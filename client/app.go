@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"client/internal/adapt"
@@ -21,8 +22,8 @@ type App struct {
 	audio     *AudioEngine
 	transport Transporter
 	nc        *NoiseCanceller
-	connected bool
-	testUser  *TestUser // non-nil when BKEN_TEST_USER is configured
+	connected atomic.Bool // true while a voice session is active; safe for concurrent access
+	testUser  *TestUser   // non-nil when BKEN_TEST_USER is configured
 
 	// Metrics cache: updated every 5 s by adaptBitrateLoop; read by GetMetrics.
 	metricsMu     sync.Mutex
@@ -184,7 +185,7 @@ func (a *App) SetDeafened(deafened bool) {
 // Connect establishes a voice session with the server.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) Connect(addr, username string) string {
-	if a.connected {
+	if a.connected.Load() {
 		return "already connected"
 	}
 
@@ -209,7 +210,7 @@ func (a *App) Connect(addr, username string) string {
 		log.Printf("[app] test user: %v", err)
 	}
 
-	a.connected = true
+	a.connected.Store(true)
 	log.Printf("[app] connected to %s as %s", addr, username)
 	return ""
 }
@@ -232,10 +233,10 @@ func (a *App) wireCallbacks() {
 		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(userID)})
 	})
 	a.transport.SetOnDisconnected(func() {
-		if !a.connected {
+		if !a.connected.Load() {
 			return // user-initiated disconnect, ignore
 		}
-		a.connected = false
+		a.connected.Store(false)
 		a.audio.Stop()
 		runtime.EventsEmit(a.ctx, "connection:lost", nil)
 		log.Println("[app] connection lost unexpectedly")
@@ -266,10 +267,10 @@ func (a *App) startTestUser(addr string) error {
 
 // Disconnect ends the voice session.
 func (a *App) Disconnect() {
-	if !a.connected {
+	if !a.connected.Load() {
 		return
 	}
-	a.connected = false
+	a.connected.Store(false)
 	a.audio.Stop()
 	a.transport.Disconnect()
 	if a.testUser != nil {
@@ -352,7 +353,7 @@ func (a *App) SaveConfig(cfg Config) {
 
 // IsConnected reports whether a voice session is currently active.
 func (a *App) IsConnected() bool {
-	return a.connected
+	return a.connected.Load()
 }
 
 // MuteUser suppresses incoming audio from the given remote user.
@@ -378,6 +379,8 @@ func (a *App) GetMutedUsers() []int {
 
 // sendLoop reads encoded audio from the capture channel and forwards it via
 // transport. Exits when the audio engine stops or on send error.
+// On send error, it closes the transport session so that readControl detects
+// the disconnect and fires onDisconnected → frontend reconnect banner.
 func (a *App) sendLoop() {
 	done := a.audio.Done()
 	for {
@@ -386,7 +389,8 @@ func (a *App) sendLoop() {
 			return
 		case data := <-a.audio.CaptureOut:
 			if err := a.transport.SendAudio(data); err != nil {
-				log.Printf("[app] send audio: %v", err)
+				log.Printf("[app] send audio error, closing session: %v", err)
+				a.transport.Disconnect()
 				return
 			}
 		}
