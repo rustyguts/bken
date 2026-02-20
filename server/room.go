@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -156,7 +157,14 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 
 // BroadcastControl sends a control message to all clients except the one with excludeID.
 // Pass excludeID=0 to send to all clients.
+// JSON is marshaled once before acquiring the lock to minimise lock hold time.
 func (r *Room) BroadcastControl(msg ControlMsg, excludeID uint16) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -164,19 +172,26 @@ func (r *Room) BroadcastControl(msg ControlMsg, excludeID uint16) {
 		if id == excludeID {
 			continue
 		}
-		c.SendControl(msg)
+		c.sendRaw(data)
 	}
 }
 
 // BroadcastToChannel sends a control message to all clients currently in channelID.
 // Sends to every matching client including the sender (excludeID=0 semantics).
+// JSON is marshaled once before acquiring the lock to minimise lock hold time.
 func (r *Room) BroadcastToChannel(channelID int64, msg ControlMsg) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	for _, c := range r.clients {
-		if c.channelID == channelID {
-			c.SendControl(msg)
+		if c.channelID.Load() == channelID {
+			c.sendRaw(data)
 		}
 	}
 }
@@ -188,7 +203,7 @@ func (r *Room) Clients() []UserInfo {
 
 	out := make([]UserInfo, 0, len(r.clients))
 	for _, c := range r.clients {
-		out = append(out, UserInfo{ID: c.ID, Username: c.Username, ChannelID: c.channelID})
+		out = append(out, UserInfo{ID: c.ID, Username: c.Username, ChannelID: c.channelID.Load()})
 	}
 	return out
 }

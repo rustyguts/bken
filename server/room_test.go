@@ -310,7 +310,7 @@ func TestRoomClientsIncludesChannelID(t *testing.T) {
 
 	c := newTestClient("alice")
 	room.AddClient(c)
-	c.channelID = 42
+	c.channelID.Store(42)
 
 	users := room.Clients()
 	if len(users) != 1 {
@@ -325,11 +325,11 @@ func TestRoomBroadcastToChannelOnlySameChannel(t *testing.T) {
 	room := NewRoom()
 
 	inChannel, inBuf := newCtrlClient("alice")
-	inChannel.channelID = 1
+	inChannel.channelID.Store(1)
 	room.AddClient(inChannel)
 
 	otherChannel, otherBuf := newCtrlClient("bob")
-	otherChannel.channelID = 2
+	otherChannel.channelID.Store(2)
 	room.AddClient(otherChannel)
 
 	lobby, lobbyBuf := newCtrlClient("carol")

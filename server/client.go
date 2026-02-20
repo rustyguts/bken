@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/quic-go/webtransport-go"
@@ -18,7 +19,7 @@ import (
 type Client struct {
 	ID        uint16
 	Username  string
-	channelID int64 // current channel; 0 = not in any channel; protected by the room mutex on writes
+	channelID atomic.Int64 // current channel; 0 = not in any channel; accessed atomically
 
 	// session implements DatagramSender; stored as the interface so tests can mock it.
 	session DatagramSender
@@ -27,6 +28,18 @@ type Client struct {
 	ctrl   io.Writer // control stream; nil until the join handshake completes
 	cancel context.CancelFunc
 	closer io.Closer // closes the underlying connection; nil in unit tests
+}
+
+// sendRaw writes a pre-marshaled, newline-terminated JSON message to the control stream.
+// It is safe to call concurrently.
+func (c *Client) sendRaw(data []byte) {
+	c.ctrlMu.Lock()
+	defer c.ctrlMu.Unlock()
+	if c.ctrl != nil {
+		if _, err := c.ctrl.Write(data); err != nil {
+			log.Printf("[client %d] control write error: %v", c.ID, err)
+		}
+	}
 }
 
 // sessionCloser adapts *webtransport.Session to io.Closer.
@@ -41,15 +54,7 @@ func (c *Client) SendControl(msg ControlMsg) {
 	if err != nil {
 		return
 	}
-	data = append(data, '\n')
-
-	c.ctrlMu.Lock()
-	defer c.ctrlMu.Unlock()
-	if c.ctrl != nil {
-		if _, err := c.ctrl.Write(data); err != nil {
-			log.Printf("[client %d] control write error: %v", c.ID, err)
-		}
-	}
+	c.sendRaw(append(data, '\n'))
 }
 
 // handleClient manages a single WebTransport session from join to disconnect.
@@ -160,10 +165,11 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			Message:   msg.Message,
 			Timestamp: time.Now().UnixMilli(),
 		}
-		if msg.ChannelID != 0 && client.channelID != 0 {
+		chID := client.channelID.Load()
+		if msg.ChannelID != 0 && chID != 0 {
 			// Channel-scoped: fan out only to users in the sender's current channel.
-			out.ChannelID = client.channelID
-			room.BroadcastToChannel(client.channelID, out)
+			out.ChannelID = chID
+			room.BroadcastToChannel(chID, out)
 		} else {
 			// Server-level: fan out to everyone.
 			room.BroadcastControl(out, 0)
@@ -197,7 +203,7 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		log.Printf("[client %d] %s renamed server to %q", client.ID, client.Username, name)
 	case "join_channel":
 		// Any client may join a channel (including channel 0 to leave all channels).
-		client.channelID = msg.ChannelID
+		client.channelID.Store(msg.ChannelID)
 		room.BroadcastControl(ControlMsg{
 			Type:      "user_channel",
 			ID:        client.ID,

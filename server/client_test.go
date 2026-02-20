@@ -179,15 +179,15 @@ func TestProcessControlChatChannelScopedOnlyReachesChannel(t *testing.T) {
 	room := NewRoom()
 
 	sender, senderBuf := newCtrlClient("alice")
-	sender.channelID = 1
+	sender.channelID.Store(1)
 	room.AddClient(sender)
 
 	inChannel, inBuf := newCtrlClient("bob")
-	inChannel.channelID = 1
+	inChannel.channelID.Store(1)
 	room.AddClient(inChannel)
 
 	otherChannel, otherBuf := newCtrlClient("carol")
-	otherChannel.channelID = 2
+	otherChannel.channelID.Store(2)
 	room.AddClient(otherChannel)
 
 	lobby, lobbyBuf := newCtrlClient("dave")
@@ -221,11 +221,11 @@ func TestProcessControlChatChannelSpoofingPrevented(t *testing.T) {
 
 	// Client is in channel 1 but tries to claim they're sending to channel 2.
 	sender, _ := newCtrlClient("alice")
-	sender.channelID = 1
+	sender.channelID.Store(1)
 	room.AddClient(sender)
 
 	target, targetBuf := newCtrlClient("bob")
-	target.channelID = 2 // attacker's intended victim
+	target.channelID.Store(2) // attacker's intended victim
 	room.AddClient(target)
 
 	processControl(ControlMsg{Type: "chat", Message: "spoofed", ChannelID: 2}, sender, room)
@@ -246,7 +246,7 @@ func TestProcessControlChatChannelRequiresSenderInChannel(t *testing.T) {
 	room.AddClient(sender)
 
 	observer, observerBuf := newCtrlClient("bob")
-	observer.channelID = 1
+	observer.channelID.Store(1)
 	room.AddClient(observer)
 
 	// Requesting channel chat while in lobby should fall back to global.
@@ -457,8 +457,8 @@ func TestProcessControlJoinChannel(t *testing.T) {
 	processControl(ControlMsg{Type: "join_channel", ChannelID: 7}, client, room)
 
 	// Client's channelID should be updated.
-	if client.channelID != 7 {
-		t.Errorf("channelID: got %d, want 7", client.channelID)
+	if client.channelID.Load() != 7 {
+		t.Errorf("channelID: got %d, want 7", client.channelID.Load())
 	}
 
 	// All clients (including sender) should receive user_channel broadcast.
@@ -478,13 +478,13 @@ func TestProcessControlJoinChannelZeroLeaves(t *testing.T) {
 	room := NewRoom()
 	client, _ := newCtrlClient("alice")
 	room.AddClient(client)
-	client.channelID = 5
+	client.channelID.Store(5)
 
 	// Sending channel_id=0 means "leave all channels".
 	processControl(ControlMsg{Type: "join_channel", ChannelID: 0}, client, room)
 
-	if client.channelID != 0 {
-		t.Errorf("channelID after leave: got %d, want 0", client.channelID)
+	if client.channelID.Load() != 0 {
+		t.Errorf("channelID after leave: got %d, want 0", client.channelID.Load())
 	}
 }
 
