@@ -38,7 +38,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Performance is critical, analyze slow parts of the code and improve performance (ongoing)
 - UI: Small icons can be uploaded and set per channel
 - UI: A server icon can be uploaded and set
-- Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
+- Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast. (ongoing)
 - Code quality and readability
 - Repo structure and organization
 
@@ -62,3 +62,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - UI: Responsive layout — MinWidth=400/MinHeight=300; left info panel hides below 768 px; ServerBrowser/AudioSettings/RoomBrowser use responsive padding; user cards centred
 - Performance: AEC hot path — pre-allocated refBuf eliminates 285 KB/s GC pressure; FeedFarEnd/Process reference extraction use bulk copy (0 allocs/op on both benchmarks)
 - Server state: embedded SQLite (modernc.org/sqlite, no CGO) with versioned migration runner; settings table with GET/PUT /api/settings; server_name defaults to "bken server"; -db flag for DB path
+- Voice reliability: atomic.Bool for connected flag (fixes data race); sendLoop triggers reconnect on SendAudio error; pongTimeout 10s→6s (faster disconnect detection); StartReceiving captures session once (no per-datagram mutex)
