@@ -1283,3 +1283,256 @@ func TestProcessControlDeleteChannelAllowedWithMultiple(t *testing.T) {
 		t.Errorf("onDeleteChannel: got %d, want 1", deletedID)
 	}
 }
+
+// --- processControl: edit_message ---
+
+func TestProcessControlEditMessageBySender(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	receiver, receiverBuf := newCtrlClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+
+	// Send a chat message to establish ownership.
+	processControl(ControlMsg{Type: "chat", Message: "original"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+	_ = decodeControl(t, receiverBuf) // drain receiver's copy
+
+	// Edit the message.
+	processControl(ControlMsg{Type: "edit_message", MsgID: chatMsg.MsgID, Message: "edited"}, sender, room)
+
+	got := decodeControl(t, receiverBuf)
+	if got.Type != "message_edited" {
+		t.Errorf("type: got %q, want %q", got.Type, "message_edited")
+	}
+	if got.MsgID != chatMsg.MsgID {
+		t.Errorf("msg_id: got %d, want %d", got.MsgID, chatMsg.MsgID)
+	}
+	if got.Message != "edited" {
+		t.Errorf("message: got %q, want %q", got.Message, "edited")
+	}
+	if got.Timestamp == 0 {
+		t.Error("timestamp should be set by server")
+	}
+}
+
+func TestProcessControlEditMessageByNonSender(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	attacker, attackerBuf := newCtrlClient("eve")
+	room.AddClient(sender)
+	room.AddClient(attacker)
+
+	// Send a message as alice.
+	processControl(ControlMsg{Type: "chat", Message: "original"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+	_ = decodeControl(t, attackerBuf) // drain
+
+	// Eve tries to edit alice's message — should be rejected.
+	processControl(ControlMsg{Type: "edit_message", MsgID: chatMsg.MsgID, Message: "hacked"}, attacker, room)
+
+	if attackerBuf.Len() != 0 {
+		t.Error("non-sender should not be able to edit messages")
+	}
+}
+
+func TestProcessControlEditMessageOwnerCannotEditOthers(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	owner, ownerBuf := newCtrlClient("admin")
+	room.AddClient(sender)
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	// alice sends a message.
+	processControl(ControlMsg{Type: "chat", Message: "original"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+	_ = decodeControl(t, ownerBuf) // drain
+
+	// Owner tries to edit alice's message — should be rejected (only delete is allowed).
+	processControl(ControlMsg{Type: "edit_message", MsgID: chatMsg.MsgID, Message: "owner-edit"}, owner, room)
+
+	if ownerBuf.Len() != 0 {
+		t.Error("owner should not be able to edit others' messages")
+	}
+}
+
+func TestProcessControlEditMessageEmptyRejected(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	processControl(ControlMsg{Type: "chat", Message: "original"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+
+	processControl(ControlMsg{Type: "edit_message", MsgID: chatMsg.MsgID, Message: ""}, sender, room)
+
+	if senderBuf.Len() != 0 {
+		t.Error("empty edit message should be rejected")
+	}
+}
+
+func TestProcessControlEditMessageTooLongRejected(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	processControl(ControlMsg{Type: "chat", Message: "original"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+
+	processControl(ControlMsg{Type: "edit_message", MsgID: chatMsg.MsgID, Message: strings.Repeat("x", 501)}, sender, room)
+
+	if senderBuf.Len() != 0 {
+		t.Error("501-char edit should be rejected")
+	}
+}
+
+func TestProcessControlEditMessageUnknownMsgID(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	// Try to edit a message that was never sent.
+	processControl(ControlMsg{Type: "edit_message", MsgID: 9999, Message: "edit"}, sender, room)
+
+	if senderBuf.Len() != 0 {
+		t.Error("editing unknown msg_id should be silently rejected")
+	}
+}
+
+func TestProcessControlEditMessageZeroMsgID(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	processControl(ControlMsg{Type: "edit_message", MsgID: 0, Message: "edit"}, sender, room)
+
+	if senderBuf.Len() != 0 {
+		t.Error("editing with msg_id=0 should be rejected")
+	}
+}
+
+// --- processControl: delete_message ---
+
+func TestProcessControlDeleteMessageBySender(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	receiver, receiverBuf := newCtrlClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+
+	processControl(ControlMsg{Type: "chat", Message: "to delete"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+	_ = decodeControl(t, receiverBuf)
+
+	processControl(ControlMsg{Type: "delete_message", MsgID: chatMsg.MsgID}, sender, room)
+
+	got := decodeControl(t, receiverBuf)
+	if got.Type != "message_deleted" {
+		t.Errorf("type: got %q, want %q", got.Type, "message_deleted")
+	}
+	if got.MsgID != chatMsg.MsgID {
+		t.Errorf("msg_id: got %d, want %d", got.MsgID, chatMsg.MsgID)
+	}
+}
+
+func TestProcessControlDeleteMessageByOwner(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	owner, ownerBuf := newCtrlClient("admin")
+	room.AddClient(sender)
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "chat", Message: "alice says hi"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+	_ = decodeControl(t, ownerBuf) // drain
+
+	// Owner deletes alice's message — should succeed.
+	processControl(ControlMsg{Type: "delete_message", MsgID: chatMsg.MsgID}, owner, room)
+
+	got := decodeControl(t, ownerBuf)
+	if got.Type != "message_deleted" {
+		t.Errorf("type: got %q, want %q", got.Type, "message_deleted")
+	}
+}
+
+func TestProcessControlDeleteMessageByNonSenderNonOwner(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	owner, _ := newCtrlClient("admin")
+	attacker, attackerBuf := newCtrlClient("eve")
+	room.AddClient(sender)
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "chat", Message: "original"}, sender, room)
+	chatMsg := decodeControl(t, senderBuf)
+	_ = decodeControl(t, attackerBuf) // drain
+
+	// Eve (non-sender, non-owner) tries to delete — should be rejected.
+	processControl(ControlMsg{Type: "delete_message", MsgID: chatMsg.MsgID}, attacker, room)
+
+	if attackerBuf.Len() != 0 {
+		t.Error("non-sender non-owner should not be able to delete messages")
+	}
+}
+
+func TestProcessControlDeleteMessageZeroMsgID(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	processControl(ControlMsg{Type: "delete_message", MsgID: 0}, sender, room)
+
+	if senderBuf.Len() != 0 {
+		t.Error("deleting with msg_id=0 should be rejected")
+	}
+}
+
+func TestProcessControlDeleteMessageUnknownMsgID(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	processControl(ControlMsg{Type: "delete_message", MsgID: 9999}, sender, room)
+
+	if senderBuf.Len() != 0 {
+		t.Error("deleting unknown msg_id should be silently rejected")
+	}
+}
+
+// --- Room: message ownership tracking ---
+
+func TestRoomRecordAndGetMsgOwner(t *testing.T) {
+	room := NewRoom()
+	room.RecordMsgOwner(1, 42)
+	room.RecordMsgOwner(2, 43)
+
+	if id, ok := room.GetMsgOwner(1); !ok || id != 42 {
+		t.Errorf("GetMsgOwner(1): got (%d, %v), want (42, true)", id, ok)
+	}
+	if id, ok := room.GetMsgOwner(2); !ok || id != 43 {
+		t.Errorf("GetMsgOwner(2): got (%d, %v), want (43, true)", id, ok)
+	}
+	if _, ok := room.GetMsgOwner(999); ok {
+		t.Error("GetMsgOwner(999): expected not found")
+	}
+}
+
+func TestRoomMsgOwnerEviction(t *testing.T) {
+	room := NewRoom()
+	// Fill up to maxMsgOwners + 1 to trigger eviction.
+	for i := uint64(1); i <= maxMsgOwners+1; i++ {
+		room.RecordMsgOwner(i, uint16(i%100))
+	}
+	// First entry should have been evicted.
+	if _, ok := room.GetMsgOwner(1); ok {
+		t.Error("msg_id 1 should have been evicted")
+	}
+	// Last entry should still exist.
+	if _, ok := room.GetMsgOwner(maxMsgOwners + 1); !ok {
+		t.Error("msg_id maxMsgOwners+1 should still exist")
+	}
+}

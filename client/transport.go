@@ -173,8 +173,8 @@ type Transport struct {
 	onUserLeft           func(uint16)
 	onAudioReceived      func(uint16)
 	onDisconnected       func(reason string)
-	onChatMessage        func(msgID uint64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
-	onChannelChatMessage func(msgID uint64, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
+	onChatMessage        func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
+	onChannelChatMessage func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
 	onServerInfo         func(name string)
 	onKicked             func()
 	onOwnerChanged       func(ownerID uint16)
@@ -182,6 +182,8 @@ type Transport struct {
 	onUserChannel        func(userID uint16, channelID int64)
 	onLinkPreview        func(msgID uint64, channelID int64, url, title, desc, image, siteName string)
 	onUserRenamed        func(userID uint16, username string)
+	onMessageEdited      func(msgID uint64, message string, ts int64)
+	onMessageDeleted     func(msgID uint64)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -224,13 +226,13 @@ func (t *Transport) SetOnDisconnected(fn func(reason string)) {
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChatMessage(fn func(msgID uint64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
+func (t *Transport) SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
 	t.cbMu.Lock()
 	t.onChatMessage = fn
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChannelChatMessage(fn func(msgID uint64, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
+func (t *Transport) SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
 	t.cbMu.Lock()
 	t.onChannelChatMessage = fn
 	t.cbMu.Unlock()
@@ -275,6 +277,18 @@ func (t *Transport) SetOnLinkPreview(fn func(msgID uint64, channelID int64, url,
 func (t *Transport) SetOnUserRenamed(fn func(userID uint16, username string)) {
 	t.cbMu.Lock()
 	t.onUserRenamed = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnMessageEdited(fn func(msgID uint64, message string, ts int64)) {
+	t.cbMu.Lock()
+	t.onMessageEdited = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnMessageDeleted(fn func(msgID uint64)) {
+	t.cbMu.Lock()
+	t.onMessageDeleted = fn
 	t.cbMu.Unlock()
 }
 
@@ -338,6 +352,21 @@ func (t *Transport) MoveUser(userID uint16, channelID int64) error {
 // for future chat messages and notifies other clients.
 func (t *Transport) RenameUser(name string) error {
 	return t.writeCtrl(ControlMsg{Type: "rename_user", Username: name})
+}
+
+// EditMessage asks the server to update a message's text. Only the original
+// sender is allowed to edit; the server enforces the authorisation check.
+func (t *Transport) EditMessage(msgID uint64, message string) error {
+	if err := validateChat(message); err != nil {
+		return err
+	}
+	return t.writeCtrl(ControlMsg{Type: "edit_message", MsgID: msgID, Message: message})
+}
+
+// DeleteMessage asks the server to delete a message. The original sender
+// and the room owner are allowed to delete; the server enforces the check.
+func (t *Transport) DeleteMessage(msgID uint64) error {
+	return t.writeCtrl(ControlMsg{Type: "delete_message", MsgID: msgID})
 }
 
 // APIBaseURL returns the HTTP base URL for the server's REST API, or "" if not yet known.
@@ -814,6 +843,8 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onUserChannel := t.onUserChannel
 		onLinkPreview := t.onLinkPreview
 		onUserRenamed := t.onUserRenamed
+		onMessageEdited := t.onMessageEdited
+		onMessageDeleted := t.onMessageDeleted
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
@@ -869,11 +900,11 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		case "chat":
 			if msg.ChannelID != 0 {
 				if onChannelChat != nil {
-					onChannelChat(msg.MsgID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
+					onChannelChat(msg.MsgID, msg.ID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
 				}
 			} else {
 				if onChat != nil {
-					onChat(msg.MsgID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
+					onChat(msg.MsgID, msg.ID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
 				}
 			}
 		case "link_preview":
@@ -903,6 +934,14 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		case "user_renamed":
 			if onUserRenamed != nil {
 				onUserRenamed(msg.ID, msg.Username)
+			}
+		case "message_edited":
+			if onMessageEdited != nil {
+				onMessageEdited(msg.MsgID, msg.Message, msg.Ts)
+			}
+		case "message_deleted":
+			if onMessageDeleted != nil {
+				onMessageDeleted(msg.MsgID)
 			}
 		}
 	}

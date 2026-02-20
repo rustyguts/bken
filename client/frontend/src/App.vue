@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import Room from './Room.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -225,6 +225,14 @@ async function handleRenameGlobalUsername(name: string): Promise<void> {
   }
 }
 
+async function handleEditMessage(msgID: number, message: string): Promise<void> {
+  await EditMessage(msgID, message)
+}
+
+async function handleDeleteMessage(msgID: number): Promise<void> {
+  await DeleteMessage(msgID)
+}
+
 async function handleSendChat(message: string): Promise<void> {
   activeChannelId.value = 0
   await SendChat(message)
@@ -360,13 +368,14 @@ onMounted(async () => {
     userChannels.value = { ...userChannels.value, [data.user_id]: data.channel_id }
   })
 
-  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; msg_id: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string }) => {
+  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; msg_id: number; sender_id?: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string }) => {
     const channelId = data.channel_id ?? 0
     chatMessages.value = [
       ...chatMessages.value,
       {
         id: ++chatIdCounter,
         msgId: data.msg_id ?? 0,
+        senderId: data.sender_id ?? 0,
         username: data.username,
         message: data.message,
         ts: data.ts,
@@ -397,6 +406,22 @@ onMounted(async () => {
         siteName: data.site_name,
       },
     }
+    chatMessages.value = updated
+  })
+
+  EventsOn('chat:message_edited', (data: { msg_id: number; message: string; ts: number }) => {
+    const idx = chatMessages.value.findIndex(m => m.msgId === data.msg_id)
+    if (idx === -1) return
+    const updated = [...chatMessages.value]
+    updated[idx] = { ...updated[idx], message: data.message, edited: true, editedTs: data.ts }
+    chatMessages.value = updated
+  })
+
+  EventsOn('chat:message_deleted', (data: { msg_id: number }) => {
+    const idx = chatMessages.value.findIndex(m => m.msgId === data.msg_id)
+    if (idx === -1) return
+    const updated = [...chatMessages.value]
+    updated[idx] = { ...updated[idx], message: '', deleted: true }
     chatMessages.value = updated
   })
 
@@ -490,7 +515,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('hashchange', syncRouteFromHash)
   window.removeEventListener('keydown', handlePTTKeyDown)
   window.removeEventListener('keyup', handlePTTKeyUp)
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:link_preview', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
   clearTimers()
   cleanupSpeaking()
 })
@@ -556,6 +581,8 @@ onBeforeUnmount(() => {
           @upload-file="handleUploadFile"
           @upload-file-from-path="handleUploadFileFromPath"
           @view-channel="handleViewChannel"
+          @edit-message="handleEditMessage"
+          @delete-message="handleDeleteMessage"
         />
       </Transition>
     </div>

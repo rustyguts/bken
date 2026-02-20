@@ -15,6 +15,11 @@ type DatagramSender interface {
 	SendDatagram([]byte) error
 }
 
+// maxMsgOwners is the maximum number of message→sender mappings to retain.
+// Once exceeded, the oldest entries are evicted. 10 000 messages ≈ a few hours
+// of active chat, which is more than enough for an ephemeral in-memory server.
+const maxMsgOwners = 10000
+
 // Room holds all connected clients and handles voice datagram fan-out.
 type Room struct {
 	mu         sync.RWMutex
@@ -26,6 +31,11 @@ type Room struct {
 	apiPort    int           // HTTP API port communicated to clients in user_list; protected by mu
 	nextID      atomic.Uint32
 	nextMsgID   atomic.Uint64
+
+	// msgOwners maps server-assigned message IDs to the sender's client ID.
+	// Used to authorise edit_message/delete_message requests. Protected by mu.
+	msgOwners    map[uint64]uint16
+	msgOwnerKeys []uint64 // insertion order for bounded eviction
 
 	// Channel CRUD persistence callbacks — set via setters; called outside the mutex.
 	onCreateChannel func(name string) (int64, error)
@@ -41,7 +51,8 @@ type Room struct {
 
 func NewRoom() *Room {
 	return &Room{
-		clients: make(map[uint16]*Client),
+		clients:   make(map[uint16]*Client),
+		msgOwners: make(map[uint64]uint16),
 	}
 }
 
@@ -463,6 +474,28 @@ func (r *Room) ChannelCount() int {
 // NextMsgID returns a monotonically increasing message ID for chat messages.
 func (r *Room) NextMsgID() uint64 {
 	return r.nextMsgID.Add(1)
+}
+
+// RecordMsgOwner associates a server-assigned message ID with the sender's
+// client ID. This mapping is used to authorise edit/delete requests.
+// The map is bounded to maxMsgOwners entries; oldest entries are evicted first.
+func (r *Room) RecordMsgOwner(msgID uint64, senderID uint16) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.msgOwners[msgID] = senderID
+	r.msgOwnerKeys = append(r.msgOwnerKeys, msgID)
+	for len(r.msgOwnerKeys) > maxMsgOwners {
+		delete(r.msgOwners, r.msgOwnerKeys[0])
+		r.msgOwnerKeys = r.msgOwnerKeys[1:]
+	}
+}
+
+// GetMsgOwner returns the sender ID for a message, or 0 and false if unknown.
+func (r *Room) GetMsgOwner(msgID uint64) (uint16, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id, ok := r.msgOwners[msgID]
+	return id, ok
 }
 
 // ClientCount returns the current number of connected clients.

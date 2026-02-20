@@ -56,6 +56,7 @@ export interface LinkPreview {
 export interface ChatMessage {
   id: number         // client-side counter for v-for keys
   msgId: number      // server-assigned message ID (for matching link previews)
+  senderId: number   // server-assigned sender user ID (for edit/delete authorisation)
   username: string
   message: string
   ts: number         // Unix ms timestamp (server-stamped)
@@ -65,4 +66,7 @@ export interface ChatMessage {
   fileSize?: number  // file size in bytes
   fileUrl?: string   // download URL (constructed by Go layer)
   linkPreview?: LinkPreview // rich link preview (populated asynchronously)
+  edited?: boolean   // true if the message has been edited
+  editedTs?: number  // Unix ms timestamp of the last edit
+  deleted?: boolean  // true if the message has been deleted
 }

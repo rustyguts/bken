@@ -100,6 +100,14 @@ export function SendChat(message: string): Promise<string> {
   return bridge()['SendChat'](message)
 }
 
+export function EditMessage(msgID: number, message: string): Promise<string> {
+  return bridge()['EditMessage'](msgID, message)
+}
+
+export function DeleteMessage(msgID: number): Promise<string> {
+  return bridge()['DeleteMessage'](msgID)
+}
+
 // --- Moderation bindings ---
 
 export function KickUser(id: number): Promise<string> {

@@ -286,13 +286,14 @@ func (a *App) wireCallbacks() {
 		wailsrt.EventsEmit(a.ctx, "connection:lost", map[string]any{"reason": reason})
 		log.Printf("[app] connection lost: %s", reason)
 	})
-	a.transport.SetOnChatMessage(func(msgID uint64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+	a.transport.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
 		payload := map[string]any{
 			"username":   username,
 			"message":    message,
 			"ts":         ts,
 			"channel_id": 0,
 			"msg_id":     msgID,
+			"sender_id":  int(senderID),
 		}
 		if fileID != 0 {
 			payload["file_id"] = fileID
@@ -302,13 +303,14 @@ func (a *App) wireCallbacks() {
 		}
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
-	a.transport.SetOnChannelChatMessage(func(msgID uint64, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+	a.transport.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
 		payload := map[string]any{
 			"username":   username,
 			"message":    message,
 			"ts":         ts,
 			"channel_id": channelID,
 			"msg_id":     msgID,
+			"sender_id":  int(senderID),
 		}
 		if fileID != 0 {
 			payload["file_id"] = fileID
@@ -354,6 +356,18 @@ func (a *App) wireCallbacks() {
 		wailsrt.EventsEmit(a.ctx, "user:renamed", map[string]any{
 			"id":       int(userID),
 			"username": username,
+		})
+	})
+	a.transport.SetOnMessageEdited(func(msgID uint64, message string, ts int64) {
+		wailsrt.EventsEmit(a.ctx, "chat:message_edited", map[string]any{
+			"msg_id":  msgID,
+			"message": message,
+			"ts":      ts,
+		})
+	})
+	a.transport.SetOnMessageDeleted(func(msgID uint64) {
+		wailsrt.EventsEmit(a.ctx, "chat:message_deleted", map[string]any{
+			"msg_id": msgID,
 		})
 	})
 	a.audio.OnSpeaking = func() {
@@ -632,6 +646,26 @@ func (a *App) JoinChannel(id int) string {
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendChannelChat(channelID int, message string) string {
 	if err := a.transport.SendChannelChat(int64(channelID), message); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// EditMessage asks the server to update a chat message's text.
+// Only the original sender is allowed to edit; the server enforces the check.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) EditMessage(msgID int, message string) string {
+	if err := a.transport.EditMessage(uint64(msgID), message); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// DeleteMessage asks the server to delete a chat message.
+// The original sender and the room owner are allowed to delete.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) DeleteMessage(msgID int) string {
+	if err := a.transport.DeleteMessage(uint64(msgID)); err != nil {
 		return err.Error()
 	}
 	return ""

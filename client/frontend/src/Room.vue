@@ -42,6 +42,8 @@ const emit = defineEmits<{
   uploadFile: [channelID: number]
   uploadFileFromPath: [channelID: number, path: string]
   viewChannel: [channelID: number]
+  editMessage: [msgID: number, message: string]
+  deleteMessage: [msgID: number]
 }>()
 
 const muted = ref(false)
@@ -162,10 +164,14 @@ function handleSendMessage(message: string): void {
       :my-channel-id="myChannelId"
       :connected="connected"
       :unread-counts="unreadCounts"
+      :my-id="myId"
+      :owner-id="ownerId"
       @select-channel="handleSelectChannel"
       @send="handleSendMessage"
       @upload-file="emit('uploadFile', selectedChannelId)"
       @upload-file-from-path="(path: string) => emit('uploadFileFromPath', selectedChannelId, path)"
+      @edit-message="(msgID: number, message: string) => emit('editMessage', msgID, message)"
+      @delete-message="(msgID: number) => emit('deleteMessage', msgID)"
     />
 
     <UserControls

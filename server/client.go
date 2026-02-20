@@ -283,6 +283,7 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			FileSize:  msg.FileSize,
 			MsgID:     msgID,
 		}
+		room.RecordMsgOwner(msgID, client.ID)
 		room.BroadcastControl(out, 0)
 
 		// Asynchronously fetch a link preview if the message contains a URL.
@@ -449,6 +450,40 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			ChannelID: msg.ChannelID,
 		}, 0)
 		log.Printf("[client %d] %s moved client %d to channel %d", client.ID, client.Username, msg.ID, msg.ChannelID)
+	case "edit_message":
+		// A user may only edit their own messages.
+		if msg.MsgID == 0 || msg.Message == "" || len(msg.Message) > MaxChatLength {
+			return
+		}
+		ownerID, ok := room.GetMsgOwner(msg.MsgID)
+		if !ok || ownerID != client.ID {
+			return
+		}
+		room.BroadcastControl(ControlMsg{
+			Type:      "message_edited",
+			MsgID:     msg.MsgID,
+			Message:   msg.Message,
+			Timestamp: time.Now().UnixMilli(),
+		}, 0)
+		log.Printf("[client %d] %s edited message %d", client.ID, client.Username, msg.MsgID)
+	case "delete_message":
+		// A user may delete their own messages; the room owner may delete any message.
+		if msg.MsgID == 0 {
+			return
+		}
+		ownerID, ok := room.GetMsgOwner(msg.MsgID)
+		if !ok {
+			return
+		}
+		isRoomOwner := room.OwnerID() == client.ID
+		if ownerID != client.ID && !isRoomOwner {
+			return
+		}
+		room.BroadcastControl(ControlMsg{
+			Type:  "message_deleted",
+			MsgID: msg.MsgID,
+		}, 0)
+		log.Printf("[client %d] %s deleted message %d", client.ID, client.Username, msg.MsgID)
 	}
 }
 

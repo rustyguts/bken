@@ -25,8 +25,8 @@ type Transporter interface {
 	SetOnUserLeft(fn func(uint16))
 	SetOnAudioReceived(fn func(uint16))
 	SetOnDisconnected(fn func(reason string))
-	SetOnChatMessage(fn func(msgID uint64, username, message string, ts int64, fileID int64, fileName string, fileSize int64))
-	SetOnChannelChatMessage(fn func(msgID uint64, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64))
+	SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64))
+	SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64))
 	SetOnLinkPreview(fn func(msgID uint64, channelID int64, url, title, desc, image, siteName string))
 	SetOnServerInfo(fn func(name string))
 	SetOnKicked(fn func())
@@ -34,10 +34,14 @@ type Transporter interface {
 	SetOnChannelList(fn func([]ChannelInfo))
 	SetOnUserChannel(fn func(userID uint16, channelID int64))
 	SetOnUserRenamed(fn func(userID uint16, username string))
+	SetOnMessageEdited(fn func(msgID uint64, message string, ts int64))
+	SetOnMessageDeleted(fn func(msgID uint64))
 
 	// Chat.
 	SendChat(message string) error
 	SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error
+	EditMessage(msgID uint64, message string) error
+	DeleteMessage(msgID uint64) error
 
 	// File API.
 	APIBaseURL() string
