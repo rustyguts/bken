@@ -53,6 +53,12 @@ type ControlMsg struct {
 	FileID     int64         `json:"file_id,omitempty"`     // chat: uploaded file DB id
 	FileName   string        `json:"file_name,omitempty"`   // chat: original filename
 	FileSize   int64         `json:"file_size,omitempty"`   // chat: file size in bytes
+	MsgID      uint64        `json:"msg_id,omitempty"`      // chat/link_preview: server-assigned message ID
+	LinkURL    string        `json:"link_url,omitempty"`    // link_preview: the URL that was fetched
+	LinkTitle  string        `json:"link_title,omitempty"`  // link_preview: page title
+	LinkDesc   string        `json:"link_desc,omitempty"`   // link_preview: page description
+	LinkImage  string        `json:"link_image,omitempty"`  // link_preview: preview image URL
+	LinkSite   string        `json:"link_site,omitempty"`   // link_preview: site name
 }
 
 // UserInfo describes a connected peer.
@@ -140,13 +146,14 @@ type Transport struct {
 	onUserLeft           func(uint16)
 	onAudioReceived      func(uint16)
 	onDisconnected       func(reason string)
-	onChatMessage        func(username, message string, ts int64, fileID int64, fileName string, fileSize int64)
-	onChannelChatMessage func(channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
+	onChatMessage        func(msgID uint64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
+	onChannelChatMessage func(msgID uint64, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
 	onServerInfo         func(name string)
 	onKicked             func()
 	onOwnerChanged       func(ownerID uint16)
 	onChannelList        func([]ChannelInfo)
 	onUserChannel        func(userID uint16, channelID int64)
+	onLinkPreview        func(msgID uint64, channelID int64, url, title, desc, image, siteName string)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -189,13 +196,13 @@ func (t *Transport) SetOnDisconnected(fn func(reason string)) {
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChatMessage(fn func(username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
+func (t *Transport) SetOnChatMessage(fn func(msgID uint64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
 	t.cbMu.Lock()
 	t.onChatMessage = fn
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChannelChatMessage(fn func(channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
+func (t *Transport) SetOnChannelChatMessage(fn func(msgID uint64, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
 	t.cbMu.Lock()
 	t.onChannelChatMessage = fn
 	t.cbMu.Unlock()
@@ -228,6 +235,12 @@ func (t *Transport) SetOnChannelList(fn func([]ChannelInfo)) {
 func (t *Transport) SetOnUserChannel(fn func(userID uint16, channelID int64)) {
 	t.cbMu.Lock()
 	t.onUserChannel = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnLinkPreview(fn func(msgID uint64, channelID int64, url, title, desc, image, siteName string)) {
+	t.cbMu.Lock()
+	t.onLinkPreview = fn
 	t.cbMu.Unlock()
 }
 
@@ -662,6 +675,7 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onOwnerChanged := t.onOwnerChanged
 		onChannelList := t.onChannelList
 		onUserChannel := t.onUserChannel
+		onLinkPreview := t.onLinkPreview
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
@@ -717,12 +731,16 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		case "chat":
 			if msg.ChannelID != 0 {
 				if onChannelChat != nil {
-					onChannelChat(msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
+					onChannelChat(msg.MsgID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
 				}
 			} else {
 				if onChat != nil {
-					onChat(msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
+					onChat(msg.MsgID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
 				}
+			}
+		case "link_preview":
+			if onLinkPreview != nil {
+				onLinkPreview(msg.MsgID, msg.ChannelID, msg.LinkURL, msg.LinkTitle, msg.LinkDesc, msg.LinkImage, msg.LinkSite)
 			}
 		case "server_info":
 			if msg.ServerName != "" && onServerInfo != nil {

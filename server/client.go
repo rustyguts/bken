@@ -181,6 +181,7 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		if len(msg.Message) > MaxChatLength {
 			return
 		}
+		msgID := room.NextMsgID()
 		out := ControlMsg{
 			Type:      "chat",
 			ID:        client.ID,
@@ -191,8 +192,33 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			FileID:    msg.FileID,
 			FileName:  msg.FileName,
 			FileSize:  msg.FileSize,
+			MsgID:     msgID,
 		}
 		room.BroadcastControl(out, 0)
+
+		// Asynchronously fetch a link preview if the message contains a URL.
+		if rawURL := extractFirstURL(msg.Message); rawURL != "" {
+			go func() {
+				lp, err := fetchLinkPreview(rawURL)
+				if err != nil {
+					log.Printf("[linkpreview] fetch %q: %v", rawURL, err)
+					return
+				}
+				if lp.Title == "" && lp.Desc == "" && lp.Image == "" {
+					return // nothing useful to show
+				}
+				room.BroadcastControl(ControlMsg{
+					Type:      "link_preview",
+					MsgID:     msgID,
+					ChannelID: msg.ChannelID,
+					LinkURL:   lp.URL,
+					LinkTitle: lp.Title,
+					LinkDesc:  lp.Desc,
+					LinkImage: lp.Image,
+					LinkSite:  lp.SiteName,
+				}, 0)
+			}()
+		}
 	case "kick":
 		// Only the room owner may kick. Owners cannot kick themselves.
 		if room.OwnerID() != client.ID || msg.ID == 0 || msg.ID == client.ID {

@@ -268,12 +268,13 @@ func (a *App) wireCallbacks() {
 		wailsrt.EventsEmit(a.ctx, "connection:lost", map[string]any{"reason": reason})
 		log.Printf("[app] connection lost: %s", reason)
 	})
-	a.transport.SetOnChatMessage(func(username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+	a.transport.SetOnChatMessage(func(msgID uint64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
 		payload := map[string]any{
 			"username":   username,
 			"message":    message,
 			"ts":         ts,
 			"channel_id": 0,
+			"msg_id":     msgID,
 		}
 		if fileID != 0 {
 			payload["file_id"] = fileID
@@ -283,12 +284,13 @@ func (a *App) wireCallbacks() {
 		}
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
-	a.transport.SetOnChannelChatMessage(func(channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+	a.transport.SetOnChannelChatMessage(func(msgID uint64, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
 		payload := map[string]any{
 			"username":   username,
 			"message":    message,
 			"ts":         ts,
 			"channel_id": channelID,
+			"msg_id":     msgID,
 		}
 		if fileID != 0 {
 			payload["file_id"] = fileID
@@ -297,6 +299,17 @@ func (a *App) wireCallbacks() {
 			payload["file_url"] = a.fileURL(fileID)
 		}
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
+	})
+	a.transport.SetOnLinkPreview(func(msgID uint64, channelID int64, url, title, desc, image, siteName string) {
+		wailsrt.EventsEmit(a.ctx, "chat:link_preview", map[string]any{
+			"msg_id":      msgID,
+			"channel_id":  channelID,
+			"url":         url,
+			"title":       title,
+			"description": desc,
+			"image":       image,
+			"site_name":   siteName,
+		})
 	})
 	a.transport.SetOnServerInfo(func(name string) {
 		wailsrt.EventsEmit(a.ctx, "server:info", map[string]any{"name": name})

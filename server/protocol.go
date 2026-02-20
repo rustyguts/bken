@@ -42,6 +42,12 @@ type ControlMsg struct {
 	FileID     int64         `json:"file_id,omitempty"`      // chat: uploaded file DB id
 	FileName   string        `json:"file_name,omitempty"`    // chat: original filename
 	FileSize   int64         `json:"file_size,omitempty"`    // chat: file size in bytes
+	MsgID      uint64        `json:"msg_id,omitempty"`       // chat/link_preview: server-assigned message ID
+	LinkURL    string        `json:"link_url,omitempty"`     // link_preview: the URL that was fetched
+	LinkTitle  string        `json:"link_title,omitempty"`   // link_preview: page title
+	LinkDesc   string        `json:"link_desc,omitempty"`    // link_preview: page description
+	LinkImage  string        `json:"link_image,omitempty"`   // link_preview: preview image URL
+	LinkSite   string        `json:"link_site,omitempty"`    // link_preview: site name
 }
 
 // UserInfo is a brief snapshot of a connected user, used in user_list messages.

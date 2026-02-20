@@ -43,9 +43,19 @@ export interface ConnectPayload {
   addr: string
 }
 
+/** Rich link preview metadata fetched by the server. */
+export interface LinkPreview {
+  url: string
+  title: string
+  description: string
+  image: string
+  siteName: string
+}
+
 /** A single chat message received from the server. */
 export interface ChatMessage {
   id: number         // client-side counter for v-for keys
+  msgId: number      // server-assigned message ID (for matching link previews)
   username: string
   message: string
   ts: number         // Unix ms timestamp (server-stamped)
@@ -54,4 +64,5 @@ export interface ChatMessage {
   fileName?: string  // original filename
   fileSize?: number  // file size in bytes
   fileUrl?: string   // download URL (constructed by Go layer)
+  linkPreview?: LinkPreview // rich link preview (populated asynchronously)
 }

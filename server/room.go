@@ -25,6 +25,7 @@ type Room struct {
 	channels   []ChannelInfo // cached channel list sent to newly-connecting clients; protected by mu
 	apiPort    int           // HTTP API port communicated to clients in user_list; protected by mu
 	nextID     atomic.Uint32
+	nextMsgID  atomic.Uint64
 
 	// Channel CRUD persistence callbacks — set via setters; called outside the mutex.
 	onCreateChannel func(name string) (int64, error)
@@ -408,6 +409,11 @@ func (r *Room) MoveChannelUsersToLobby(channelID int64) {
 	for _, id := range moved {
 		r.BroadcastControl(ControlMsg{Type: "user_channel", ID: id, ChannelID: 0}, 0)
 	}
+}
+
+// NextMsgID returns a monotonically increasing message ID for chat messages.
+func (r *Room) NextMsgID() uint64 {
+	return r.nextMsgID.Add(1)
 }
 
 // ClientCount returns the current number of connected clients.

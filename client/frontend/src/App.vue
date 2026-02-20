@@ -312,12 +312,13 @@ onMounted(async () => {
     userChannels.value = { ...userChannels.value, [data.user_id]: data.channel_id }
   })
 
-  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string }) => {
+  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; msg_id: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string }) => {
     const channelId = data.channel_id ?? 0
     chatMessages.value = [
       ...chatMessages.value,
       {
         id: ++chatIdCounter,
+        msgId: data.msg_id ?? 0,
         username: data.username,
         message: data.message,
         ts: data.ts,
@@ -332,6 +333,23 @@ onMounted(async () => {
     if (channelId !== viewedChannelId.value) {
       unreadCounts.value = { ...unreadCounts.value, [channelId]: (unreadCounts.value[channelId] ?? 0) + 1 }
     }
+  })
+
+  EventsOn('chat:link_preview', (data: { msg_id: number; channel_id: number; url: string; title: string; description: string; image: string; site_name: string }) => {
+    const idx = chatMessages.value.findIndex(m => m.msgId === data.msg_id)
+    if (idx === -1) return
+    const updated = [...chatMessages.value]
+    updated[idx] = {
+      ...updated[idx],
+      linkPreview: {
+        url: data.url,
+        title: data.title,
+        description: data.description,
+        image: data.image,
+        siteName: data.site_name,
+      },
+    }
+    chatMessages.value = updated
   })
 
   EventsOn('server:info', (data: { name: string }) => {
@@ -411,7 +429,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', syncRouteFromHash)
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'chat:message', 'chat:link_preview', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
   clearTimers()
   cleanupSpeaking()
 })

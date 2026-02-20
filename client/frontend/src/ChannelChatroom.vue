@@ -183,6 +183,28 @@ function isImageFile(name: string): boolean {
             <span class="text-[11px] opacity-50 shrink-0">({{ formatFileSize(msg.fileSize ?? 0) }})</span>
           </a>
         </div>
+
+        <!-- Link preview -->
+        <a
+          v-if="msg.linkPreview"
+          :href="msg.linkPreview.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="mt-2 block max-w-[400px] rounded-lg border border-base-content/10 bg-base-300 overflow-hidden hover:border-primary/30 transition-colors no-underline"
+        >
+          <img
+            v-if="msg.linkPreview.image"
+            :src="msg.linkPreview.image"
+            :alt="msg.linkPreview.title"
+            class="w-full max-h-[200px] object-cover"
+            loading="lazy"
+          />
+          <div class="p-2">
+            <p v-if="msg.linkPreview.siteName" class="text-[10px] opacity-50 uppercase tracking-wide mb-0.5">{{ msg.linkPreview.siteName }}</p>
+            <p v-if="msg.linkPreview.title" class="text-sm font-semibold text-primary line-clamp-2">{{ msg.linkPreview.title }}</p>
+            <p v-if="msg.linkPreview.description" class="text-xs opacity-70 mt-0.5 line-clamp-2">{{ msg.linkPreview.description }}</p>
+          </div>
+        </a>
       </article>
     </div>
 
