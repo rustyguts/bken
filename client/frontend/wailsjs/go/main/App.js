@@ -30,8 +30,16 @@ export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
 
+export function SetDeafened(arg1) {
+  return window['go']['main']['App']['SetDeafened'](arg1);
+}
+
 export function SetInputDevice(arg1) {
   return window['go']['main']['App']['SetInputDevice'](arg1);
+}
+
+export function SetMuted(arg1) {
+  return window['go']['main']['App']['SetMuted'](arg1);
 }
 
 export function SetNoiseSuppression(arg1) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Disconnect } from '../wailsjs/go/main/App'
+import { Disconnect, SetMuted, SetDeafened } from '../wailsjs/go/main/App'
 import Sidebar from './Sidebar.vue'
 import EventLog from './EventLog.vue'
 import type { LogEvent } from './EventLog.vue'
@@ -17,6 +17,18 @@ defineProps<{
 const emit = defineEmits<{ disconnect: [] }>()
 
 const settingsOpen = ref(false)
+const muted = ref(false)
+const deafened = ref(false)
+
+async function handleMuteToggle() {
+  muted.value = !muted.value
+  await SetMuted(muted.value)
+}
+
+async function handleDeafenToggle() {
+  deafened.value = !deafened.value
+  await SetDeafened(deafened.value)
+}
 
 async function handleDisconnect() {
   await Disconnect()
@@ -28,7 +40,12 @@ async function handleDisconnect() {
   <div class="flex h-full overflow-hidden">
     <Sidebar
       :settings-open="settingsOpen"
+      :muted="muted"
+      :deafened="deafened"
       @settings-toggle="settingsOpen = !settingsOpen"
+      @mute-toggle="handleMuteToggle"
+      @deafen-toggle="handleDeafenToggle"
+      @server-browser="handleDisconnect"
       @disconnect="handleDisconnect"
     />
 

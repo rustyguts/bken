@@ -16,7 +16,11 @@ export function GetOutputDevices():Promise<Array<main.AudioDevice>>;
 
 export function IsConnected():Promise<boolean>;
 
+export function SetDeafened(arg1:boolean):Promise<void>;
+
 export function SetInputDevice(arg1:number):Promise<void>;
+
+export function SetMuted(arg1:boolean):Promise<void>;
 
 export function SetNoiseSuppression(arg1:boolean):Promise<void>;
 

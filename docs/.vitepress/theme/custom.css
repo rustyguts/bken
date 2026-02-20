@@ -1,0 +1,140 @@
+/* === Typography ========================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --vp-font-family-base: 'IBM Plex Mono', ui-monospace, monospace;
+  --vp-font-family-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* === Hero section ======================================================= */
+
+.VPHero {
+  position: relative;
+  overflow: hidden;
+}
+
+.VPHero .container {
+  position: relative;
+  z-index: 1;
+}
+
+.VPHero .name {
+  letter-spacing: -0.02em;
+}
+
+.VPHero .tagline {
+  font-size: 1.15rem !important;
+  line-height: 1.75 !important;
+  max-width: 580px;
+  margin-left: auto;
+  margin-right: auto;
+  opacity: 0.8;
+}
+
+/* === Buttons ============================================================ */
+
+.VPButton {
+  border-radius: 9999px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em;
+}
+
+.VPButton.alt {
+  border-radius: 9999px !important;
+}
+
+/* === Feature cards ====================================================== */
+
+.VPFeatures .VPFeature {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+  background: var(--vp-c-bg-soft);
+}
+
+.VPFeatures .VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+  box-shadow: 0 6px 30px color-mix(in srgb, var(--vp-c-brand-1) 20%, transparent);
+  transform: translateY(-2px);
+}
+
+.VPFeatures .VPFeature .icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.VPFeatures .VPFeature h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.VPFeatures .VPFeature p {
+  opacity: 0.72;
+  line-height: 1.65;
+  font-size: 0.9rem;
+}
+
+/* === Nav ================================================================ */
+
+.VPNavBar {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.VPNavBarTitle .title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: 1.1rem;
+}
+
+/* === Doc content ======================================================== */
+
+.vp-doc h1 {
+  letter-spacing: -0.03em;
+}
+
+.vp-doc h2 {
+  letter-spacing: -0.02em;
+}
+
+.vp-doc table {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.vp-doc th {
+  background: var(--vp-c-bg-soft);
+  font-weight: 600;
+}
+
+.vp-doc tr:last-child td {
+  border-bottom: none;
+}
+
+/* Code blocks */
+.vp-doc div[class*='language-'] {
+  border-radius: 10px;
+  border: 1px solid var(--vp-c-divider);
+}
+
+/* === Footer ============================================================= */
+
+.VPFooter {
+  border-top: 1px solid var(--vp-c-divider);
+  opacity: 0.6;
+}
+
+/* === Dark mode tweaks =================================================== */
+
+.dark .VPFeatures .VPFeature {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.dark .VPNavBar {
+  background: rgba(27, 27, 31, 0.85) !important;
+}

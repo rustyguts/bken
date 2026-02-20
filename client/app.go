@@ -121,6 +121,16 @@ func (a *App) StopTest() {
 	a.audio.StopTest()
 }
 
+// SetMuted mutes or unmutes the microphone.
+func (a *App) SetMuted(muted bool) {
+	a.audio.SetMuted(muted)
+}
+
+// SetDeafened enables or disables audio playback.
+func (a *App) SetDeafened(deafened bool) {
+	a.audio.SetDeafened(deafened)
+}
+
 // Connect connects to a voice server.
 func (a *App) Connect(addr, username string) string {
 	if a.connected {

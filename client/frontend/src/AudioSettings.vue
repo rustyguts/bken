@@ -17,9 +17,24 @@ const noiseLevel = ref(80)
 const testing = ref(false)
 const testError = ref('')
 
+const THEMES = ['light', 'dark', 'sunset'] as const
+type Theme = typeof THEMES[number]
+const THEME_LABELS: Record<Theme, string> = { light: 'Light', dark: 'Dark', sunset: 'Sunset' }
+const currentTheme = ref<Theme>('dark')
+
+function applyTheme(theme: Theme) {
+  currentTheme.value = theme
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem('bken-theme', theme)
+}
+
 onMounted(async () => {
   inputDevices.value = (await GetInputDevices()) || []
   outputDevices.value = (await GetOutputDevices()) || []
+  const saved = localStorage.getItem('bken-theme') as Theme | null
+  if (saved && (THEMES as readonly string[]).includes(saved)) {
+    currentTheme.value = saved
+  }
 })
 
 async function handleInputChange() {
@@ -117,6 +132,26 @@ async function toggleTest() {
 
       <div v-if="testError" role="alert" class="alert alert-error text-xs py-1">
         {{ testError }}
+      </div>
+    </div>
+
+    <div class="px-4 py-2 text-xs font-semibold uppercase tracking-wider opacity-40 border-t border-b border-base-content/10 shrink-0">
+      Appearance
+    </div>
+    <div class="p-6 flex flex-col gap-4 max-w-sm">
+      <div class="form-control w-full">
+        <div class="label"><span class="label-text text-xs">Theme</span></div>
+        <div class="flex gap-2">
+          <button
+            v-for="theme in THEMES"
+            :key="theme"
+            class="btn btn-sm flex-1"
+            :class="currentTheme === theme ? 'btn-primary' : 'btn-ghost border border-base-content/20'"
+            @click="applyTheme(theme)"
+          >
+            {{ THEME_LABELS[theme] }}
+          </button>
+        </div>
       </div>
     </div>
   </div>

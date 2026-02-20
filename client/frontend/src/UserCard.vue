@@ -33,6 +33,6 @@ function initials(name: string) {
 }
 .speaking {
   outline-width: 3px;
-  outline-color: #ffcc00;
+  outline-color: var(--color-success);
 }
 </style>

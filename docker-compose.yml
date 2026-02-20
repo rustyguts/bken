@@ -8,16 +8,19 @@ services:
       - ./server:/app
     network_mode: host
 
-  client:
+  client1:
     build:
       context: ./client
       target: dev
+      args:
+        UID: ${UID}
+        GID: ${GID}
     user: "${UID}:${GID}"
     network_mode: host
     environment:
       - DISPLAY=${DISPLAY}
       - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
-      - XAUTHORITY=/root/.Xauthority
+      - XAUTHORITY=/tmp/.Xauthority
       - WEBKIT_DISABLE_COMPOSITING_MODE=1
       - WEBKIT_DISABLE_DMABUF_RENDERER=1
       - LIBGL_ALWAYS_SOFTWARE=1
@@ -26,14 +29,17 @@ services:
       - HOME=/tmp
     volumes:
       - ./client:/app
-      - /app/frontend/dist                  # anonymous: shadows root-owned host dir
+      - /app/frontend/dist                  # anonymous: owned by UID at build time
       - /app/frontend/node_modules          # anonymous: avoids cross-platform issues
       - /app/frontend/wailsjs/runtime       # anonymous: wails writes runtime files here
+      - /app/build                          # anonymous: compiled binary output
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTHORITY}:/root/.Xauthority:ro
+      - ${XAUTHORITY}:/tmp/.Xauthority:ro
       - ${XDG_RUNTIME_DIR}/pipewire-0:${XDG_RUNTIME_DIR}/pipewire-0
     devices:
       - /dev/snd:/dev/snd
+    security_opt:
+      - seccomp:unconfined
     depends_on:
       - server
 
@@ -41,12 +47,15 @@ services:
     build:
       context: ./client
       target: dev
+      args:
+        UID: ${UID}
+        GID: ${GID}
     user: "${UID}:${GID}"
     network_mode: host
     environment:
       - DISPLAY=${DISPLAY}
       - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
-      - XAUTHORITY=/root/.Xauthority
+      - XAUTHORITY=/tmp/.Xauthority
       - WEBKIT_DISABLE_COMPOSITING_MODE=1
       - WEBKIT_DISABLE_DMABUF_RENDERER=1
       - LIBGL_ALWAYS_SOFTWARE=1
@@ -55,14 +64,18 @@ services:
       - HOME=/tmp
     volumes:
       - ./client:/app
-      - /app/frontend/dist                  # anonymous: shadows root-owned host dir
+      - ./client/wails-34116.json:/app/wails.json  # override devServer port for this instance
+      - /app/frontend/dist                  # anonymous: owned by UID at build time
       - /app/frontend/node_modules          # anonymous: avoids cross-platform issues
       - /app/frontend/wailsjs/runtime       # anonymous: wails writes runtime files here
+      - /app/build                          # anonymous: compiled binary output
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTHORITY}:/root/.Xauthority:ro
+      - ${XAUTHORITY}:/tmp/.Xauthority:ro
       - ${XDG_RUNTIME_DIR}/pipewire-0:${XDG_RUNTIME_DIR}/pipewire-0
     devices:
       - /dev/snd:/dev/snd
+    security_opt:
+      - seccomp:unconfined
     depends_on:
       - server
 
@@ -83,17 +96,19 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
-      - XAUTHORITY=/root/.Xauthority
+      - XAUTHORITY=/tmp/.Xauthority
       - WEBKIT_DISABLE_COMPOSITING_MODE=1
       - WEBKIT_DISABLE_DMABUF_RENDERER=1
       - LIBGL_ALWAYS_SOFTWARE=1
       - BKEN_USERNAME=Brendan
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTHORITY}:/root/.Xauthority:ro
+      - ${XAUTHORITY}:/tmp/.Xauthority:ro
       - ${XDG_RUNTIME_DIR}/pipewire-0:${XDG_RUNTIME_DIR}/pipewire-0
     devices:
       - /dev/snd:/dev/snd
+    security_opt:
+      - seccomp:unconfined
     depends_on:
       - server-prod
 
@@ -106,16 +121,18 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
-      - XAUTHORITY=/root/.Xauthority
+      - XAUTHORITY=/tmp/.Xauthority
       - WEBKIT_DISABLE_COMPOSITING_MODE=1
       - WEBKIT_DISABLE_DMABUF_RENDERER=1
       - LIBGL_ALWAYS_SOFTWARE=1
       - BKEN_USERNAME=Rosie
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTHORITY}:/root/.Xauthority:ro
+      - ${XAUTHORITY}:/tmp/.Xauthority:ro
       - ${XDG_RUNTIME_DIR}/pipewire-0:${XDG_RUNTIME_DIR}/pipewire-0
     devices:
       - /dev/snd:/dev/snd
+    security_opt:
+      - seccomp:unconfined
     depends_on:
       - server-prod

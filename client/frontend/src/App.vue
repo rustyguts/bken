@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Connect, GetAutoLogin } from '../wailsjs/go/main/App'
+import { Connect, Disconnect, GetAutoLogin } from '../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
-import Login from './Login.vue'
+import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
 import type { LogEvent } from './EventLog.vue'
@@ -13,7 +13,7 @@ interface User {
 }
 
 const connected = ref(false)
-const loginRef = ref<InstanceType<typeof Login> | null>(null)
+const serverBrowserRef = ref<InstanceType<typeof ServerBrowser> | null>(null)
 const users = ref<User[]>([])
 const logEvents = ref<LogEvent[]>([])
 const speakingUsers = ref<Set<number>>(new Set())
@@ -132,7 +132,7 @@ async function handleConnect(payload: { username: string; addr: string }) {
   logEvents.value = []
   const err = await Connect(payload.addr, payload.username)
   if (err) {
-    loginRef.value?.setError(err)
+    serverBrowserRef.value?.setError(err)
   } else {
     connected.value = true
     addEvent('Connected', 'info')
@@ -155,7 +155,7 @@ function handleDisconnect() {
   clearSpeaking()
 }
 
-function handleCancelReconnect() {
+async function handleCancelReconnect() {
   clearReconnectTimers()
   reconnecting.value = false
   reconnectAttempt.value = 0
@@ -163,6 +163,7 @@ function handleCancelReconnect() {
   users.value = []
   logEvents.value = []
   clearSpeaking()
+  await Disconnect() // reset Go state in case a reconnect resolved in-flight
 }
 </script>
 
@@ -181,6 +182,6 @@ function handleCancelReconnect() {
       :log-events="logEvents"
       @disconnect="handleDisconnect"
     />
-    <Login v-else ref="loginRef" @connect="handleConnect" />
+    <ServerBrowser v-else ref="serverBrowserRef" @connect="handleConnect" />
   </main>
 </template>

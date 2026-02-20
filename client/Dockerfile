@@ -1,6 +1,11 @@
 # ── base: system deps + Go toolchain + Wails CLI + module cache ───────────────
 FROM golang:1-bookworm AS base
 
+# Build-time UID/GID so pre-created dirs are owned by the container user.
+# Match the values passed via docker-compose build.args (default: 1000).
+ARG UID=1000
+ARG GID=1000
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg \
     libgtk-3-dev \
@@ -12,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ \
     libasound2-dev \
     libpipewire-0.3-dev \
+    pipewire-alsa \
+    pipewire-jack \
     autoconf automake libtool git \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -37,13 +44,19 @@ COPY go.mod go.sum ./
 RUN go mod download all
 
 # Make the Go toolchain and module cache fully accessible to any user.
-RUN chmod -R a+rwX /go
+RUN chown -R ${UID}:${GID} /go && chmod -R a+rwX /go
 
-# Pre-create dirs used as anonymous volumes so they're world-writable when
-# Docker initialises the volume from the image (before bind mounts apply).
-RUN mkdir -p /app/frontend/node_modules /app/frontend/dist /app/frontend/wailsjs/runtime \
+# Pre-create dirs that will be shadowed by anonymous volumes.
+# chown to the runtime user so Docker initialises the volumes with correct
+# ownership — the container user can then chmod/write them freely.
+RUN mkdir -p \
+        /app/frontend/node_modules \
+        /app/frontend/dist \
+        /app/frontend/wailsjs/runtime \
+        /app/build/bin \
     && touch /app/frontend/dist/.gitkeep \
-    && chmod -R a+rwx /app/frontend
+    && chown -R ${UID}:${GID} /app/frontend /app/build \
+    && chmod -R a+rwx /app/frontend /app/build
 
 # ── dev: wails dev with source mounted at /app ────────────────────────────────
 FROM base AS dev

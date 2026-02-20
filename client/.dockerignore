@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Compiled binary output
+build/bin/
+client
+
+# Frontend deps and build artifacts (populated at runtime via anonymous volumes)
+frontend/node_modules/
+frontend/dist/
+frontend/wailsjs/runtime/
+
+# Go test artifacts
+*.test
+*.out
+*.prof
+
+# Air hot-reload temp dir
+tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Docs
+README.md

@@ -43,8 +43,10 @@ type AudioEngine struct {
 	CaptureOut chan []byte // Encoded OPUS frames ready to send.
 	PlaybackIn chan []byte // Encoded OPUS frames received from network.
 
-	running  atomic.Bool
-	testMode atomic.Bool
+	running   atomic.Bool
+	testMode  atomic.Bool
+	muted     atomic.Bool
+	deafened  atomic.Bool
 
 	stopCh     chan struct{}
 	OnSpeaking func() // called (throttled) when mic audio exceeds speaking threshold
@@ -287,6 +289,7 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 		if err != nil {
 			if ae.running.Load() {
 				log.Printf("[audio] capture read: %v", err)
+				go ae.Stop() // signal app that audio failed
 			}
 			return
 		}
@@ -334,9 +337,11 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			default:
 			}
 		} else {
-			select {
-			case ae.CaptureOut <- encoded:
-			default:
+			if !ae.muted.Load() {
+				select {
+				case ae.CaptureOut <- encoded:
+				default:
+				}
 			}
 		}
 	}
@@ -350,6 +355,19 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 		case <-ae.stopCh:
 			return
 		case data := <-ae.PlaybackIn:
+			if ae.deafened.Load() {
+				// Write silence to keep the stream alive.
+				for i := range buf {
+					buf[i] = 0
+				}
+				if err := ae.playbackStream.Write(); err != nil {
+					if ae.running.Load() {
+						log.Printf("[audio] playback write: %v", err)
+					}
+					return
+				}
+				continue
+			}
 			n, err := ae.decoder.Decode(data, pcm)
 			if err != nil {
 				log.Printf("[audio] decode: %v", err)
@@ -389,6 +407,16 @@ func (ae *AudioEngine) StartTest() error {
 func (ae *AudioEngine) StopTest() {
 	ae.testMode.Store(false)
 	ae.Stop()
+}
+
+// SetMuted mutes/unmutes the microphone (stops sending audio).
+func (ae *AudioEngine) SetMuted(muted bool) {
+	ae.muted.Store(muted)
+}
+
+// SetDeafened enables/disables audio playback.
+func (ae *AudioEngine) SetDeafened(deafened bool) {
+	ae.deafened.Store(deafened)
 }
 
 // EncodeFrame encodes a PCM int16 frame to OPUS. Exported for testing.
