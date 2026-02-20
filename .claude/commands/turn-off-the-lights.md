@@ -22,9 +22,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 ### Things to work on
 
-- Set a default global username. Right now users cant join a server unless their username is set. Generate one if one is not defined. Store the global username in the client state db
-- Bug: I can hear voice from people in other channels. You should only receive voice packets for the channel that you are in
-- Bug: Pressing disconnect stops voice but the UI does not update. It still shows that you are connected to the channel
 - Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in
 - Error states when you can't connect to the server or get disconnected
 - Join voice button sometimes does not work.
@@ -35,7 +32,10 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Notifications when you miss messages
 - Admin can drag users into a different channel (or right click and move them)
 - Admin can create new channels (Right click on server in sidebar create channel)
-- Differentiate the idea of being "Connected" to the server vs being connected via voice. When the user clicks on the server in the sidebar they are connected over WebTransport and start getting messages. The disconnect button only disconnects them from the voice channel that they are currently in. But they are still connected to the server itself so that they can chat, browse, do other things. Switching between other servers does truly disconnect and connect to another server instance
 
 ### Done
 
+- Set a default global username. Right now users cant join a server unless their username is set. Generate one if one is not defined. Store the global username in the client state db
+- Bug: I can hear voice from people in other channels. You should only receive voice packets for the channel that you are in
+- Bug: Pressing disconnect stops voice but the UI does not update. It still shows that you are connected to the channel
+- Differentiate the idea of being "Connected" to the server vs being connected via voice. When the user clicks on the server in the sidebar they are connected over WebTransport and start getting messages. The disconnect button only disconnects them from the voice channel that they are currently in. But they are still connected to the server itself so that they can chat, browse, do other things. Switching between other servers does truly disconnect and connect to another server instance
