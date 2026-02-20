@@ -83,3 +83,9 @@ export function GetMutedUsers(): Promise<number[]> {
 export function SendChat(message: string): Promise<string> {
   return bridge()['SendChat'](message)
 }
+
+// --- Moderation bindings ---
+
+export function KickUser(id: number): Promise<string> {
+  return bridge()['KickUser'](id)
+}

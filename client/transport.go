@@ -44,6 +44,7 @@ type ControlMsg struct {
 	Ts         int64      `json:"ts,omitempty"`          // ping/pong timestamp (Unix ms)
 	Message    string     `json:"message,omitempty"`     // chat: body text
 	ServerName string     `json:"server_name,omitempty"` // user_list: human-readable server name
+	OwnerID    uint16     `json:"owner_id,omitempty"`    // user_list/owner_changed: current room owner
 }
 
 // UserInfo describes a connected peer.
@@ -109,6 +110,8 @@ type Transport struct {
 	onDisconnected  func()
 	onChatMessage   func(username, message string, ts int64)
 	onServerInfo    func(name string)
+	onKicked        func()
+	onOwnerChanged  func(ownerID uint16)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -163,6 +166,18 @@ func (t *Transport) SetOnServerInfo(fn func(name string)) {
 	t.cbMu.Unlock()
 }
 
+func (t *Transport) SetOnKicked(fn func()) {
+	t.cbMu.Lock()
+	t.onKicked = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnOwnerChanged(fn func(ownerID uint16)) {
+	t.cbMu.Lock()
+	t.onOwnerChanged = fn
+	t.cbMu.Unlock()
+}
+
 // --- Per-user local muting ---
 
 // MuteUser suppresses incoming audio from the given remote user ID.
@@ -176,6 +191,13 @@ func (t *Transport) IsUserMuted(id uint16) bool { return t.muted.Has(id) }
 
 // MutedUsers returns the IDs of all currently muted remote users.
 func (t *Transport) MutedUsers() []uint16 { return t.muted.Slice() }
+
+// KickUser sends a kick request to the server. Only succeeds if the caller is
+// the room owner; the server enforces the authorisation check.
+func (t *Transport) KickUser(id uint16) error {
+	t.writeCtrl(ControlMsg{Type: "kick", ID: id})
+	return nil
+}
 
 // SendChat sends a chat message to the server for fan-out to all participants.
 func (t *Transport) SendChat(message string) error {
@@ -450,6 +472,8 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onUserLeft := t.onUserLeft
 		onChat := t.onChatMessage
 		onServerInfo := t.onServerInfo
+		onKicked := t.onKicked
+		onOwnerChanged := t.onOwnerChanged
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
@@ -466,6 +490,9 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 			}
 			if msg.ServerName != "" && onServerInfo != nil {
 				onServerInfo(msg.ServerName)
+			}
+			if onOwnerChanged != nil {
+				onOwnerChanged(msg.OwnerID)
 			}
 		case "user_joined":
 			if onUserJoined != nil {
@@ -496,6 +523,14 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		case "server_info":
 			if msg.ServerName != "" && onServerInfo != nil {
 				onServerInfo(msg.ServerName)
+			}
+		case "owner_changed":
+			if onOwnerChanged != nil {
+				onOwnerChanged(msg.OwnerID)
+			}
+		case "kicked":
+			if onKicked != nil {
+				onKicked()
 			}
 		}
 	}

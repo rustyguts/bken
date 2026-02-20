@@ -15,6 +15,8 @@ const users = ref<User[]>([])
 const logEvents = ref<LogEvent[]>([])
 const chatMessages = ref<ChatMessage[]>([])
 const serverName = ref('')
+const ownerID = ref(0)
+const myID = ref(0)
 const speakingUsers = ref<Set<number>>(new Set())
 const speakingTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let eventIdCounter = 0
@@ -95,6 +97,8 @@ function resetState(): void {
   logEvents.value = []
   chatMessages.value = []
   serverName.value = ''
+  ownerID.value = 0
+  myID.value = 0
   clearSpeaking()
 }
 
@@ -172,6 +176,22 @@ onMounted(async () => {
     serverName.value = data.name
   })
 
+  EventsOn('room:owner', (data: { owner_id: number }) => {
+    ownerID.value = data.owner_id
+  })
+
+  EventsOn('user:me', (data: { id: number }) => {
+    myID.value = data.id
+  })
+
+  EventsOn('connection:kicked', () => {
+    addEvent('You were kicked from the server', 'leave')
+    clearReconnectTimers()
+    reconnecting.value = false
+    reconnectAttempt.value = 0
+    resetState()
+  })
+
   // Apply saved audio settings before doing anything else so noise suppression,
   // AGC, and volume are active even if the user never opens the settings panel.
   await ApplyConfig()
@@ -182,7 +202,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message', 'server:info')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked')
   clearReconnectTimers()
   speakingTimers.forEach(t => clearTimeout(t))
 })
@@ -207,6 +227,8 @@ onBeforeUnmount(() => {
         :speaking-users="speakingUsers"
         :log-events="logEvents"
         :chat-messages="chatMessages"
+        :owner-id="ownerID"
+        :my-id="myID"
         class="flex-1 min-h-0"
         @disconnect="handleDisconnect"
         @send-chat="handleSendChat"

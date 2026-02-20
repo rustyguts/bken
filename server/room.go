@@ -17,6 +17,7 @@ type Room struct {
 	mu         sync.RWMutex
 	clients    map[uint16]*Client
 	serverName string // protected by mu
+	ownerID    uint16 // ID of the current room owner; 0 = no owner; protected by mu
 	nextID     atomic.Uint32
 
 	// Metrics (reset on each Stats call).
@@ -42,6 +43,51 @@ func (r *Room) ServerName() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.serverName
+}
+
+// ClaimOwnership sets id as the room owner if no owner is currently set.
+// Returns true if this call made the client the owner.
+func (r *Room) ClaimOwnership(id uint16) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ownerID == 0 {
+		r.ownerID = id
+		return true
+	}
+	return false
+}
+
+// OwnerID returns the ID of the current room owner (0 if none).
+func (r *Room) OwnerID() uint16 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.ownerID
+}
+
+// TransferOwnership removes ownership from leavingID and assigns it to the
+// remaining client with the lowest ID. Returns the new owner ID and whether
+// ownership actually changed. Call after RemoveClient so the leaving client
+// is no longer in the clients map.
+func (r *Room) TransferOwnership(leavingID uint16) (newOwnerID uint16, changed bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ownerID != leavingID {
+		return r.ownerID, false // leaving client was not the owner
+	}
+	r.ownerID = 0
+	for id := range r.clients {
+		if r.ownerID == 0 || id < r.ownerID {
+			r.ownerID = id
+		}
+	}
+	return r.ownerID, true
+}
+
+// GetClient returns the client with the given ID, or nil if not found.
+func (r *Room) GetClient(id uint16) *Client {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.clients[id]
 }
 
 // AddClient registers a client, assigns it a unique ID, and returns that ID.

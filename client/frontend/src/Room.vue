@@ -14,6 +14,8 @@ const props = defineProps<{
   speakingUsers: Set<number>
   logEvents: LogEvent[]
   chatMessages: ChatMessage[]
+  ownerId: number
+  myId: number
 }>()
 
 const emit = defineEmits<{ disconnect: []; sendChat: [message: string] }>()
@@ -101,6 +103,8 @@ async function handleDisconnect(): Promise<void> {
               v-if="activeTab === 'voice'"
               :users="users"
               :speaking-users="speakingUsers"
+              :owner-id="props.ownerId"
+              :my-id="props.myId"
               class="h-full"
             />
             <ChatPanel

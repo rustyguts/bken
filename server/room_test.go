@@ -183,6 +183,86 @@ func TestRoomSetGetServerName(t *testing.T) {
 	}
 }
 
+func TestRoomClaimOwnership(t *testing.T) {
+	room := NewRoom()
+
+	c1 := newTestClient("alice")
+	c2 := newTestClient("bob")
+	room.AddClient(c1)
+	room.AddClient(c2)
+
+	if !room.ClaimOwnership(c1.ID) {
+		t.Fatal("first ClaimOwnership should succeed")
+	}
+	if room.OwnerID() != c1.ID {
+		t.Errorf("ownerID: got %d, want %d", room.OwnerID(), c1.ID)
+	}
+	if room.ClaimOwnership(c2.ID) {
+		t.Error("second ClaimOwnership should fail when owner already set")
+	}
+	if room.OwnerID() != c1.ID {
+		t.Errorf("ownerID should remain %d, got %d", c1.ID, room.OwnerID())
+	}
+}
+
+func TestRoomTransferOwnershipToLowestID(t *testing.T) {
+	room := NewRoom()
+
+	c1 := newTestClient("alice")
+	c2 := newTestClient("bob")
+	c3 := newTestClient("carol")
+	room.AddClient(c1)
+	room.AddClient(c2)
+	room.AddClient(c3)
+	room.ClaimOwnership(c1.ID)
+
+	// c1 leaves → TransferOwnership must be called AFTER RemoveClient.
+	room.RemoveClient(c1.ID)
+	newOwner, changed := room.TransferOwnership(c1.ID)
+	if !changed {
+		t.Fatal("expected ownership to change when owner left")
+	}
+	if newOwner != c2.ID {
+		t.Errorf("newOwner: got %d, want %d (lowest remaining ID)", newOwner, c2.ID)
+	}
+}
+
+func TestRoomTransferOwnershipNonOwner(t *testing.T) {
+	room := NewRoom()
+
+	c1 := newTestClient("alice")
+	c2 := newTestClient("bob")
+	room.AddClient(c1)
+	room.AddClient(c2)
+	room.ClaimOwnership(c1.ID)
+
+	room.RemoveClient(c2.ID)
+	_, changed := room.TransferOwnership(c2.ID)
+	if changed {
+		t.Error("non-owner leaving should not change ownership")
+	}
+	if room.OwnerID() != c1.ID {
+		t.Errorf("ownerID should remain %d, got %d", c1.ID, room.OwnerID())
+	}
+}
+
+func TestRoomTransferOwnershipEmptyRoom(t *testing.T) {
+	room := NewRoom()
+
+	c1 := newTestClient("alice")
+	room.AddClient(c1)
+	room.ClaimOwnership(c1.ID)
+
+	room.RemoveClient(c1.ID)
+	newOwner, changed := room.TransferOwnership(c1.ID)
+	if !changed {
+		t.Fatal("expected ownership to change")
+	}
+	if newOwner != 0 {
+		t.Errorf("empty room: newOwner should be 0, got %d", newOwner)
+	}
+}
+
 func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	room := NewRoom()
 

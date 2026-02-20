@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -169,6 +170,101 @@ func TestProcessControlChatStampsServerUsername(t *testing.T) {
 	got := decodeControl(t, buf)
 	if got.Username != "alice" {
 		t.Errorf("username should be server-stamped 'alice', got %q", got.Username)
+	}
+}
+
+// --- processControl: kick ---
+
+// mockCloser records whether Close was called.
+type mockCloser struct{ closed bool }
+
+func (m *mockCloser) Close() error { m.closed = true; return nil }
+
+// newKickableClient returns a Client with a cancel func and closer, both observable in tests.
+func newKickableClient(username string) (*Client, *bytes.Buffer, context.CancelFunc, *mockCloser) {
+	buf := &bytes.Buffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = ctx // cancel is what we observe
+	mc := &mockCloser{}
+	c := &Client{
+		Username: username,
+		session:  &mockSender{},
+		ctrl:     buf,
+		cancel:   cancel,
+		closer:   mc,
+	}
+	return c, buf, cancel, mc
+}
+
+func TestProcessControlKickByOwner(t *testing.T) {
+	room := NewRoom()
+	owner, ownerBuf := newCtrlClient("alice")
+	target, targetBuf, _, targetCloser := newKickableClient("bob")
+	room.AddClient(owner)
+	room.AddClient(target)
+	room.ClaimOwnership(owner.ID)
+
+	_ = ownerBuf
+	processControl(ControlMsg{Type: "kick", ID: target.ID}, owner, room)
+
+	// Target should receive a "kicked" message.
+	got := decodeControl(t, targetBuf)
+	if got.Type != "kicked" {
+		t.Errorf("target: type: got %q, want %q", got.Type, "kicked")
+	}
+	// Target's closer should have been called.
+	if !targetCloser.closed {
+		t.Error("target closer should have been called")
+	}
+}
+
+func TestProcessControlKickByNonOwner(t *testing.T) {
+	room := NewRoom()
+	owner, _ := newCtrlClient("alice")
+	attacker, _ := newCtrlClient("eve")
+	target, targetBuf, _, targetCloser := newKickableClient("bob")
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.AddClient(target)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "kick", ID: target.ID}, attacker, room)
+
+	if targetBuf.Len() != 0 {
+		t.Error("non-owner kick should be ignored: target should receive nothing")
+	}
+	if targetCloser.closed {
+		t.Error("non-owner kick should not close target connection")
+	}
+}
+
+func TestProcessControlKickSelf(t *testing.T) {
+	room := NewRoom()
+	owner, ownerBuf, _, ownerCloser := newKickableClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "kick", ID: owner.ID}, owner, room)
+
+	if ownerBuf.Len() != 0 {
+		t.Error("owner should not be able to kick themselves")
+	}
+	if ownerCloser.closed {
+		t.Error("owner closer should not be called when kicking self")
+	}
+}
+
+func TestProcessControlKickUnknownTarget(t *testing.T) {
+	room := NewRoom()
+	owner, _, _, ownerCloser := newKickableClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	// Should not panic — target ID 9999 doesn't exist.
+	processControl(ControlMsg{Type: "kick", ID: 9999}, owner, room)
+
+	if ownerCloser.closed {
+		t.Error("kicking unknown target should not affect owner")
 	}
 }
 

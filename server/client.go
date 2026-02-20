@@ -24,7 +24,13 @@ type Client struct {
 	ctrlMu sync.Mutex
 	ctrl   io.Writer // control stream; nil until the join handshake completes
 	cancel context.CancelFunc
+	closer io.Closer // closes the underlying connection; nil in unit tests
 }
+
+// sessionCloser adapts *webtransport.Session to io.Closer.
+type sessionCloser struct{ sess *webtransport.Session }
+
+func (s *sessionCloser) Close() error { return s.sess.CloseWithError(0, "") }
 
 // SendControl writes a newline-delimited JSON control message to the client's control stream.
 // It is safe to call concurrently.
@@ -50,6 +56,7 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	client := &Client{
 		session: sess,
 		cancel:  cancel,
+		closer:  &sessionCloser{sess},
 	}
 
 	defer func() {
@@ -57,6 +64,9 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 		if client.ID != 0 {
 			room.RemoveClient(client.ID)
 			room.BroadcastControl(ControlMsg{Type: "user_left", ID: client.ID}, 0)
+			if newOwner, changed := room.TransferOwnership(client.ID); changed {
+				room.BroadcastControl(ControlMsg{Type: "owner_changed", OwnerID: newOwner}, 0)
+			}
 		}
 		sess.CloseWithError(0, "bye")
 	}()
@@ -86,8 +96,12 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	client.Username = joinMsg.Username
 	room.AddClient(client)
 
+	if room.ClaimOwnership(client.ID) {
+		log.Printf("[client %d] %s claimed room ownership", client.ID, client.Username)
+	}
+
 	// Send the current user list (and server name) to the new client.
-	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName()})
+	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName(), OwnerID: room.OwnerID()})
 
 	// Notify all other clients that this user joined.
 	room.BroadcastControl(
@@ -134,6 +148,21 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 				Message:   msg.Message,
 				Timestamp: time.Now().UnixMilli(),
 			}, 0)
+		}
+	case "kick":
+		// Only the room owner may kick. Owners cannot kick themselves.
+		if room.OwnerID() != client.ID || msg.ID == 0 || msg.ID == client.ID {
+			return
+		}
+		target := room.GetClient(msg.ID)
+		if target == nil {
+			return
+		}
+		log.Printf("[client %d] %s kicked client %d", client.ID, client.Username, msg.ID)
+		target.SendControl(ControlMsg{Type: "kicked"})
+		target.cancel()
+		if target.closer != nil {
+			target.closer.Close()
 		}
 	}
 }

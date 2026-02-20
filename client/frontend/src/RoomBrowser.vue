@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import UserCard from './UserCard.vue'
-import { MuteUser, UnmuteUser } from './config'
+import { MuteUser, UnmuteUser, KickUser } from './config'
 import type { User } from './types'
 
-defineProps<{
+const props = defineProps<{
   users: User[]
   speakingUsers: Set<number>
+  ownerId: number
+  myId: number
 }>()
 
 const mutedUsers = ref<Set<number>>(new Set())
@@ -22,6 +24,10 @@ async function handleToggleMute(id: number): Promise<void> {
     mutedUsers.value = new Set(mutedUsers.value)
     await MuteUser(id)
   }
+}
+
+async function handleKick(id: number): Promise<void> {
+  await KickUser(id)
 }
 </script>
 
@@ -40,7 +46,9 @@ async function handleToggleMute(id: number): Promise<void> {
         :user="user"
         :speaking="speakingUsers.has(user.id)"
         :muted="mutedUsers.has(user.id)"
+        :can-kick="props.ownerId === props.myId && props.myId !== 0 && user.id !== props.myId"
         @toggle-mute="handleToggleMute"
+        @kick="handleKick"
       />
     </div>
   </div>

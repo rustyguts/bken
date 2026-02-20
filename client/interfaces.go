@@ -27,7 +27,12 @@ type Transporter interface {
 	SetOnDisconnected(fn func())
 	SetOnChatMessage(fn func(username, message string, ts int64))
 	SetOnServerInfo(fn func(name string))
+	SetOnKicked(fn func())
+	SetOnOwnerChanged(fn func(ownerID uint16))
 
 	// Chat.
 	SendChat(message string) error
+
+	// Moderation.
+	KickUser(id uint16) error
 }

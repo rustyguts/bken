@@ -220,6 +220,7 @@ func (a *App) Connect(addr, username string) string {
 func (a *App) wireCallbacks() {
 	a.transport.SetOnUserList(func(users []UserInfo) {
 		runtime.EventsEmit(a.ctx, "user:list", users)
+		runtime.EventsEmit(a.ctx, "user:me", map[string]any{"id": int(a.transport.MyID())})
 	})
 	a.transport.SetOnUserJoined(func(id uint16, name string) {
 		runtime.EventsEmit(a.ctx, "user:joined", map[string]interface{}{"id": id, "username": name})
@@ -250,6 +251,15 @@ func (a *App) wireCallbacks() {
 	})
 	a.transport.SetOnServerInfo(func(name string) {
 		runtime.EventsEmit(a.ctx, "server:info", map[string]any{"name": name})
+	})
+	a.transport.SetOnOwnerChanged(func(ownerID uint16) {
+		runtime.EventsEmit(a.ctx, "room:owner", map[string]any{"owner_id": int(ownerID)})
+	})
+	a.transport.SetOnKicked(func() {
+		a.connected.Store(false)
+		a.audio.Stop()
+		runtime.EventsEmit(a.ctx, "connection:kicked", nil)
+		log.Println("[app] kicked from server")
 	})
 	a.audio.OnSpeaking = func() {
 		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
@@ -385,6 +395,16 @@ func (a *App) GetMutedUsers() []int {
 		out[i] = int(id)
 	}
 	return out
+}
+
+// KickUser removes the given user from the server. Only succeeds if the
+// caller is the room owner; the server enforces the check.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) KickUser(id int) string {
+	if err := a.transport.KickUser(uint16(id)); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // SendChat sends a chat message to the server for fan-out to all participants.

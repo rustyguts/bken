@@ -9,6 +9,7 @@ type ControlMsg struct {
 	Timestamp  int64      `json:"ts,omitempty"`          // ping/pong Unix ms
 	Message    string     `json:"message,omitempty"`     // chat: body text (max 500 chars)
 	ServerName string     `json:"server_name,omitempty"` // user_list: human-readable server name
+	OwnerID    uint16     `json:"owner_id,omitempty"`    // user_list/owner_changed: current room owner
 }
 
 // UserInfo is a brief snapshot of a connected user, used in user_list messages.
