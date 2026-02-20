@@ -277,11 +277,21 @@ onMounted(async () => {
 
   EventsOn('connection:lost', (data: { reason: string } | null) => {
     const reason = data?.reason || 'Connection lost'
+    // Remember the voice channel so we can rejoin after reconnect.
+    const lastChannel = userChannels.value[myID.value] ?? 0
     connected.value = false
     voiceConnected.value = false
     connectError.value = reason
     startReconnect(
-      () => { connected.value = true; voiceConnected.value = true; connectError.value = '' },
+      async () => {
+        connected.value = true
+        voiceConnected.value = true
+        connectError.value = ''
+        // Rejoin the voice channel the user was in before the disconnect.
+        if (lastChannel > 0) {
+          await JoinChannel(lastChannel)
+        }
+      },
       () => {},
     )
   })

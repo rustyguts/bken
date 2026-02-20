@@ -506,8 +506,24 @@ func (t *Transport) Disconnect() {
 	t.myID = 0
 }
 
+// dgramPool reuses datagram buffers on the voice send hot path.
+// Each buffer is pre-allocated to the maximum datagram size (4-byte header +
+// 1275-byte max Opus packet). quic-go's SendDatagram copies the data
+// internally, so the buffer can be returned to the pool immediately after
+// the call returns.
+//
+// Stored as *[]byte (not []byte) so the pointer fits in the interface word
+// and Get/Put avoid the per-call allocation from boxing a 3-word slice header.
+var dgramPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 4+opusMaxPacketBytes)
+		return &buf
+	},
+}
+
 // SendAudio sends an encoded Opus frame as an unreliable datagram.
 // The datagram header is: [userID:2][seq:2][opus_payload].
+// Buffers are recycled via sync.Pool to avoid per-frame allocations (50/s).
 func (t *Transport) SendAudio(opusData []byte) error {
 	t.mu.Lock()
 	sess := t.session
@@ -519,14 +535,18 @@ func (t *Transport) SendAudio(opusData []byte) error {
 	}
 
 	seq := uint16(t.seq.Add(1))
+	dgramLen := 4 + len(opusData)
 
-	dgram := make([]byte, 4+len(opusData))
+	bp := dgramPool.Get().(*[]byte)
+	dgram := (*bp)[:dgramLen]
 	binary.BigEndian.PutUint16(dgram[0:2], myID)
 	binary.BigEndian.PutUint16(dgram[2:4], seq)
 	copy(dgram[4:], opusData)
 
-	t.bytesSent.Add(uint64(len(dgram)))
-	return sess.SendDatagram(dgram)
+	t.bytesSent.Add(uint64(dgramLen))
+	err := sess.SendDatagram(dgram)
+	dgramPool.Put(bp)
+	return err
 }
 
 // MyID returns the local client's server-assigned user ID (0 before join ack).

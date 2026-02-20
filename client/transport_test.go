@@ -541,6 +541,69 @@ func TestPlaybackDroppedCounter(t *testing.T) {
 	}
 }
 
+// --- Datagram pool tests ---
+
+func TestDgramPoolBufferSize(t *testing.T) {
+	// Pool buffers must be large enough for the maximum datagram: 4-byte header + max Opus packet.
+	bp := dgramPool.Get().(*[]byte)
+	defer dgramPool.Put(bp)
+
+	buf := *bp
+	maxDgramSize := 4 + opusMaxPacketBytes
+	if len(buf) != maxDgramSize {
+		t.Errorf("pool buffer len = %d, want %d", len(buf), maxDgramSize)
+	}
+	if cap(buf) < maxDgramSize {
+		t.Errorf("pool buffer cap = %d, want >= %d", cap(buf), maxDgramSize)
+	}
+}
+
+func TestDgramPoolReuse(t *testing.T) {
+	// Verify that Get/Put cycle reuses the same underlying array.
+	bp1 := dgramPool.Get().(*[]byte)
+	ptr1 := &(*bp1)[0]
+	dgramPool.Put(bp1)
+
+	bp2 := dgramPool.Get().(*[]byte)
+	ptr2 := &(*bp2)[0]
+	dgramPool.Put(bp2)
+
+	if ptr1 != ptr2 {
+		t.Log("pool did not reuse buffer (may happen under GC pressure, not a hard failure)")
+	}
+}
+
+func TestDgramPoolSubsliceIntegrity(t *testing.T) {
+	// Simulate what SendAudio does: sub-slice the pool buffer, fill it, then
+	// verify the content matches what MarshalDatagram would produce.
+	opus := []byte{0xCA, 0xFE, 0xBA, 0xBE, 0x01, 0x02}
+	var userID uint16 = 42
+	var seq uint16 = 100
+
+	bp := dgramPool.Get().(*[]byte)
+	dgram := (*bp)[:4+len(opus)]
+	binary.BigEndian.PutUint16(dgram[0:2], userID)
+	binary.BigEndian.PutUint16(dgram[2:4], seq)
+	copy(dgram[4:], opus)
+	dgramPool.Put(bp)
+
+	// Compare with the allocation-based MarshalDatagram.
+	expected := MarshalDatagram(userID, seq, opus)
+	if string(dgram) != string(expected) {
+		t.Errorf("pooled datagram = %x, want %x", dgram, expected)
+	}
+}
+
+func TestSendAudioNilSessionPoolSafe(t *testing.T) {
+	// SendAudio with nil session should return nil without touching the pool
+	// in a way that causes panics.
+	tr := NewTransport()
+	err := tr.SendAudio([]byte{0x01, 0x02, 0x03})
+	if err != nil {
+		t.Errorf("SendAudio with nil session returned error: %v", err)
+	}
+}
+
 func TestOnDisconnectedCallbackSignature(t *testing.T) {
 	// Verify that the callback receives a reason string.
 	tr := NewTransport()
@@ -559,5 +622,34 @@ func TestOnDisconnectedCallbackSignature(t *testing.T) {
 
 	if received != "test reason" {
 		t.Errorf("callback received %q, want %q", received, "test reason")
+	}
+}
+
+// --- Benchmarks ---
+
+func BenchmarkDgramBuildPooled(b *testing.B) {
+	// Measures the pooled datagram construction path used by SendAudio.
+	opus := make([]byte, 80) // typical Opus VoIP frame at 32 kbps
+	b.ReportAllocs()
+	for b.Loop() {
+		bp := dgramPool.Get().(*[]byte)
+		dgram := (*bp)[:4+len(opus)]
+		binary.BigEndian.PutUint16(dgram[0:2], 1)
+		binary.BigEndian.PutUint16(dgram[2:4], 1)
+		copy(dgram[4:], opus)
+		dgramPool.Put(bp)
+	}
+}
+
+func BenchmarkDgramBuildAlloc(b *testing.B) {
+	// Measures the old allocation-per-frame path for comparison.
+	opus := make([]byte, 80)
+	b.ReportAllocs()
+	for b.Loop() {
+		dgram := make([]byte, 4+len(opus))
+		binary.BigEndian.PutUint16(dgram[0:2], 1)
+		binary.BigEndian.PutUint16(dgram[2:4], 1)
+		copy(dgram[4:], opus)
+		_ = dgram
 	}
 }
