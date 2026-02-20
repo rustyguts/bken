@@ -510,10 +510,11 @@ func (t *Transport) MyID() uint16 {
 }
 
 // StartReceiving pumps incoming datagrams to playbackCh in a background goroutine.
-// Each datagram payload is the raw Opus bytes (header stripped).
+// Each TaggedAudio carries the sender ID, sequence number, and raw Opus payload
+// so the audio engine can feed its per-sender jitter buffer.
 // Calling StartReceiving again cancels the previous goroutine before spawning a
 // new one, preventing duplicate readers on the same session.
-func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte) {
+func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- TaggedAudio) {
 	t.mu.Lock()
 	// Cancel any existing receive goroutine so we never have two readers.
 	if t.recvCancel != nil {
@@ -597,7 +598,7 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte
 			}
 
 			select {
-			case playbackCh <- opusData:
+			case playbackCh <- TaggedAudio{SenderID: userID, Seq: seq, OpusData: opusData}:
 			default:
 			}
 		}
@@ -800,6 +801,14 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 	if onDisconnected != nil {
 		onDisconnected(reason)
 	}
+}
+
+// TaggedAudio is a voice frame tagged with the sender's ID and sequence number.
+// Used to feed the per-sender jitter buffer in the audio engine.
+type TaggedAudio struct {
+	SenderID uint16
+	Seq      uint16
+	OpusData []byte
 }
 
 // MarshalDatagram builds a voice datagram. Exported for testing.

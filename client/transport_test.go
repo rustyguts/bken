@@ -155,7 +155,7 @@ func TestMutedSetClear(t *testing.T) {
 func TestStartReceivingNilSessionNoGoroutine(t *testing.T) {
 	tr := NewTransport()
 	// session is nil; should return immediately without panicking.
-	ch := make(chan []byte, 1)
+	ch := make(chan TaggedAudio, 1)
 	tr.StartReceiving(t.Context(), ch)
 	// If a goroutine had been started and accessed t.session unsafely, the
 	// race detector would catch it. The test itself just verifies no panic.

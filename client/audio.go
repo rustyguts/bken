@@ -8,6 +8,7 @@ import (
 
 	"client/internal/aec"
 	"client/internal/agc"
+	"client/internal/jitter"
 	"client/internal/vad"
 
 	"github.com/gordonklaus/portaudio"
@@ -68,8 +69,8 @@ type AudioEngine struct {
 
 	// CaptureOut carries encoded Opus frames ready to send over the network.
 	CaptureOut chan []byte
-	// PlaybackIn carries encoded Opus frames received from the network.
-	PlaybackIn chan []byte
+	// PlaybackIn carries tagged Opus frames from the network (sender ID + seq + data).
+	PlaybackIn chan TaggedAudio
 	// notifCh carries pre-chunked raw PCM float32 frames (FrameSize each)
 	// synthesised by PlayNotification. Mixed into the output after voice decoding.
 	notifCh chan []float32
@@ -107,7 +108,7 @@ func NewAudioEngine() *AudioEngine {
 		agcProc:        agc.New(),
 		vadProc:        vad.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
-		PlaybackIn:     make(chan []byte, playbackChannelBuf),
+		PlaybackIn:     make(chan TaggedAudio, playbackChannelBuf),
 		notifCh:        make(chan []float32, notifChannelBuf),
 		stopCh:         make(chan struct{}),
 	}
@@ -375,7 +376,7 @@ func (ae *AudioEngine) Stop() {
 	}
 	ae.mu.Unlock()
 
-	// Drain stale frames so they don't bleed into the next session.
+	// Drain stale tagged frames so they don't bleed into the next session.
 	for {
 		select {
 		case <-ae.PlaybackIn:
@@ -471,7 +472,7 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 		// (unless muted).
 		if ae.testMode.Load() {
 			select {
-			case ae.PlaybackIn <- encoded:
+			case ae.PlaybackIn <- TaggedAudio{SenderID: 0, Seq: 0, OpusData: encoded}:
 			default:
 			}
 		} else if !ae.muted.Load() {
@@ -483,8 +484,20 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 	}
 }
 
+// jitterDepth is the number of 20 ms frames the jitter buffer accumulates
+// before starting playback. 3 frames = 60 ms added latency — a good balance
+// between reorder tolerance and conversational responsiveness on a LAN.
+const jitterDepth = 3
+
+// decoderPruneInterval controls how often per-sender decoders are pruned
+// for senders that have gone silent (every N playback cycles ≈ N*20 ms).
+const decoderPruneInterval = 500 // ~10 s
+
 func (ae *AudioEngine) playbackLoop(buf []float32) {
 	pcm := make([]int16, FrameSize)
+	decoders := make(map[uint16]opusDecoder)
+	jb := jitter.New(jitterDepth)
+	var pruneCounter int
 
 	for {
 		// Check for stop before every write cycle.
@@ -494,34 +507,76 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 		default:
 		}
 
-		// Non-blocking receive: decode a packet if one is ready, otherwise write
-		// silence. playbackStream.Write() blocks until the hardware buffer needs
-		// more samples, naturally pacing this loop without an external ticker.
-		// Blocking here on the channel would starve the stream during silence
-		// gaps and cause underruns.
-		select {
-		case data := <-ae.PlaybackIn:
-			if ae.deafened.Load() {
-				zeroFloat32(buf)
-			} else {
-				n, err := ae.decoder.Decode(data, pcm)
-				if err != nil {
-					log.Printf("[audio] decode: %v", err)
-					zeroFloat32(buf)
-				} else {
-					ae.mu.Lock()
-					vol := ae.volume
-					ae.mu.Unlock()
-					scale := float32(vol) / 32768.0
-					for i := 0; i < n; i++ {
-						buf[i] = float32(pcm[i]) * scale
+		// Drain all available tagged frames into the jitter buffer.
+	drain:
+		for {
+			select {
+			case tagged := <-ae.PlaybackIn:
+				jb.Push(tagged.SenderID, tagged.Seq, tagged.OpusData)
+			default:
+				break drain
+			}
+		}
+
+		// Start with silence.
+		zeroFloat32(buf)
+
+		if !ae.deafened.Load() {
+			ae.mu.Lock()
+			vol := ae.volume
+			ae.mu.Unlock()
+			scale := float32(vol) / 32768.0
+
+			// Pop one frame per active sender from the jitter buffer.
+			for _, f := range jb.Pop() {
+				dec, ok := decoders[f.SenderID]
+				if !ok {
+					d, err := opus.NewDecoder(sampleRate, channels)
+					if err != nil {
+						log.Printf("[audio] create decoder for sender %d: %v", f.SenderID, err)
+						continue
 					}
-					zeroFloat32(buf[n:])
+					dec = d
+					decoders[f.SenderID] = dec
+				}
+
+				var n int
+				var err error
+				if f.OpusData != nil {
+					n, err = dec.Decode(f.OpusData, pcm)
+				} else {
+					// Packet loss concealment: Opus extrapolates from its internal
+					// state to fill the gap with a plausible waveform.
+					n, err = dec.Decode(nil, pcm)
+				}
+				if err != nil {
+					log.Printf("[audio] decode sender %d: %v", f.SenderID, err)
+					continue
+				}
+
+				// Additively mix this sender into the output buffer.
+				for i := 0; i < n; i++ {
+					buf[i] += float32(pcm[i]) * scale
 				}
 			}
-		default:
-			// No packet ready — output silence to keep the stream fed.
-			zeroFloat32(buf)
+
+			// Clamp mixed output to [-1.0, 1.0].
+			for i := range buf {
+				buf[i] = clampFloat32(buf[i])
+			}
+		}
+
+		// Periodically prune decoders when there are more decoders than active
+		// jitter buffer streams. This keeps memory bounded as users leave.
+		pruneCounter++
+		if pruneCounter >= decoderPruneInterval {
+			pruneCounter = 0
+			if len(decoders) > jb.ActiveSenders()+2 {
+				// More decoders than active senders — clear the map. Active
+				// senders will get fresh decoders on the next Pop cycle; Opus
+				// reconverges within one or two frames.
+				decoders = make(map[uint16]opusDecoder)
+			}
 		}
 
 		// Mix in one notification frame if available. Notifications bypass the

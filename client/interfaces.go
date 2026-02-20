@@ -8,7 +8,7 @@ type Transporter interface {
 	Connect(ctx context.Context, addr, username string) error
 	Disconnect()
 	SendAudio(opusData []byte) error
-	StartReceiving(ctx context.Context, playbackCh chan<- []byte)
+	StartReceiving(ctx context.Context, playbackCh chan<- TaggedAudio)
 	MyID() uint16
 	GetMetrics() Metrics
 
