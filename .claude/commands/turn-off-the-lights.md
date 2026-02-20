@@ -24,7 +24,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 - Basic roles for the server. Owner / Member.
   - ✅ Owners can kick members from the server — see Done section
-  - Owners can create channels in the server and CRUD the channels
+  - ✅ Owners can create channels in the server and CRUD the channels — see Done section
   - ✅ Owners can set the name of the server — see Done section
 - Server should have more state. Recommend embedded sqlite database.
   - ✅ Foundation is done — see Done section
@@ -72,3 +72,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Basic room ownership + kick: first client becomes owner; owner can kick members (server enforces); ownership transfers to lowest-ID client when owner leaves; "kicked" message closes connection; 4 kick tests + 4 ownership tests; kick button reveals on hover in UserCard (owner-only, not on self)
 - Owner can rename server: pencil icon hover-reveals in TitleBar (owner-only); inline input (max 50 chars, trim whitespace); Enter/confirm-button confirms, Escape/blur cancels; rename ControlMsg → server validates owner, updates SQLite via callback, broadcasts server_info to all clients; 5 rename tests in client_test.go + 2 in room_test.go
 - API validation consistency: PUT /api/settings trims whitespace + enforces 50-char max (mirrors in-session rename); GET /api/room now includes owner_id (0 when empty); 8 new tests covering too-long, whitespace-only, trim, malformed JSON, owner_id presence
+- Owner channel CRUD: SQLite migration v2 adds channels table; store exposes GetChannels/CreateChannel/RenameChannel/DeleteChannel/ChannelCount; REST API GET/POST/PUT/DELETE /api/channels with trim+50-char validation; "General" channel seeded on first run; 9 store tests + 9 API tests
