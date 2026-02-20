@@ -4,6 +4,10 @@ import (
 	"context"
 	"log"
 	"os"
+	"sync"
+	"time"
+
+	"client/internal/adapt"
 
 	"github.com/gordonklaus/portaudio"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -19,6 +23,10 @@ type App struct {
 	nc        *NoiseCanceller
 	connected bool
 	testUser  *TestUser // non-nil when BKEN_TEST_USER is configured
+
+	// Metrics cache: updated every 5 s by adaptBitrateLoop; read by GetMetrics.
+	metricsMu     sync.Mutex
+	cachedMetrics Metrics
 }
 
 // NewApp creates a new App.
@@ -155,6 +163,7 @@ func (a *App) Connect(addr, username string) string {
 
 	a.transport.StartReceiving(context.Background(), a.audio.PlaybackIn)
 	go a.sendLoop()
+	go a.adaptBitrateLoop(a.audio.Done())
 
 	if err := a.startTestUser(addr); err != nil {
 		log.Printf("[app] test user: %v", err)
@@ -225,12 +234,45 @@ func (a *App) Disconnect() {
 		a.testUser.stop()
 		a.testUser = nil
 	}
+	a.metricsMu.Lock()
+	a.cachedMetrics = Metrics{}
+	a.metricsMu.Unlock()
 	log.Println("[app] disconnected")
 }
 
-// GetMetrics returns current connection quality metrics.
+// GetMetrics returns the most recently cached connection quality metrics.
+// The cache is refreshed every 5 s by adaptBitrateLoop while connected.
 func (a *App) GetMetrics() Metrics {
-	return a.transport.GetMetrics()
+	a.metricsMu.Lock()
+	defer a.metricsMu.Unlock()
+	return a.cachedMetrics
+}
+
+// adaptBitrateLoop polls transport metrics every 5 s, adapts the Opus encoder
+// bitrate based on observed packet loss and RTT, then caches the metrics for
+// the frontend. It exits when done is closed (i.e. when audio stops).
+func (a *App) adaptBitrateLoop(done <-chan struct{}) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			m := a.transport.GetMetrics()
+			currentKbps := a.audio.CurrentBitrate()
+			nextKbps := adapt.NextBitrate(currentKbps, m.PacketLoss, m.RTTMs)
+			if nextKbps != currentKbps {
+				log.Printf("[app] adapting bitrate %d→%d kbps (loss=%.1f%% rtt=%.0fms)",
+					currentKbps, nextKbps, m.PacketLoss*100, m.RTTMs)
+				a.audio.SetBitrate(nextKbps)
+			}
+			m.OpusTargetKbps = nextKbps
+			a.metricsMu.Lock()
+			a.cachedMetrics = m
+			a.metricsMu.Unlock()
+		}
+	}
 }
 
 // GetConfig loads and returns the persisted user config.

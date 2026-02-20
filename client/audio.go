@@ -40,6 +40,7 @@ type paStream interface {
 // opusEncoder abstracts Opus encoding for testing.
 type opusEncoder interface {
 	Encode(pcm []int16, data []byte) (int, error)
+	SetBitrate(bitrate int) error
 }
 
 // opusDecoder abstracts Opus decoding for testing.
@@ -67,10 +68,11 @@ type AudioEngine struct {
 	// PlaybackIn carries encoded Opus frames received from the network.
 	PlaybackIn chan []byte
 
-	running  atomic.Bool
-	testMode atomic.Bool
-	muted    atomic.Bool
-	deafened atomic.Bool
+	running        atomic.Bool
+	testMode       atomic.Bool
+	muted          atomic.Bool
+	deafened       atomic.Bool
+	currentBitrate atomic.Int32 // kbps; set in Start() and updated by SetBitrate()
 
 	stopCh     chan struct{}
 	wg         sync.WaitGroup // tracks captureLoop + playbackLoop goroutines
@@ -154,6 +156,31 @@ func (ae *AudioEngine) SetVolume(vol float64) {
 	ae.mu.Unlock()
 }
 
+// SetBitrate changes the Opus encoder target bitrate (kbps) on the fly.
+// The value is clamped to the valid Opus range [6, 510].
+// Safe to call concurrently with audio capture.
+func (ae *AudioEngine) SetBitrate(kbps int) {
+	if kbps < 6 {
+		kbps = 6
+	}
+	if kbps > 510 {
+		kbps = 510
+	}
+	ae.mu.Lock()
+	if ae.encoder != nil {
+		if err := ae.encoder.SetBitrate(kbps * 1000); err != nil {
+			log.Printf("[audio] SetBitrate %d kbps: %v", kbps, err)
+		}
+	}
+	ae.mu.Unlock()
+	ae.currentBitrate.Store(int32(kbps))
+}
+
+// CurrentBitrate returns the current Opus encoder target bitrate (kbps).
+func (ae *AudioEngine) CurrentBitrate() int {
+	return int(ae.currentBitrate.Load())
+}
+
 // Start initializes the Opus codec and starts capture/playback streams.
 func (ae *AudioEngine) Start() error {
 	ae.mu.Lock()
@@ -169,6 +196,7 @@ func (ae *AudioEngine) Start() error {
 	}
 	enc.SetBitrate(opusBitrate)
 	ae.encoder = enc
+	ae.currentBitrate.Store(opusBitrate / 1000)
 
 	dec, err := opus.NewDecoder(sampleRate, channels)
 	if err != nil {

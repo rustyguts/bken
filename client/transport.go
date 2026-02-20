@@ -34,9 +34,10 @@ type UserInfo struct {
 
 // Metrics holds connection quality metrics shown in the UI.
 type Metrics struct {
-	RTTMs       float64 `json:"rtt_ms"`
-	PacketLoss  float64 `json:"packet_loss"`  // 0.0–1.0
-	BitrateKbps float64 `json:"bitrate_kbps"` // outgoing audio
+	RTTMs          float64 `json:"rtt_ms"`
+	PacketLoss     float64 `json:"packet_loss"`      // 0.0–1.0
+	BitrateKbps    float64 `json:"bitrate_kbps"`     // measured outgoing audio
+	OpusTargetKbps int     `json:"opus_target_kbps"` // current encoder target
 }
 
 // Transport manages the WebTransport connection to the server.
