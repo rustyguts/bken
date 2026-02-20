@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -53,6 +54,7 @@ func (s *APIServer) registerRoutes() {
 	s.echo.POST("/api/channels", s.handleCreateChannel)
 	s.echo.PUT("/api/channels/:id", s.handleRenameChannel)
 	s.echo.DELETE("/api/channels/:id", s.handleDeleteChannel)
+	s.echo.GET("/invite", s.handleInvite)
 }
 
 // Run starts the Echo HTTP server on addr and blocks until ctx is cancelled.
@@ -216,6 +218,62 @@ func (s *APIServer) handleDeleteChannel(c echo.Context) error {
 	}
 	s.refreshChannels()
 	return c.NoContent(http.StatusNoContent)
+}
+
+// handleInvite serves a browser-friendly invite page for the server.
+// The optional ?addr=host:port query parameter is the WebTransport address;
+// when provided the page includes a clickable bken:// deep-link.
+func (s *APIServer) handleInvite(c echo.Context) error {
+	name := s.room.ServerName()
+	if name == "" {
+		name = "bken server"
+	}
+	addr := c.QueryParam("addr")
+
+	var linkHTML string
+	if addr != "" {
+		bkenURL := "bken://" + addr
+		linkHTML = fmt.Sprintf(
+			`<a href="%s" class="btn">Open in bken</a><div class="addr">%s</div>`,
+			bkenURL, addr,
+		)
+	} else {
+		linkHTML = `<p class="hint">Ask the server owner for the invite link.</p>`
+	}
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Join %s – bken</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+    .card{background:#16213e;border-radius:12px;padding:2rem;max-width:400px;width:90%%;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+    h1{margin:0 0 .2rem;font-size:1rem;opacity:.45;letter-spacing:.18em;font-weight:700;text-transform:uppercase}
+    h2{margin:.2rem 0 .75rem;font-size:1.6rem;font-weight:700}
+    p{margin:0 0 1rem;opacity:.65;font-size:.9rem;line-height:1.5}
+    .btn{display:inline-block;padding:.7rem 1.4rem;background:#7c3aed;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.95rem}
+    .btn:hover{background:#6d28d9}
+    .addr{display:inline-block;font-family:monospace;background:#0f3460;padding:.35rem .7rem;border-radius:6px;font-size:.85rem;margin-top:.75rem;color:#93c5fd}
+    .hint{font-size:.85rem;opacity:.55}
+    .note{margin-top:1.5rem;font-size:.75rem;opacity:.4}
+    .note a{color:#a78bfa}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>bken</h1>
+    <h2>%s</h2>
+    <p>You have been invited to join this voice server.</p>
+    %s
+    <div class="note">Don't have bken? Get it at <a href="https://github.com/rustyguts/bken">github.com/rustyguts/bken</a>.</div>
+  </div>
+</body>
+</html>`, name, name, linkHTML)
+
+	return c.HTML(http.StatusOK, html)
 }
 
 // convertChannels maps store channel records to the wire-protocol ChannelInfo slice.

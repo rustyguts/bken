@@ -34,6 +34,9 @@ let countdownTimer: ReturnType<typeof setInterval> | null = null
 let lastAddr = ''
 let lastUsername = ''
 
+/** The WebTransport address the client is currently connected to. Exposed to TitleBar so the owner can generate an invite link. */
+const connectedAddr = ref('')
+
 /** Exponential backoff delays in seconds. */
 const BACKOFF = [1, 2, 4, 8, 16, 30] as const
 
@@ -96,6 +99,7 @@ function scheduleReconnect(): void {
 
 function resetState(): void {
   connected.value = false
+  connectedAddr.value = ''
   users.value = []
   logEvents.value = []
   chatMessages.value = []
@@ -117,6 +121,7 @@ async function handleConnect(payload: ConnectPayload): Promise<void> {
     serverBrowserRef.value?.setError(err)
   } else {
     connected.value = true
+    connectedAddr.value = payload.addr
     addEvent('Connected', 'info')
   }
 }
@@ -234,7 +239,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="flex flex-col h-full">
-    <TitleBar :server-name="serverName" :is-owner="ownerID !== 0 && ownerID === myID" />
+    <TitleBar :server-name="serverName" :is-owner="ownerID !== 0 && ownerID === myID" :server-addr="connectedAddr" />
     <Transition name="slide-down">
       <ReconnectBanner
         v-if="reconnecting"

@@ -3,11 +3,20 @@ import { ref, watch, nextTick } from 'vue'
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 import { RenameServer } from './config'
 
-const props = defineProps<{ serverName?: string; isOwner?: boolean }>()
+const props = defineProps<{ serverName?: string; isOwner?: boolean; serverAddr?: string }>()
 
 const editing = ref(false)
 const draft = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
+const copied = ref(false)
+
+async function copyInvite(): Promise<void> {
+  if (!props.serverAddr) return
+  const link = `bken://${props.serverAddr}`
+  await navigator.clipboard.writeText(link)
+  copied.value = true
+  setTimeout(() => { copied.value = false }, 2000)
+}
 
 function startEdit(): void {
   draft.value = props.serverName ?? ''
@@ -74,10 +83,11 @@ watch(() => props.serverName, () => { editing.value = false })
           </button>
         </template>
 
-        <!-- Display: server name + pencil icon on hover (owner only) -->
+        <!-- Display: server name + action icons on hover (owner only) -->
         <template v-else>
           <div class="group/name flex items-center gap-1">
             <span class="text-xs opacity-60 truncate max-w-[160px] pointer-events-none">{{ serverName }}</span>
+            <!-- Rename server (pencil) -->
             <button
               v-if="isOwner"
               class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity"
@@ -86,6 +96,23 @@ watch(() => props.serverName, () => { editing.value = false })
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true">
                 <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.263a1.75 1.75 0 0 0 0-2.473ZM4.75 13.25a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" />
+              </svg>
+            </button>
+            <!-- Copy invite link (chain link / check) -->
+            <button
+              v-if="isOwner && serverAddr"
+              class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity"
+              :class="{ 'opacity-100 text-success': copied }"
+              :title="copied ? 'Copied!' : 'Copy invite link'"
+              @click="copyInvite"
+            >
+              <!-- Check mark when recently copied -->
+              <svg v-if="copied" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true">
+                <path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
+              </svg>
+              <!-- Chain-link icon otherwise -->
+              <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true">
+                <path d="M8.914 6.025a.75.75 0 0 1 1.06 1.06L6.918 10.143a3.25 3.25 0 1 1-4.596-4.596L4.85 3.02a.75.75 0 0 1 1.06 1.06L3.383 6.607a1.75 1.75 0 1 0 2.475 2.475l3.056-3.057Zm.11-3.05a.75.75 0 0 1 1.06-1.06l2.528 2.528a3.25 3.25 0 1 1-4.596 4.596L5.49 7.51a.75.75 0 0 1 1.06-1.06l2.528 2.528a1.75 1.75 0 1 0 2.475-2.475L9.025 2.975Z" />
               </svg>
             </button>
           </div>

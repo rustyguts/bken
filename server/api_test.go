@@ -677,3 +677,89 @@ func TestDeleteChannelNotFound(t *testing.T) {
 		t.Errorf("expected 404, got %v", err)
 	}
 }
+
+// --- Invite endpoint tests ---
+
+func TestInviteEndpointReturnsHTML(t *testing.T) {
+	room := NewRoom()
+	room.SetServerName("My Server")
+	api := newTestAPI(t, room)
+
+	req := httptest.NewRequest(http.MethodGet, "/invite", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleInvite(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "My Server") {
+		t.Errorf("body should contain server name, got: %q", body[:minLen(len(body), 200)])
+	}
+	if !strings.Contains(body, "<!DOCTYPE html>") {
+		t.Errorf("body should be HTML")
+	}
+}
+
+func TestInviteEndpointWithAddr(t *testing.T) {
+	room := NewRoom()
+	room.SetServerName("Test Server")
+	api := newTestAPI(t, room)
+
+	req := httptest.NewRequest(http.MethodGet, "/invite?addr=192.168.1.10:4433", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleInvite(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "bken://192.168.1.10:4433") {
+		t.Errorf("body should contain bken:// link, got: %q", body[:minLen(len(body), 400)])
+	}
+}
+
+func TestInviteEndpointNoAddrOmitsLink(t *testing.T) {
+	room := NewRoom()
+	api := newTestAPI(t, room)
+
+	req := httptest.NewRequest(http.MethodGet, "/invite", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleInvite(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "bken://") {
+		t.Errorf("body should not contain bken:// link when addr is absent")
+	}
+}
+
+func TestInviteEndpointDefaultServerName(t *testing.T) {
+	room := NewRoom() // no server name set
+	api := newTestAPI(t, room)
+
+	req := httptest.NewRequest(http.MethodGet, "/invite", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleInvite(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "bken server") {
+		t.Errorf("should fall back to 'bken server' when name is empty")
+	}
+}
+
+// minLen returns the smaller of a and b (used for safe body truncation in test errors).
+func minLen(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

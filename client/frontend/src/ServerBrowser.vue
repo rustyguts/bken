@@ -49,7 +49,9 @@ function setError(msg: string): void {
 
 async function addServer(): Promise<void> {
   const name = newName.value.trim()
-  const addr = newAddr.value.trim()
+  // Accept bken:// invite links in the address field — strip the scheme prefix.
+  let addr = newAddr.value.trim()
+  if (addr.startsWith('bken://')) addr = addr.slice('bken://'.length)
   if (!name || !addr) {
     addError.value = 'Name and address are required'
     return
@@ -140,7 +142,7 @@ defineExpose({ setError })
           <input
             v-model="newAddr"
             type="text"
-            placeholder="host:port"
+            placeholder="host:port or bken:// link"
             class="input input-sm input-bordered w-full font-mono"
             :disabled="connecting"
             @keydown.enter="addServer"
