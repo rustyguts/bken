@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"log"
 	"net/http"
+	"time"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/webtransport-go"
 )
@@ -35,6 +37,12 @@ func (s *Server) Run(ctx context.Context) error {
 			Addr:      s.addr,
 			TLSConfig: s.tlsConfig,
 			Handler:   mux,
+			// Close QUIC connections that have been idle for 30 s.
+			// This reclaims resources from clients that disappear without a
+			// clean disconnect (e.g. crash, network change, power loss).
+			QUICConfig: &quic.Config{
+				MaxIdleTimeout: 30 * time.Second,
+			},
 		},
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}

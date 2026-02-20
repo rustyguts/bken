@@ -152,6 +152,58 @@ func TestServerTwoClientsExchangeDatagrams(t *testing.T) {
 	}
 }
 
+func TestPingPong(t *testing.T) {
+	addr, cancel := startTestServer(t)
+	defer cancel()
+
+	sess, ctrl := dialTestClient(t, addr, "pinger")
+	defer sess.CloseWithError(0, "test done")
+
+	reader := bufio.NewReader(ctrl)
+
+	// Drain the initial user_list.
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		t.Fatalf("read user_list: %v", err)
+	}
+
+	// Send a ping with a known timestamp.
+	pingTs := time.Now().UnixMilli()
+	pingMsg := ControlMsg{Type: "ping", Timestamp: pingTs}
+	data, _ := json.Marshal(pingMsg)
+	data = append(data, '\n')
+	if _, err := ctrl.Write(data); err != nil {
+		t.Fatalf("write ping: %v", err)
+	}
+
+	// Expect a pong echoing the timestamp.
+	ctx, rcvCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer rcvCancel()
+
+	pongCh := make(chan ControlMsg, 1)
+	go func() {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var msg ControlMsg
+		if json.Unmarshal(line, &msg) == nil {
+			pongCh <- msg
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for pong")
+	case msg := <-pongCh:
+		if msg.Type != "pong" {
+			t.Errorf("expected pong, got %q", msg.Type)
+		}
+		if msg.Timestamp != pingTs {
+			t.Errorf("pong timestamp mismatch: got %d, want %d", msg.Timestamp, pingTs)
+		}
+	}
+}
+
 func TestServerControlMessages(t *testing.T) {
 	addr, cancel := startTestServer(t)
 	defer cancel()

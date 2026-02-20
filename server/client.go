@@ -124,6 +124,10 @@ func readDatagrams(ctx context.Context, sess *webtransport.Session, room *Room, 
 	for {
 		data, err := sess.ReceiveDatagram(ctx)
 		if err != nil {
+			if ctx.Err() == nil {
+				// Not a clean shutdown — log so operators can see unexpected drops.
+				log.Printf("[client %d] datagram read error: %v", senderID, err)
+			}
 			return
 		}
 		if len(data) < 4 {

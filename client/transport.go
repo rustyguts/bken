@@ -61,6 +61,10 @@ type Transport struct {
 	smoothedRTT atomic.Uint64
 	lastPingTs  atomic.Int64 // Unix ms of the last ping sent
 
+	// lastPongTime records when the most recent pong was received (Unix nanoseconds).
+	// Initialised to the connection start time; 0 means never received.
+	lastPongTime atomic.Int64
+
 	// Bytes sent since the last GetMetrics call (for bitrate calculation).
 	bytesSent atomic.Uint64
 
@@ -176,6 +180,7 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	t.bytesSent.Store(0)
 	t.lostPackets.Store(0)
 	t.expectedPackets.Store(0)
+	t.lastPongTime.Store(time.Now().UnixNano()) // baseline: treat connection start as a pong
 	t.metricsMu.Lock()
 	t.lastMetricsTime = time.Now()
 	t.metricsMu.Unlock()
@@ -327,7 +332,12 @@ func (t *Transport) GetMetrics() Metrics {
 	}
 }
 
-// pingLoop sends a ping every 2 s for RTT measurement.
+// pongTimeout is the maximum time allowed between pongs before the connection
+// is considered dead and the client disconnects. 5 missed pings at 2 s each.
+const pongTimeout = 10 * time.Second
+
+// pingLoop sends a ping every 2 s for RTT measurement and enforces a pong
+// deadline. If no pong arrives within pongTimeout, the session is closed.
 func (t *Transport) pingLoop(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -339,6 +349,15 @@ func (t *Transport) pingLoop(ctx context.Context) {
 			ts := time.Now().UnixMilli()
 			t.lastPingTs.Store(ts)
 			t.writeCtrl(ControlMsg{Type: "ping", Ts: ts})
+
+			// Check pong deadline. lastPongTime is set to connection-start in
+			// Connect(), so this is only a timeout if the server stops responding.
+			lastPong := t.lastPongTime.Load()
+			if lastPong > 0 && time.Since(time.Unix(0, lastPong)) > pongTimeout {
+				log.Printf("[transport] pong timeout — server unreachable, disconnecting")
+				t.Disconnect()
+				return
+			}
 		}
 	}
 }
@@ -382,6 +401,7 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 				onUserLeft(msg.ID)
 			}
 		case "pong":
+			t.lastPongTime.Store(time.Now().UnixNano())
 			sent := t.lastPingTs.Load()
 			if sent != 0 {
 				sample := float64(time.Now().UnixMilli() - sent)
