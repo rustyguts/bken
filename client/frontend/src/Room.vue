@@ -37,6 +37,7 @@ const emit = defineEmits<{
   createChannel: [name: string]
   renameChannel: [channelID: number, name: string]
   deleteChannel: [channelID: number]
+  moveUser: [userID: number, channelID: number]
 }>()
 
 const muted = ref(false)
@@ -142,6 +143,7 @@ function handleSendMessage(message: string): void {
       @create-channel="emit('createChannel', $event)"
       @rename-channel="(id, name) => emit('renameChannel', id, name)"
       @delete-channel="emit('deleteChannel', $event)"
+      @move-user="(uid, chid) => emit('moveUser', uid, chid)"
     />
 
     <ChannelChatroom

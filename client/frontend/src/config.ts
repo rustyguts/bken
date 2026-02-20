@@ -127,3 +127,7 @@ export function RenameChannel(id: number, name: string): Promise<string> {
 export function DeleteChannel(id: number): Promise<string> {
   return bridge()['DeleteChannel'](id)
 }
+
+export function MoveUserToChannel(userID: number, channelID: number): Promise<string> {
+  return bridge()['MoveUserToChannel'](userID, channelID)
+}

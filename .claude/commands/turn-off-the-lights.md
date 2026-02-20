@@ -27,7 +27,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - File uploading in chatroom. Max size 10mb. Drag and drop should work. Or a Plus button with droptop (open top) and "Upload file"
 - Rich link previews
 - Notifications when you miss messages
-- Admin can drag users into a different channel (or right click and move them)
 ### Done
 
 - Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in (frontend filters messages by channel_id via visibleMessages computed property)
@@ -38,3 +37,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Error states when you can't connect to the server or get disconnected (10s connect timeout, disconnect reason in ReconnectBanner + ServerChannels, transport cleanup on unexpected disconnect)
 - Join voice button sometimes does not work (writeCtrl now returns errors so JoinChannel/ConnectVoice failures surface to frontend; StartReceiving cancels previous goroutine preventing duplicates; ConnectVoice cleans up audio on JoinChannel failure; frontend debounces rapid Join Voice clicks)
 - Admin can create new channels (owner sees "+" button in channel panel header to create; right-click on any channel for rename/delete context menu; channel CRUD via WebTransport control messages with owner-only auth; deleted channels move users back to lobby; 9 new server tests)
+- Admin can move users to a different channel (owner right-clicks user avatar in channel panel; context menu shows available channels; move_user control message with owner-only auth; 6 new server tests)

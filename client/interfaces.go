@@ -48,4 +48,5 @@ type Transporter interface {
 	CreateChannel(name string) error
 	RenameChannel(id int64, name string) error
 	DeleteChannel(id int64) error
+	MoveUser(userID uint16, channelID int64) error
 }

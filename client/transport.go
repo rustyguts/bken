@@ -268,6 +268,12 @@ func (t *Transport) DeleteChannel(id int64) error {
 	return t.writeCtrl(ControlMsg{Type: "delete_channel", ChannelID: id})
 }
 
+// MoveUser asks the server to move a user to a different channel.
+// Only succeeds if the caller is the room owner; the server enforces the check.
+func (t *Transport) MoveUser(userID uint16, channelID int64) error {
+	return t.writeCtrl(ControlMsg{Type: "move_user", ID: userID, ChannelID: channelID})
+}
+
 // SendChannelChat sends a channel-scoped chat message. The server routes it
 // only to users currently in the sender's channel. If the caller is not in a
 // channel, the server falls back to global broadcast.

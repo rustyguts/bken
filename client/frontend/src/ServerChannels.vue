@@ -20,6 +20,7 @@ const emit = defineEmits<{
   createChannel: [name: string]
   renameChannel: [channelID: number, name: string]
   deleteChannel: [channelID: number]
+  moveUser: [userID: number, channelID: number]
 }>()
 
 const myChannelId = computed(() => props.userChannels[props.myId] ?? 0)
@@ -136,10 +137,37 @@ function startDelete(): void {
   closeContextMenu()
   emit('deleteChannel', channel.id)
 }
+
+// User context menu (owner right-click on user avatar to move them)
+const userContextMenu = ref<{ x: number; y: number; user: User; currentChannelId: number } | null>(null)
+
+function openUserContextMenu(event: MouseEvent, user: User, currentChannelId: number): void {
+  if (!props.isOwner || user.id === props.myId) return
+  event.preventDefault()
+  event.stopPropagation()
+  userContextMenu.value = { x: event.clientX, y: event.clientY, user, currentChannelId }
+}
+
+function closeUserContextMenu(): void {
+  userContextMenu.value = null
+}
+
+function moveUserToChannel(channelId: number): void {
+  if (!userContextMenu.value) return
+  emit('moveUser', userContextMenu.value.user.id, channelId)
+  closeUserContextMenu()
+}
+
+/** Channels the user can be moved to (all rows except their current one). */
+const moveTargets = computed(() => {
+  if (!userContextMenu.value) return []
+  const current = userContextMenu.value.currentChannelId
+  return rows.value.filter(ch => ch.id !== current)
+})
 </script>
 
 <template>
-  <section class="flex flex-col h-full min-h-0" @click="closeContextMenu">
+  <section class="flex flex-col h-full min-h-0" @click="closeContextMenu(); closeUserContextMenu()">
     <div class="px-3 py-2 border-b border-base-content/10 flex items-center justify-between">
       <h2 class="text-xs font-semibold uppercase tracking-widest opacity-50">{{ serverName || 'Server' }}</h2>
       <button
@@ -208,8 +236,12 @@ function startDelete(): void {
             v-for="user in usersForChannel(channel.id).slice(0, 6)"
             :key="`${channel.id}-${user.id}`"
             class="w-5 h-5 rounded-full border text-[9px] font-mono flex items-center justify-center transition-all duration-150"
-            :class="speakingUsers.has(user.id) ? 'bg-success/20 border-success ring-1 ring-success/50' : 'bg-base-300 border-base-content/20'"
+            :class="[
+              speakingUsers.has(user.id) ? 'bg-success/20 border-success ring-1 ring-success/50' : 'bg-base-300 border-base-content/20',
+              isOwner && user.id !== myId ? 'cursor-context-menu' : '',
+            ]"
             :title="user.username"
+            @contextmenu="openUserContextMenu($event, user, channel.id)"
           >
             {{ initials(user.username) }}
           </span>
@@ -255,6 +287,28 @@ function startDelete(): void {
           @click="startDelete"
         >
           Delete Channel
+        </button>
+      </div>
+    </Teleport>
+
+    <!-- User context menu (owner right-click on user to move them) -->
+    <Teleport to="body">
+      <div
+        v-if="userContextMenu"
+        class="fixed z-50 min-w-[160px] rounded-lg border border-base-content/15 bg-base-200 shadow-lg py-1"
+        :style="{ left: userContextMenu.x + 'px', top: userContextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="px-3 py-1 text-[10px] uppercase tracking-wider opacity-40 select-none">
+          Move {{ userContextMenu.user.username }}
+        </div>
+        <button
+          v-for="target in moveTargets"
+          :key="target.id"
+          class="w-full text-left px-3 py-1.5 text-xs hover:bg-base-content/10 transition-colors"
+          @click="moveUserToChannel(target.id)"
+        >
+          {{ target.name }}
         </button>
       </div>
     </Teleport>

@@ -272,6 +272,22 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		// Move users who were in the deleted channel back to the lobby.
 		room.MoveChannelUsersToLobby(msg.ChannelID)
 		log.Printf("[client %d] %s deleted channel %d", client.ID, client.Username, msg.ChannelID)
+	case "move_user":
+		// Only the room owner may move other users between channels.
+		if room.OwnerID() != client.ID || msg.ID == 0 || msg.ID == client.ID {
+			return
+		}
+		target := room.GetClient(msg.ID)
+		if target == nil {
+			return
+		}
+		target.channelID.Store(msg.ChannelID)
+		room.BroadcastControl(ControlMsg{
+			Type:      "user_channel",
+			ID:        msg.ID,
+			ChannelID: msg.ChannelID,
+		}, 0)
+		log.Printf("[client %d] %s moved client %d to channel %d", client.ID, client.Username, msg.ID, msg.ChannelID)
 	}
 }
 

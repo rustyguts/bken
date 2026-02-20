@@ -512,6 +512,16 @@ func (a *App) DeleteChannel(id int) string {
 	return ""
 }
 
+// MoveUserToChannel asks the server to move a user to a different channel.
+// Only succeeds if the caller is the room owner; the server enforces the check.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) MoveUserToChannel(userID int, channelID int) string {
+	if err := a.transport.MoveUser(uint16(userID), int64(channelID)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // sendLoop reads encoded audio from the capture channel and forwards it via
 // transport. Exits when the audio engine stops or on send error.
 // On send error, it closes the transport session so that readControl detects

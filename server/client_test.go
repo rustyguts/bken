@@ -691,6 +691,124 @@ func TestProcessControlDeleteChannelZeroID(t *testing.T) {
 	}
 }
 
+// --- processControl: move_user ---
+
+func TestProcessControlMoveUserByOwner(t *testing.T) {
+	room := NewRoom()
+	owner, _ := newCtrlClient("alice")
+	target, _ := newCtrlClient("bob")
+	observer, observerBuf := newCtrlClient("carol")
+	room.AddClient(owner)
+	room.AddClient(target)
+	room.AddClient(observer)
+	room.ClaimOwnership(owner.ID)
+
+	target.channelID.Store(1)
+
+	processControl(ControlMsg{Type: "move_user", ID: target.ID, ChannelID: 5}, owner, room)
+
+	// Target's channelID should be updated.
+	if target.channelID.Load() != 5 {
+		t.Errorf("channelID: got %d, want 5", target.channelID.Load())
+	}
+
+	// All clients should receive user_channel broadcast.
+	got := decodeControl(t, observerBuf)
+	if got.Type != "user_channel" {
+		t.Errorf("type: got %q, want %q", got.Type, "user_channel")
+	}
+	if got.ID != target.ID {
+		t.Errorf("ID: got %d, want %d", got.ID, target.ID)
+	}
+	if got.ChannelID != 5 {
+		t.Errorf("ChannelID: got %d, want 5", got.ChannelID)
+	}
+}
+
+func TestProcessControlMoveUserByNonOwner(t *testing.T) {
+	room := NewRoom()
+	owner, _ := newCtrlClient("alice")
+	attacker, _ := newCtrlClient("eve")
+	target, targetBuf := newCtrlClient("bob")
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.AddClient(target)
+	room.ClaimOwnership(owner.ID)
+	target.channelID.Store(1)
+
+	processControl(ControlMsg{Type: "move_user", ID: target.ID, ChannelID: 5}, attacker, room)
+
+	// Target should not be moved.
+	if target.channelID.Load() != 1 {
+		t.Errorf("channelID should remain 1, got %d", target.channelID.Load())
+	}
+	if targetBuf.Len() != 0 {
+		t.Error("non-owner move should not produce any broadcast to target")
+	}
+}
+
+func TestProcessControlMoveUserSelf(t *testing.T) {
+	room := NewRoom()
+	owner, ownerBuf := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+	owner.channelID.Store(1)
+
+	processControl(ControlMsg{Type: "move_user", ID: owner.ID, ChannelID: 5}, owner, room)
+
+	// Owner should not be able to move themselves via move_user.
+	if owner.channelID.Load() != 1 {
+		t.Errorf("channelID should remain 1, got %d", owner.channelID.Load())
+	}
+	if ownerBuf.Len() != 0 {
+		t.Error("owner moving self should be ignored")
+	}
+}
+
+func TestProcessControlMoveUserUnknownTarget(t *testing.T) {
+	room := NewRoom()
+	owner, ownerBuf := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	// Target ID 9999 doesn't exist — should not panic.
+	processControl(ControlMsg{Type: "move_user", ID: 9999, ChannelID: 5}, owner, room)
+
+	if ownerBuf.Len() != 0 {
+		t.Error("moving unknown target should produce no broadcast")
+	}
+}
+
+func TestProcessControlMoveUserToLobby(t *testing.T) {
+	room := NewRoom()
+	owner, _ := newCtrlClient("alice")
+	target, _ := newCtrlClient("bob")
+	room.AddClient(owner)
+	room.AddClient(target)
+	room.ClaimOwnership(owner.ID)
+	target.channelID.Store(3)
+
+	processControl(ControlMsg{Type: "move_user", ID: target.ID, ChannelID: 0}, owner, room)
+
+	if target.channelID.Load() != 0 {
+		t.Errorf("channelID: got %d, want 0", target.channelID.Load())
+	}
+}
+
+func TestProcessControlMoveUserZeroID(t *testing.T) {
+	room := NewRoom()
+	owner, ownerBuf := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	// ID 0 is invalid.
+	processControl(ControlMsg{Type: "move_user", ID: 0, ChannelID: 5}, owner, room)
+
+	if ownerBuf.Len() != 0 {
+		t.Error("move_user with ID=0 should be ignored")
+	}
+}
+
 // --- processControl: unknown type ---
 
 func TestProcessControlUnknownTypeIsIgnored(t *testing.T) {
