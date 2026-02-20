@@ -8,17 +8,20 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+
+	"bken/server/store"
 )
 
 // APIServer provides HTTP REST endpoints for health checking and room state.
 // It runs on a separate TCP port from the WebTransport/QUIC server.
 type APIServer struct {
-	room *Room
-	echo *echo.Echo
+	room  *Room
+	store *store.Store
+	echo  *echo.Echo
 }
 
 // NewAPIServer constructs an APIServer and registers all routes.
-func NewAPIServer(room *Room) *APIServer {
+func NewAPIServer(room *Room, st *store.Store) *APIServer {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -34,7 +37,7 @@ func NewAPIServer(room *Room) *APIServer {
 	}))
 	e.Use(middleware.Recover())
 
-	s := &APIServer{room: room, echo: e}
+	s := &APIServer{room: room, store: st, echo: e}
 	s.registerRoutes()
 	return s
 }
@@ -42,6 +45,8 @@ func NewAPIServer(room *Room) *APIServer {
 func (s *APIServer) registerRoutes() {
 	s.echo.GET("/health", s.handleHealth)
 	s.echo.GET("/api/room", s.handleRoom)
+	s.echo.GET("/api/settings", s.handleGetSettings)
+	s.echo.PUT("/api/settings", s.handlePutSettings)
 }
 
 // Run starts the Echo HTTP server on addr and blocks until ctx is cancelled.
@@ -57,6 +62,38 @@ func (s *APIServer) Run(ctx context.Context, addr string) {
 	if err := s.echo.Shutdown(shutCtx); err != nil {
 		log.Printf("[api] shutdown: %v", err)
 	}
+}
+
+// SettingsResponse is the payload for GET /api/settings.
+type SettingsResponse struct {
+	ServerName string `json:"server_name"`
+}
+
+// SettingsRequest is the body for PUT /api/settings.
+type SettingsRequest struct {
+	ServerName string `json:"server_name"`
+}
+
+func (s *APIServer) handleGetSettings(c echo.Context) error {
+	name, _, err := s.store.GetSetting("server_name")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, SettingsResponse{ServerName: name})
+}
+
+func (s *APIServer) handlePutSettings(c echo.Context) error {
+	var req SettingsRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if req.ServerName == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "server_name must not be empty")
+	}
+	if err := s.store.SetSetting("server_name", req.ServerName); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // HealthResponse is the payload for GET /health.

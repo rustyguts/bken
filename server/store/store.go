@@ -1,0 +1,118 @@
+// Package store provides persistent server state backed by an embedded SQLite
+// database. It owns the database lifecycle and exposes a minimal API used by
+// the rest of the server.
+//
+// Migration design: SQL statements are kept in the [migrations] slice as
+// ordered strings. Each is applied exactly once; the applied version is
+// tracked in the schema_migrations table. To add a migration, append a new
+// string — never edit or reorder existing entries.
+package store
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+
+	_ "modernc.org/sqlite"
+)
+
+// migrations holds the ordered list of DDL/DML statements that bring the
+// schema up to date. Index i corresponds to version i+1.
+var migrations = []string{
+	// v1 — settings key/value store
+	`CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`,
+}
+
+// Store wraps a SQLite database and exposes server-state operations.
+type Store struct {
+	db *sql.DB
+}
+
+// New opens (or creates) the SQLite database at path and applies any pending
+// migrations. Use ":memory:" for ephemeral in-process storage (tests).
+func New(path string) (*Store, error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	// SQLite is single-writer; cap to one connection to prevent SQLITE_BUSY.
+	db.SetMaxOpenConns(1)
+
+	s := &Store{db: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return s, nil
+}
+
+// Close releases the database connection.
+func (s *Store) Close() error {
+	return s.db.Close()
+}
+
+// migrate creates the schema_migrations table (if absent) and applies any
+// migrations whose version number exceeds the current maximum.
+func (s *Store) migrate() error {
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version    INTEGER PRIMARY KEY,
+		applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
+	var current int
+	if err := s.db.QueryRow(
+		`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`,
+	).Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+
+	for i, stmt := range migrations {
+		v := i + 1
+		if v <= current {
+			continue
+		}
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migration %d: %w", v, err)
+		}
+		if _, err := s.db.Exec(
+			`INSERT INTO schema_migrations(version) VALUES(?)`, v,
+		); err != nil {
+			return fmt.Errorf("record migration %d: %w", v, err)
+		}
+		log.Printf("[store] applied migration v%d", v)
+	}
+	return nil
+}
+
+// GetSetting returns the value stored under key. The second return value is
+// false when the key does not exist; an error is only returned for real I/O
+// failures.
+func (s *Store) GetSetting(key string) (string, bool, error) {
+	var val string
+	err := s.db.QueryRow(
+		`SELECT value FROM settings WHERE key = ?`, key,
+	).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return val, true, nil
+}
+
+// SetSetting upserts key → value in the settings table.
+func (s *Store) SetSetting(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO settings(key, value) VALUES(?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value,
+	)
+	return err
+}
