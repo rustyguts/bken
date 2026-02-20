@@ -76,22 +76,25 @@ type ChannelInfo struct {
 
 // Metrics holds connection quality metrics shown in the UI.
 type Metrics struct {
-	RTTMs          float64 `json:"rtt_ms"`
-	PacketLoss     float64 `json:"packet_loss"`      // 0.0–1.0
-	JitterMs       float64 `json:"jitter_ms"`        // inter-arrival jitter (smoothed)
-	BitrateKbps    float64 `json:"bitrate_kbps"`     // measured outgoing audio
-	OpusTargetKbps int     `json:"opus_target_kbps"` // current encoder target
-	QualityLevel   string  `json:"quality_level"`    // "good", "moderate", or "poor"
+	RTTMs           float64 `json:"rtt_ms"`
+	PacketLoss      float64 `json:"packet_loss"`       // 0.0–1.0
+	JitterMs        float64 `json:"jitter_ms"`         // inter-arrival jitter (smoothed)
+	BitrateKbps     float64 `json:"bitrate_kbps"`      // measured outgoing audio
+	OpusTargetKbps  int     `json:"opus_target_kbps"`  // current encoder target
+	QualityLevel    string  `json:"quality_level"`     // "good", "moderate", or "poor"
+	CaptureDropped  uint64  `json:"capture_dropped"`   // frames dropped on send side since last tick
+	PlaybackDropped uint64  `json:"playback_dropped"`  // frames dropped on recv side since last tick
 }
 
 // qualityLevel classifies connection quality from metrics.
-// Thresholds: good (loss<2%, RTT<100ms, jitter<20ms),
-// moderate (loss<10%, RTT<300ms, jitter<50ms), poor (everything else).
-func qualityLevel(loss, rttMs, jitterMs float64) string {
-	if loss >= 0.10 || rttMs >= 300 || jitterMs >= 50 {
+// Thresholds: good (loss<2%, RTT<100ms, jitter<20ms, drops<1/s),
+// moderate (loss<10%, RTT<300ms, jitter<50ms, drops<5/s), poor (everything else).
+// dropRate is the combined capture+playback drops per second.
+func qualityLevel(loss, rttMs, jitterMs, dropRate float64) string {
+	if loss >= 0.10 || rttMs >= 300 || jitterMs >= 50 || dropRate >= 5 {
 		return "poor"
 	}
-	if loss >= 0.02 || rttMs >= 100 || jitterMs >= 20 {
+	if loss >= 0.02 || rttMs >= 100 || jitterMs >= 20 || dropRate >= 1 {
 		return "moderate"
 	}
 	return "good"
@@ -680,13 +683,17 @@ func (t *Transport) GetMetrics() Metrics {
 
 	rtt := math.Float64frombits(t.smoothedRTT.Load())
 	jitterMs := math.Float64frombits(t.smoothedJitter.Load())
+	playbackDrops := t.playbackDropped.Swap(0)
 
 	return Metrics{
-		RTTMs:        rtt,
-		PacketLoss:   loss,
-		JitterMs:     jitterMs,
-		BitrateKbps:  bitrate,
-		QualityLevel: qualityLevel(loss, rtt, jitterMs),
+		RTTMs:           rtt,
+		PacketLoss:      loss,
+		JitterMs:        jitterMs,
+		BitrateKbps:     bitrate,
+		PlaybackDropped: playbackDrops,
+		// QualityLevel is set by adaptBitrateLoop after merging drop counters.
+		// When called outside the loop (e.g. polling), use network metrics only.
+		QualityLevel: qualityLevel(loss, rtt, jitterMs, 0),
 	}
 }
 

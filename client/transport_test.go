@@ -341,58 +341,107 @@ func TestPongTimeoutConstant(t *testing.T) {
 }
 
 func TestQualityLevelGood(t *testing.T) {
-	if q := qualityLevel(0.01, 50, 10); q != "good" {
+	if q := qualityLevel(0.01, 50, 10, 0); q != "good" {
 		t.Errorf("expected good, got %q", q)
 	}
 }
 
 func TestQualityLevelModerate(t *testing.T) {
 	// High loss but below poor threshold.
-	if q := qualityLevel(0.05, 50, 10); q != "moderate" {
+	if q := qualityLevel(0.05, 50, 10, 0); q != "moderate" {
 		t.Errorf("expected moderate for loss=5%%, got %q", q)
 	}
 	// High RTT.
-	if q := qualityLevel(0.01, 200, 10); q != "moderate" {
+	if q := qualityLevel(0.01, 200, 10, 0); q != "moderate" {
 		t.Errorf("expected moderate for rtt=200ms, got %q", q)
 	}
 	// High jitter.
-	if q := qualityLevel(0.01, 50, 30); q != "moderate" {
+	if q := qualityLevel(0.01, 50, 30, 0); q != "moderate" {
 		t.Errorf("expected moderate for jitter=30ms, got %q", q)
 	}
 }
 
 func TestQualityLevelPoor(t *testing.T) {
-	if q := qualityLevel(0.15, 50, 10); q != "poor" {
+	if q := qualityLevel(0.15, 50, 10, 0); q != "poor" {
 		t.Errorf("expected poor for loss=15%%, got %q", q)
 	}
-	if q := qualityLevel(0.01, 400, 10); q != "poor" {
+	if q := qualityLevel(0.01, 400, 10, 0); q != "poor" {
 		t.Errorf("expected poor for rtt=400ms, got %q", q)
 	}
-	if q := qualityLevel(0.01, 50, 60); q != "poor" {
+	if q := qualityLevel(0.01, 50, 60, 0); q != "poor" {
 		t.Errorf("expected poor for jitter=60ms, got %q", q)
 	}
 }
 
 func TestQualityLevelBoundaries(t *testing.T) {
 	// Exactly at moderate boundaries.
-	if q := qualityLevel(0.02, 0, 0); q != "moderate" {
+	if q := qualityLevel(0.02, 0, 0, 0); q != "moderate" {
 		t.Errorf("loss=2%% boundary: expected moderate, got %q", q)
 	}
-	if q := qualityLevel(0, 100, 0); q != "moderate" {
+	if q := qualityLevel(0, 100, 0, 0); q != "moderate" {
 		t.Errorf("rtt=100ms boundary: expected moderate, got %q", q)
 	}
-	if q := qualityLevel(0, 0, 20); q != "moderate" {
+	if q := qualityLevel(0, 0, 20, 0); q != "moderate" {
 		t.Errorf("jitter=20ms boundary: expected moderate, got %q", q)
 	}
 	// Exactly at poor boundaries.
-	if q := qualityLevel(0.10, 0, 0); q != "poor" {
+	if q := qualityLevel(0.10, 0, 0, 0); q != "poor" {
 		t.Errorf("loss=10%% boundary: expected poor, got %q", q)
 	}
-	if q := qualityLevel(0, 300, 0); q != "poor" {
+	if q := qualityLevel(0, 300, 0, 0); q != "poor" {
 		t.Errorf("rtt=300ms boundary: expected poor, got %q", q)
 	}
-	if q := qualityLevel(0, 0, 50); q != "poor" {
+	if q := qualityLevel(0, 0, 50, 0); q != "poor" {
 		t.Errorf("jitter=50ms boundary: expected poor, got %q", q)
+	}
+}
+
+// --- Drop-aware quality level tests ---
+
+func TestQualityLevelDropsModerate(t *testing.T) {
+	// Good network metrics but 1 drop/s → moderate.
+	if q := qualityLevel(0, 0, 0, 1.0); q != "moderate" {
+		t.Errorf("dropRate=1/s: expected moderate, got %q", q)
+	}
+}
+
+func TestQualityLevelDropsPoor(t *testing.T) {
+	// Good network metrics but 5 drops/s → poor.
+	if q := qualityLevel(0, 0, 0, 5.0); q != "poor" {
+		t.Errorf("dropRate=5/s: expected poor, got %q", q)
+	}
+}
+
+func TestQualityLevelDropsBelowThreshold(t *testing.T) {
+	// Less than 1 drop/s: still good if network is fine.
+	if q := qualityLevel(0, 0, 0, 0.5); q != "good" {
+		t.Errorf("dropRate=0.5/s: expected good, got %q", q)
+	}
+}
+
+func TestQualityLevelDropsBoundaries(t *testing.T) {
+	// Exactly at moderate boundary.
+	if q := qualityLevel(0, 0, 0, 1); q != "moderate" {
+		t.Errorf("dropRate=1 boundary: expected moderate, got %q", q)
+	}
+	// Exactly at poor boundary.
+	if q := qualityLevel(0, 0, 0, 5); q != "poor" {
+		t.Errorf("dropRate=5 boundary: expected poor, got %q", q)
+	}
+}
+
+func TestMetricsIncludesDropFields(t *testing.T) {
+	tr := NewTransport()
+	// Simulate some playback drops.
+	tr.playbackDropped.Add(3)
+	m := tr.GetMetrics()
+	if m.PlaybackDropped != 3 {
+		t.Errorf("PlaybackDropped = %d, want 3", m.PlaybackDropped)
+	}
+	// Counter should be reset after GetMetrics.
+	m2 := tr.GetMetrics()
+	if m2.PlaybackDropped != 0 {
+		t.Errorf("PlaybackDropped after reset = %d, want 0", m2.PlaybackDropped)
 	}
 }
 

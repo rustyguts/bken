@@ -396,12 +396,19 @@ func (a *App) GetMetrics() Metrics {
 	return a.cachedMetrics
 }
 
+// adaptInterval is how often the adaptation loop ticks (exported for tests).
+const adaptInterval = 5 * time.Second
+
+// framesPerInterval is the approximate number of 20 ms audio frames in one
+// adaptation interval (50 fps × 5 s = 250).
+const framesPerInterval = 250.0
+
 // adaptBitrateLoop polls transport metrics every 5 s, adapts the Opus encoder
-// bitrate and jitter buffer depth based on observed network conditions, then
-// caches the metrics for the frontend. It exits when done is closed (i.e. when
-// audio stops).
+// bitrate and jitter buffer depth based on observed network conditions and
+// local frame drops, then caches the metrics for the frontend. It exits when
+// done is closed (i.e. when audio stops).
 func (a *App) adaptBitrateLoop(done <-chan struct{}) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(adaptInterval)
 	defer ticker.Stop()
 
 	const lossAlpha = 0.3 // EWMA weight for new loss sample
@@ -414,14 +421,30 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 		case <-ticker.C:
 			m := a.transport.GetMetrics()
 
+			// Collect local frame drops since the last tick.
+			// captureDrops: frames encoded but dropped because sendLoop couldn't
+			// drain CaptureOut fast enough (send-side congestion signal).
+			// playbackDropsLocal: frames dropped in the audio engine (always 0
+			// today; the transport holds the real counter returned in m).
+			captureDrops, playbackDropsLocal := a.audio.DroppedFrames()
+			m.CaptureDropped = captureDrops
+			m.PlaybackDropped += playbackDropsLocal // merge audio + transport drops
+
 			// Smooth the raw loss with EWMA to prevent FEC oscillation.
 			smoothedLoss = adapt.SmoothLoss(smoothedLoss, m.PacketLoss, lossAlpha)
 
+			// Treat capture drops as send-side loss: each dropped frame is a
+			// frame that peers will never hear, equivalent to a lost packet.
+			// Adding it to the effective loss ensures the bitrate ladder steps
+			// down when the local send path is congested (e.g. QUIC buffer full).
+			captureLoss := float64(captureDrops) / framesPerInterval
+			effectiveLoss := smoothedLoss + captureLoss
+
 			currentKbps := a.audio.CurrentBitrate()
-			nextKbps := adapt.NextBitrate(currentKbps, smoothedLoss, m.RTTMs)
+			nextKbps := adapt.NextBitrate(currentKbps, effectiveLoss, m.RTTMs)
 			if nextKbps != currentKbps {
-				log.Printf("[app] adapting bitrate %d→%d kbps (loss=%.1f%% smoothed=%.1f%% rtt=%.0fms)",
-					currentKbps, nextKbps, m.PacketLoss*100, smoothedLoss*100, m.RTTMs)
+				log.Printf("[app] adapting bitrate %d→%d kbps (loss=%.1f%% smoothed=%.1f%% capDrops=%d rtt=%.0fms)",
+					currentKbps, nextKbps, m.PacketLoss*100, smoothedLoss*100, captureDrops, m.RTTMs)
 				a.audio.SetBitrate(nextKbps)
 			}
 			// Feed smoothed loss into the Opus encoder for FEC tuning.
@@ -431,7 +454,12 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 			targetDepth := adapt.TargetJitterDepth(m.JitterMs, smoothedLoss)
 			a.audio.SetJitterDepth(targetDepth)
 
+			// Compute quality level including local drops.
+			totalDrops := captureDrops + m.PlaybackDropped
+			dropRate := float64(totalDrops) / adaptInterval.Seconds()
+
 			m.OpusTargetKbps = nextKbps
+			m.QualityLevel = qualityLevel(smoothedLoss, m.RTTMs, m.JitterMs, dropRate)
 			a.metricsMu.Lock()
 			a.cachedMetrics = m
 			a.metricsMu.Unlock()

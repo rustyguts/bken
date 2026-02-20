@@ -10,6 +10,8 @@ interface QualityMetrics {
   bitrate_kbps: number
   opus_target_kbps: number
   quality_level: string
+  capture_dropped: number
+  playback_dropped: number
 }
 
 const m = ref<QualityMetrics>({
@@ -19,7 +21,11 @@ const m = ref<QualityMetrics>({
   bitrate_kbps: 0,
   opus_target_kbps: 0,
   quality_level: '',
+  capture_dropped: 0,
+  playback_dropped: 0,
 })
+
+const totalDrops = computed(() => (m.value.capture_dropped ?? 0) + (m.value.playback_dropped ?? 0))
 
 const qualityDot = computed(() => {
   switch (m.value.quality_level) {
@@ -51,6 +57,8 @@ onMounted(() => {
         bitrate_kbps: metrics.bitrate_kbps ?? 0,
         opus_target_kbps: metrics.opus_target_kbps ?? 0,
         quality_level: metrics.quality_level ?? '',
+        capture_dropped: metrics.capture_dropped ?? 0,
+        playback_dropped: metrics.playback_dropped ?? 0,
       }
     }
   }, 5000)
@@ -81,6 +89,13 @@ onBeforeUnmount(() => {
     </span>
     <span class="opacity-50" title="Jitter">
       {{ m.jitter_ms > 0 ? m.jitter_ms.toFixed(0) + 'ms' : '---' }}
+    </span>
+    <span
+      v-if="totalDrops > 0"
+      class="text-warning"
+      :title="`${m.capture_dropped ?? 0} capture + ${m.playback_dropped ?? 0} playback frames dropped`"
+    >
+      {{ totalDrops }}d
     </span>
   </div>
 </template>
