@@ -142,6 +142,7 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 		}
 		var msg ControlMsg
 		if err := json.Unmarshal(line, &msg); err != nil {
+			log.Printf("[client %d] control unmarshal error: %v", client.ID, err)
 			continue
 		}
 		processControl(msg, client, room)

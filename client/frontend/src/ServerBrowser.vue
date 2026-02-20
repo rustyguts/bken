@@ -129,7 +129,7 @@ defineExpose({ setError })
 
       <!-- Add server form -->
       <Transition name="fade">
-        <div v-if="showAddForm" class="bg-base-200 rounded-lg p-3 flex flex-col gap-2">
+        <div v-if="showAddForm" class="card bg-base-200 p-3 flex flex-col gap-2">
           <div class="text-xs font-semibold opacity-60">Add Server</div>
           <input
             v-model="newName"
@@ -159,7 +159,7 @@ defineExpose({ setError })
       <div
         v-for="server in servers"
         :key="server.addr"
-        class="flex items-center justify-between bg-base-200 rounded-lg px-4 py-3 gap-2"
+        class="card flex-row items-center justify-between bg-base-200 px-4 py-3 gap-2"
       >
         <div class="flex-1 min-w-0">
           <div class="font-medium text-sm truncate">{{ server.name }}</div>

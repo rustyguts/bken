@@ -218,7 +218,7 @@ async function toggleTest(): Promise<void> {
           <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Input</span>
         </div>
 
-        <div class="rounded-xl border border-base-content/10 bg-base-200/40 p-4 flex flex-col gap-4">
+        <div class="card bg-base-200/40 border border-base-content/10 p-4 flex flex-col gap-4">
           <label class="form-control w-full">
             <div class="label pb-1 pt-0"><span class="label-text text-xs opacity-70">Microphone</span></div>
             <select
@@ -265,7 +265,7 @@ async function toggleTest(): Promise<void> {
           <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Output</span>
         </div>
 
-        <div class="rounded-xl border border-base-content/10 bg-base-200/40 p-4 flex flex-col gap-4">
+        <div class="card bg-base-200/40 border border-base-content/10 p-4 flex flex-col gap-4">
           <label class="form-control w-full">
             <div class="label pb-1 pt-0"><span class="label-text text-xs opacity-70">Speaker</span></div>
             <select
@@ -307,7 +307,7 @@ async function toggleTest(): Promise<void> {
           <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Voice Processing</span>
         </div>
 
-        <div class="rounded-xl border border-base-content/10 bg-base-200/40 p-4 flex flex-col gap-4">
+        <div class="card bg-base-200/40 border border-base-content/10 p-4 flex flex-col gap-4">
 
           <!-- Echo Cancellation -->
           <div>
