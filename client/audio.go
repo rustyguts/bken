@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"client/internal/agc"
+
 	"github.com/gordonklaus/portaudio"
 	"gopkg.in/hraban/opus.v2"
 )
@@ -71,6 +73,9 @@ type AudioEngine struct {
 	// synthesised by PlayNotification. Mixed into the output after voice decoding.
 	notifCh chan []float32
 
+	agcProc    *agc.AGC
+	agcEnabled atomic.Bool
+
 	running        atomic.Bool
 	testMode       atomic.Bool
 	muted          atomic.Bool
@@ -92,6 +97,7 @@ func NewAudioEngine() *AudioEngine {
 		inputDeviceID:  -1,
 		outputDeviceID: -1,
 		volume:         1.0,
+		agcProc:        agc.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
 		PlaybackIn:     make(chan []byte, playbackChannelBuf),
 		notifCh:        make(chan []float32, notifChannelBuf),
@@ -162,6 +168,20 @@ func (ae *AudioEngine) SetVolume(vol float64) {
 	ae.mu.Lock()
 	ae.volume = vol
 	ae.mu.Unlock()
+}
+
+// SetAGC enables or disables automatic gain control on the capture path.
+func (ae *AudioEngine) SetAGC(enabled bool) {
+	if enabled {
+		ae.agcProc.Reset()
+	}
+	ae.agcEnabled.Store(enabled)
+}
+
+// SetAGCLevel sets the AGC target loudness. level is in [0, 100] and maps to
+// an RMS target of [0.01, 0.50] (see agc.SetTarget).
+func (ae *AudioEngine) SetAGCLevel(level int) {
+	ae.agcProc.SetTarget(level)
 }
 
 // SetBitrate changes the Opus encoder target bitrate (kbps) on the fly.
@@ -391,6 +411,11 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 		ae.mu.Unlock()
 		if nc != nil {
 			nc.Process(buf)
+		}
+
+		// Apply AGC if enabled.
+		if ae.agcEnabled.Load() {
+			ae.agcProc.Process(buf)
 		}
 
 		// Convert float32 to int16 for Opus encoder.

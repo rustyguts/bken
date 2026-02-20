@@ -15,6 +15,8 @@ export interface Config {
   volume: number
   noise_enabled: boolean
   noise_level: number
+  agc_enabled: boolean
+  agc_level: number
   servers: ServerEntry[]
 }
 
@@ -27,6 +29,16 @@ export function GetConfig(): Promise<Config> {
 
 export function SaveConfig(cfg: Config): Promise<void> {
   return bridge()['SaveConfig'](cfg)
+}
+
+// --- AGC bindings ---
+
+export function SetAGC(enabled: boolean): Promise<void> {
+  return bridge()['SetAGC'](enabled)
+}
+
+export function SetAGCLevel(level: number): Promise<void> {
+  return bridge()['SetAGCLevel'](level)
 }
 
 // --- Per-user local mute bindings ---

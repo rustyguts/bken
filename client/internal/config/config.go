@@ -17,6 +17,8 @@ type Config struct {
 	Volume         float64       `json:"volume"`
 	NoiseEnabled   bool          `json:"noise_enabled"`
 	NoiseLevel     int           `json:"noise_level"`
+	AGCEnabled     bool          `json:"agc_enabled"`
+	AGCLevel       int           `json:"agc_level"`
 	Servers        []ServerEntry `json:"servers"`
 }
 
@@ -32,6 +34,8 @@ func Default() Config {
 		Theme:          "dark",
 		Volume:         1.0,
 		NoiseLevel:     80,
+		AGCEnabled:     true,
+		AGCLevel:       50,
 		InputDeviceID:  -1,
 		OutputDeviceID: -1,
 		Servers: []ServerEntry{

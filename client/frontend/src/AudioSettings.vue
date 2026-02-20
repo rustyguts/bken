@@ -12,7 +12,7 @@ import {
   StopTest,
 } from '../wailsjs/go/main/App'
 import { main } from '../wailsjs/go/models'
-import { GetConfig, SaveConfig } from './config'
+import { GetConfig, SaveConfig, SetAGC, SetAGCLevel } from './config'
 
 const inputDevices = ref<main.AudioDevice[]>([])
 const outputDevices = ref<main.AudioDevice[]>([])
@@ -21,6 +21,8 @@ const selectedOutput = ref(-1)
 const volume = ref(100)
 const noiseEnabled = ref(false)
 const noiseLevel = ref(80)
+const agcEnabled = ref(true)
+const agcLevel = ref(50)
 const testing = ref(false)
 const testError = ref('')
 
@@ -76,6 +78,8 @@ async function persistConfig(): Promise<void> {
     volume: volume.value / 100,
     noise_enabled: noiseEnabled.value,
     noise_level: noiseLevel.value,
+    agc_enabled: agcEnabled.value,
+    agc_level: agcLevel.value,
   })
 }
 
@@ -100,6 +104,8 @@ onMounted(async () => {
   volume.value = Math.round(cfg.volume * 100)
   noiseEnabled.value = cfg.noise_enabled
   noiseLevel.value = cfg.noise_level
+  agcEnabled.value = cfg.agc_enabled
+  agcLevel.value = cfg.agc_level
 
   // Theme: config is source of truth; keep localStorage in sync for fast startup
   const validTheme = THEMES.some(t => t.name === cfg.theme)
@@ -115,6 +121,8 @@ onMounted(async () => {
   await SetVolume(cfg.volume)
   await SetNoiseSuppression(cfg.noise_enabled)
   await SetNoiseSuppressionLevel(cfg.noise_level)
+  await SetAGC(cfg.agc_enabled)
+  await SetAGCLevel(cfg.agc_level)
 })
 
 async function handleInputChange(): Promise<void> {
@@ -139,6 +147,16 @@ async function handleNoiseToggle(): Promise<void> {
 
 async function handleNoiseLevelChange(): Promise<void> {
   await SetNoiseSuppressionLevel(noiseLevel.value)
+  await persistConfig()
+}
+
+async function handleAGCToggle(): Promise<void> {
+  await SetAGC(agcEnabled.value)
+  await persistConfig()
+}
+
+async function handleAGCLevelChange(): Promise<void> {
+  await SetAGCLevel(agcLevel.value)
   await persistConfig()
 }
 
@@ -228,6 +246,33 @@ async function toggleTest(): Promise<void> {
           :aria-label="`Noise suppression level: ${noiseLevel}%`"
           :disabled="!noiseEnabled"
           @input="handleNoiseLevelChange"
+        />
+      </label>
+
+      <label class="form-control w-full">
+        <div class="label cursor-pointer">
+          <span class="label-text text-xs">Auto Gain Control</span>
+          <input
+            type="checkbox"
+            v-model="agcEnabled"
+            class="toggle toggle-primary toggle-sm"
+            aria-label="Toggle automatic gain control"
+            @change="handleAGCToggle"
+          />
+        </div>
+      </label>
+
+      <label class="form-control w-full" :class="{ 'opacity-40 pointer-events-none': !agcEnabled }">
+        <div class="label"><span class="label-text text-xs">Target Level: {{ agcLevel }}%</span></div>
+        <input
+          type="range"
+          v-model.number="agcLevel"
+          min="0"
+          max="100"
+          class="range range-sm range-primary"
+          :aria-label="`AGC target level: ${agcLevel}%`"
+          :disabled="!agcEnabled"
+          @input="handleAGCLevelChange"
         />
       </label>
 

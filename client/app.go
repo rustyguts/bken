@@ -99,6 +99,16 @@ func (a *App) SetVolume(vol float64) {
 	a.audio.SetVolume(vol)
 }
 
+// SetAGC enables or disables automatic gain control on the capture path.
+func (a *App) SetAGC(enabled bool) {
+	a.audio.SetAGC(enabled)
+}
+
+// SetAGCLevel sets the AGC target loudness level (0–100).
+func (a *App) SetAGCLevel(level int) {
+	a.audio.SetAGCLevel(level)
+}
+
 // SetNoiseSuppression enables or disables noise suppression.
 // The NoiseCanceller is created lazily on first call.
 func (a *App) SetNoiseSuppression(enabled bool) {
