@@ -32,7 +32,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Users should be able to move between channels
 - Users should be able to connect to multiple servers and switch between them
 - UI: The inteface should always remain simple, clean, modern
-- UI: Beautiful settings page
 - Voice: Echo cancellation feature, enabled by default
 - Server owners should be able to generate invite links from the servers public endpoint. When openened in a browser this should open the app and automatically connect you to the server
 - Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat)
@@ -59,3 +58,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice: Automatic gain control (software AGC, enabled by default, configurable target level)
 - Voice: Noise suppression enabled by default; all audio settings applied on startup (not just when settings panel opens)
 - Voice: Ability to set volume (volume slider in settings panel)
+- UI: Beautiful settings page (grouped cards with icons for Input, Output, Voice Processing, Appearance)
