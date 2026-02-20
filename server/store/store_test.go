@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"testing"
 )
 
@@ -122,5 +123,126 @@ func TestMultipleSettings(t *testing.T) {
 		if err != nil || !ok || val != p[1] {
 			t.Errorf("GetSetting %q: val=%q ok=%v err=%v", p[0], val, ok, err)
 		}
+	}
+}
+
+// TestCreateAndGetChannels verifies basic channel creation and retrieval.
+func TestCreateAndGetChannels(t *testing.T) {
+	s := newMemStore(t)
+
+	id, err := s.CreateChannel("General")
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if id <= 0 {
+		t.Fatalf("expected positive id, got %d", id)
+	}
+
+	channels, err := s.GetChannels()
+	if err != nil {
+		t.Fatalf("GetChannels: %v", err)
+	}
+	if len(channels) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(channels))
+	}
+	if channels[0].Name != "General" {
+		t.Errorf("expected name %q, got %q", "General", channels[0].Name)
+	}
+	if channels[0].ID != id {
+		t.Errorf("expected id %d, got %d", id, channels[0].ID)
+	}
+}
+
+// TestGetChannelsEmpty verifies that GetChannels returns an empty (not nil) slice.
+func TestGetChannelsEmpty(t *testing.T) {
+	s := newMemStore(t)
+
+	channels, err := s.GetChannels()
+	if err != nil {
+		t.Fatalf("GetChannels: %v", err)
+	}
+	if channels != nil {
+		t.Errorf("expected nil slice for empty table, got %v", channels)
+	}
+}
+
+// TestRenameChannel verifies that a channel's name can be updated.
+func TestRenameChannel(t *testing.T) {
+	s := newMemStore(t)
+
+	id, _ := s.CreateChannel("Old Name")
+	if err := s.RenameChannel(id, "New Name"); err != nil {
+		t.Fatalf("RenameChannel: %v", err)
+	}
+
+	channels, _ := s.GetChannels()
+	if channels[0].Name != "New Name" {
+		t.Errorf("expected %q, got %q", "New Name", channels[0].Name)
+	}
+}
+
+// TestRenameChannelNotFound verifies that renaming a missing channel returns sql.ErrNoRows.
+func TestRenameChannelNotFound(t *testing.T) {
+	s := newMemStore(t)
+
+	err := s.RenameChannel(9999, "X")
+	if err != sql.ErrNoRows {
+		t.Errorf("expected sql.ErrNoRows, got %v", err)
+	}
+}
+
+// TestDeleteChannel verifies that a channel can be removed.
+func TestDeleteChannel(t *testing.T) {
+	s := newMemStore(t)
+
+	id, _ := s.CreateChannel("Temp")
+	if err := s.DeleteChannel(id); err != nil {
+		t.Fatalf("DeleteChannel: %v", err)
+	}
+
+	channels, _ := s.GetChannels()
+	if len(channels) != 0 {
+		t.Errorf("expected 0 channels after delete, got %d", len(channels))
+	}
+}
+
+// TestDeleteChannelNotFound verifies that deleting a missing channel returns sql.ErrNoRows.
+func TestDeleteChannelNotFound(t *testing.T) {
+	s := newMemStore(t)
+
+	err := s.DeleteChannel(9999)
+	if err != sql.ErrNoRows {
+		t.Errorf("expected sql.ErrNoRows, got %v", err)
+	}
+}
+
+// TestCreateChannelDuplicateName verifies that duplicate channel names are rejected.
+func TestCreateChannelDuplicateName(t *testing.T) {
+	s := newMemStore(t)
+
+	if _, err := s.CreateChannel("General"); err != nil {
+		t.Fatalf("first CreateChannel: %v", err)
+	}
+	_, err := s.CreateChannel("General")
+	if err == nil {
+		t.Fatal("expected error for duplicate channel name, got nil")
+	}
+}
+
+// TestChannelCount verifies the ChannelCount helper.
+func TestChannelCount(t *testing.T) {
+	s := newMemStore(t)
+
+	n, err := s.ChannelCount()
+	if err != nil || n != 0 {
+		t.Fatalf("expected 0, got %d err=%v", n, err)
+	}
+
+	s.CreateChannel("A")
+	s.CreateChannel("B")
+
+	n, err = s.ChannelCount()
+	if err != nil || n != 2 {
+		t.Fatalf("expected 2, got %d err=%v", n, err)
 	}
 }

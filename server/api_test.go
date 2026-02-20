@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -446,4 +447,233 @@ func TestHealthResponseContentType(t *testing.T) {
 	}
 	ct := rec.Header().Get(echo.MIMEApplicationJSON)
 	_ = ct // Echo sets content-type on the response writer; just ensure no panic
+}
+
+// --- Channel API tests ---
+
+func TestGetChannelsEmpty(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleGetChannels(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+
+	var resp []ChannelResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp) != 0 {
+		t.Errorf("expected empty array, got %v", resp)
+	}
+}
+
+func TestCreateChannelSuccess(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	body := strings.NewReader(`{"name":"General"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/channels", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	if err := api.handleCreateChannel(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status: got %d, want 201", rec.Code)
+	}
+
+	var resp ChannelResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Name != "General" {
+		t.Errorf("name: got %q, want %q", resp.Name, "General")
+	}
+	if resp.ID <= 0 {
+		t.Errorf("expected positive id, got %d", resp.ID)
+	}
+}
+
+func TestCreateChannelDuplicate(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	for i, want := range []int{http.StatusCreated, http.StatusConflict} {
+		body := strings.NewReader(`{"name":"General"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/channels", body)
+		req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		c := api.echo.NewContext(req, rec)
+		c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+		err := api.handleCreateChannel(c)
+		if i == 0 {
+			if err != nil {
+				t.Fatalf("first create: %v", err)
+			}
+		} else {
+			if err == nil {
+				t.Fatal("expected conflict error, got nil")
+			}
+			he, ok := err.(*echo.HTTPError)
+			if !ok || he.Code != want {
+				t.Errorf("expected %d, got %v", want, err)
+			}
+		}
+	}
+}
+
+func TestCreateChannelEmptyName(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	body := strings.NewReader(`{"name":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/channels", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	err := api.handleCreateChannel(c)
+	if err == nil {
+		t.Fatal("expected error for empty name, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %v", err)
+	}
+}
+
+func TestCreateChannelTooLongName(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	longName := strings.Repeat("x", 51)
+	body := strings.NewReader(`{"name":"` + longName + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/channels", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	err := api.handleCreateChannel(c)
+	if err == nil {
+		t.Fatal("expected error for 51-char name, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %v", err)
+	}
+}
+
+func TestRenameChannelSuccess(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	// Create a channel first.
+	body := strings.NewReader(`{"name":"Old"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/channels", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	if err := api.handleCreateChannel(c); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var created ChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &created)
+
+	// Rename it.
+	body2 := strings.NewReader(`{"name":"New"}`)
+	req2 := httptest.NewRequest(http.MethodPut, "/api/channels/"+strconv.FormatInt(created.ID, 10), body2)
+	req2.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec2 := httptest.NewRecorder()
+	c2 := api.echo.NewContext(req2, rec2)
+	c2.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	c2.SetParamNames("id")
+	c2.SetParamValues(strconv.FormatInt(created.ID, 10))
+
+	if err := api.handleRenameChannel(c2); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if rec2.Code != http.StatusNoContent {
+		t.Errorf("status: got %d, want 204", rec2.Code)
+	}
+}
+
+func TestRenameChannelNotFound(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	body := strings.NewReader(`{"name":"X"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/channels/9999", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	c.SetParamNames("id")
+	c.SetParamValues("9999")
+
+	err := api.handleRenameChannel(c)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %v", err)
+	}
+}
+
+func TestDeleteChannelSuccess(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	// Create a channel first.
+	body := strings.NewReader(`{"name":"Temp"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/channels", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	if err := api.handleCreateChannel(c); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var created ChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &created)
+
+	// Delete it.
+	req2 := httptest.NewRequest(http.MethodDelete, "/api/channels/"+strconv.FormatInt(created.ID, 10), nil)
+	rec2 := httptest.NewRecorder()
+	c2 := api.echo.NewContext(req2, rec2)
+	c2.SetParamNames("id")
+	c2.SetParamValues(strconv.FormatInt(created.ID, 10))
+
+	if err := api.handleDeleteChannel(c2); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if rec2.Code != http.StatusNoContent {
+		t.Errorf("status: got %d, want 204", rec2.Code)
+	}
+}
+
+func TestDeleteChannelNotFound(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/channels/9999", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9999")
+
+	err := api.handleDeleteChannel(c)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %v", err)
+	}
 }

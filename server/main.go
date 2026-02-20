@@ -70,7 +70,8 @@ func main() {
 	}
 }
 
-// seedDefaults writes factory-default settings when they have not been set yet.
+// seedDefaults writes factory-default settings and channels when they have not
+// been created yet (first-run initialisation).
 func seedDefaults(st *store.Store) {
 	defaults := [][2]string{
 		{"server_name", "bken server"},
@@ -80,6 +81,18 @@ func seedDefaults(st *store.Store) {
 			if err := st.SetSetting(kv[0], kv[1]); err != nil {
 				log.Printf("[store] seed %q: %v", kv[0], err)
 			}
+		}
+	}
+
+	// Seed a default "General" channel if no channels exist yet.
+	n, err := st.ChannelCount()
+	if err != nil {
+		log.Printf("[store] channel count: %v", err)
+		return
+	}
+	if n == 0 {
+		if _, err := st.CreateChannel("General"); err != nil {
+			log.Printf("[store] seed General channel: %v", err)
 		}
 	}
 }

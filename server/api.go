@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +50,10 @@ func (s *APIServer) registerRoutes() {
 	s.echo.GET("/api/room", s.handleRoom)
 	s.echo.GET("/api/settings", s.handleGetSettings)
 	s.echo.PUT("/api/settings", s.handlePutSettings)
+	s.echo.GET("/api/channels", s.handleGetChannels)
+	s.echo.POST("/api/channels", s.handleCreateChannel)
+	s.echo.PUT("/api/channels/:id", s.handleRenameChannel)
+	s.echo.DELETE("/api/channels/:id", s.handleDeleteChannel)
 }
 
 // Run starts the Echo HTTP server on addr and blocks until ctx is cancelled.
@@ -135,4 +141,86 @@ func (s *APIServer) handleRoom(c echo.Context) error {
 		Users:   users,
 		OwnerID: s.room.OwnerID(),
 	})
+}
+
+// ChannelResponse is an element in the GET /api/channels array.
+type ChannelResponse struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Position int    `json:"position"`
+}
+
+// ChannelRequest is the body for POST and PUT /api/channels.
+type ChannelRequest struct {
+	Name string `json:"name"`
+}
+
+func (s *APIServer) handleGetChannels(c echo.Context) error {
+	channels, err := s.store.GetChannels()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	resp := make([]ChannelResponse, 0, len(channels))
+	for _, ch := range channels {
+		resp = append(resp, ChannelResponse{ID: ch.ID, Name: ch.Name, Position: ch.Position})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (s *APIServer) handleCreateChannel(c echo.Context) error {
+	var req ChannelRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name must not be empty")
+	}
+	if len(name) > 50 {
+		return echo.NewHTTPError(http.StatusBadRequest, "name must not exceed 50 characters")
+	}
+	id, err := s.store.CreateChannel(name)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusConflict, "channel name already exists")
+	}
+	return c.JSON(http.StatusCreated, ChannelResponse{ID: id, Name: name})
+}
+
+func (s *APIServer) handleRenameChannel(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid channel id")
+	}
+	var req ChannelRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name must not be empty")
+	}
+	if len(name) > 50 {
+		return echo.NewHTTPError(http.StatusBadRequest, "name must not exceed 50 characters")
+	}
+	if err := s.store.RenameChannel(id, name); err != nil {
+		if err == sql.ErrNoRows {
+			return echo.NewHTTPError(http.StatusNotFound, "channel not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (s *APIServer) handleDeleteChannel(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid channel id")
+	}
+	if err := s.store.DeleteChannel(id); err != nil {
+		if err == sql.ErrNoRows {
+			return echo.NewHTTPError(http.StatusNotFound, "channel not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }

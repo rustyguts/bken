@@ -24,6 +24,13 @@ var migrations = []string{
 		key   TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	)`,
+	// v2 — channels
+	`CREATE TABLE IF NOT EXISTS channels (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		name       TEXT NOT NULL UNIQUE,
+		position   INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL DEFAULT (unixepoch())
+	)`,
 }
 
 // Store wraps a SQLite database and exposes server-state operations.
@@ -115,4 +122,87 @@ func (s *Store) SetSetting(key, value string) error {
 		key, value,
 	)
 	return err
+}
+
+// Channel represents a named voice channel stored in the database.
+type Channel struct {
+	ID       int64
+	Name     string
+	Position int
+}
+
+// GetChannels returns all channels ordered by position then id.
+func (s *Store) GetChannels() ([]Channel, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, position FROM channels ORDER BY position ASC, id ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var channels []Channel
+	for rows.Next() {
+		var ch Channel
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Position); err != nil {
+			return nil, err
+		}
+		channels = append(channels, ch)
+	}
+	return channels, rows.Err()
+}
+
+// CreateChannel inserts a new channel with the given name and returns its id.
+// Returns an error if a channel with that name already exists.
+func (s *Store) CreateChannel(name string) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO channels(name) VALUES(?)`, name,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// RenameChannel updates the name of the channel with the given id.
+// Returns sql.ErrNoRows if no such channel exists.
+func (s *Store) RenameChannel(id int64, name string) error {
+	res, err := s.db.Exec(
+		`UPDATE channels SET name = ? WHERE id = ?`, name, id,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteChannel removes the channel with the given id.
+// Returns sql.ErrNoRows if no such channel exists.
+func (s *Store) DeleteChannel(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM channels WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// ChannelCount returns the number of channels currently stored.
+func (s *Store) ChannelCount() (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM channels`).Scan(&n)
+	return n, err
 }
