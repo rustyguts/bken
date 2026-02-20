@@ -265,6 +265,159 @@ func TestPutSettingsRejectsEmptyName(t *testing.T) {
 	}
 }
 
+func TestPutSettingsRejectsTooLongName(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	longName := strings.Repeat("x", 51)
+	body := strings.NewReader(`{"server_name":"` + longName + `"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	err := api.handlePutSettings(c)
+	if err == nil {
+		t.Fatal("expected error for 51-char server_name, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 HTTPError, got %v", err)
+	}
+}
+
+func TestPutSettingsAcceptsExactly50Chars(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	name50 := strings.Repeat("x", 50)
+	body := strings.NewReader(`{"server_name":"` + name50 + `"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	if err := api.handlePutSettings(c); err != nil {
+		t.Fatalf("50-char name should be accepted, got error: %v", err)
+	}
+}
+
+func TestPutSettingsRejectsWhitespaceOnlyName(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	body := strings.NewReader(`{"server_name":"   "}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	err := api.handlePutSettings(c)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only server_name, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 HTTPError, got %v", err)
+	}
+}
+
+func TestPutSettingsTrimsWhitespace(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	body := strings.NewReader(`{"server_name":"  My Server  "}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	if err := api.handlePutSettings(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	// Verify the trimmed name was persisted.
+	req2 := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	rec2 := httptest.NewRecorder()
+	c2 := api.echo.NewContext(req2, rec2)
+	if err := api.handleGetSettings(c2); err != nil {
+		t.Fatalf("GET handler error: %v", err)
+	}
+	var resp SettingsResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.ServerName != "My Server" {
+		t.Errorf("server_name after trim: got %q, want %q", resp.ServerName, "My Server")
+	}
+}
+
+func TestPutSettingsRejectsMalformedJSON(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	body := strings.NewReader(`not json at all`)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	err := api.handlePutSettings(c)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 HTTPError, got %v", err)
+	}
+}
+
+func TestRoomEndpointIncludesOwnerID(t *testing.T) {
+	room := newTestRoom(
+		UserInfo{ID: 2, Username: "alice"},
+		UserInfo{ID: 5, Username: "bob"},
+	)
+	room.ClaimOwnership(2)
+	api := newTestAPI(t, room)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/room", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleRoom(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var resp RoomResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.OwnerID != 2 {
+		t.Errorf("owner_id: got %d, want 2", resp.OwnerID)
+	}
+}
+
+func TestRoomEndpointOwnerIDZeroWhenEmpty(t *testing.T) {
+	room := NewRoom()
+	api := newTestAPI(t, room)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/room", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleRoom(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var resp RoomResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.OwnerID != 0 {
+		t.Errorf("owner_id for empty room: got %d, want 0", resp.OwnerID)
+	}
+}
+
 func TestRunShutsDownOnContextCancel(t *testing.T) {
 	room := NewRoom()
 	api := newTestAPI(t, room)

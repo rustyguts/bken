@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -87,16 +88,20 @@ func (s *APIServer) handlePutSettings(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if req.ServerName == "" {
+	name := strings.TrimSpace(req.ServerName)
+	if name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "server_name must not be empty")
 	}
-	if err := s.store.SetSetting("server_name", req.ServerName); err != nil {
+	if len(name) > 50 {
+		return echo.NewHTTPError(http.StatusBadRequest, "server_name must not exceed 50 characters")
+	}
+	if err := s.store.SetSetting("server_name", name); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	// Update live room state so new connections see the new name without a restart,
 	// and push a server_info message to all currently-connected clients.
-	s.room.SetServerName(req.ServerName)
-	s.room.BroadcastControl(ControlMsg{Type: "server_info", ServerName: req.ServerName}, 0)
+	s.room.SetServerName(name)
+	s.room.BroadcastControl(ControlMsg{Type: "server_info", ServerName: name}, 0)
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -117,6 +122,7 @@ func (s *APIServer) handleHealth(c echo.Context) error {
 type RoomResponse struct {
 	Clients int        `json:"clients"`
 	Users   []UserInfo `json:"users"`
+	OwnerID uint16     `json:"owner_id"` // 0 when the room is empty
 }
 
 func (s *APIServer) handleRoom(c echo.Context) error {
@@ -127,5 +133,6 @@ func (s *APIServer) handleRoom(c echo.Context) error {
 	return c.JSON(http.StatusOK, RoomResponse{
 		Clients: len(users),
 		Users:   users,
+		OwnerID: s.room.OwnerID(),
 	})
 }
