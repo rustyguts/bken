@@ -113,13 +113,13 @@ func TestRoomStatsResetAfterRead(t *testing.T) {
 	room.totalDatagrams.Store(100)
 	room.totalBytes.Store(5000)
 
-	d, b, _ := room.Stats()
+	d, b, _, _ := room.Stats()
 	if d != 100 || b != 5000 {
 		t.Errorf("expected 100/5000, got %d/%d", d, b)
 	}
 
 	// Stats should reset after read.
-	d, b, _ = room.Stats()
+	d, b, _, _ = room.Stats()
 	if d != 0 || b != 0 {
 		t.Errorf("expected 0/0 after reset, got %d/%d", d, b)
 	}
@@ -488,7 +488,7 @@ func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	data := make([]byte, 10)
 	room.Broadcast(sender.ID, data)
 
-	d, b, _ := room.Stats()
+	d, b, _, _ := room.Stats()
 	if d != 1 {
 		t.Errorf("expected 1 datagram, got %d", d)
 	}
@@ -576,5 +576,221 @@ func TestRoomNextMsgID(t *testing.T) {
 	id2 := room.NextMsgID()
 	if id2 <= id1 {
 		t.Errorf("MsgID should be monotonically increasing: %d, %d", id1, id2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sendHealth (circuit breaker) unit tests
+// ---------------------------------------------------------------------------
+
+func TestSendHealthInitiallyHealthy(t *testing.T) {
+	var h sendHealth
+	if h.shouldSkip() {
+		t.Error("fresh sendHealth should not skip")
+	}
+}
+
+func TestSendHealthBelowThresholdNeverSkips(t *testing.T) {
+	var h sendHealth
+	for i := uint32(0); i < circuitBreakerThreshold-1; i++ {
+		h.recordFailure()
+	}
+	if h.shouldSkip() {
+		t.Error("should not skip when failures < threshold")
+	}
+}
+
+func TestSendHealthTripsAtThreshold(t *testing.T) {
+	var h sendHealth
+	for i := uint32(0); i < circuitBreakerThreshold; i++ {
+		h.recordFailure()
+	}
+	// After reaching threshold, most calls should skip (all except every probeInterval-th).
+	skipped := 0
+	for i := 0; i < 100; i++ {
+		if h.shouldSkip() {
+			skipped++
+		}
+	}
+	// Expected: 100 - (100/probeInterval) = 100 - 4 = 96 skips.
+	expectedProbes := 100 / int(circuitBreakerProbeInterval)
+	expectedSkips := 100 - expectedProbes
+	if skipped != expectedSkips {
+		t.Errorf("skipped %d out of 100, want %d (probeInterval=%d)", skipped, expectedSkips, circuitBreakerProbeInterval)
+	}
+}
+
+func TestSendHealthProbeAllowedPeriodically(t *testing.T) {
+	var h sendHealth
+	for i := uint32(0); i < circuitBreakerThreshold; i++ {
+		h.recordFailure()
+	}
+	// The first probe should occur at skip count == probeInterval.
+	probeCount := 0
+	for i := uint32(0); i < circuitBreakerProbeInterval*2; i++ {
+		if !h.shouldSkip() {
+			probeCount++
+		}
+	}
+	if probeCount != 2 {
+		t.Errorf("expected 2 probes in %d calls, got %d", circuitBreakerProbeInterval*2, probeCount)
+	}
+}
+
+func TestSendHealthRecoveryResetsState(t *testing.T) {
+	var h sendHealth
+	for i := uint32(0); i < circuitBreakerThreshold; i++ {
+		h.recordFailure()
+	}
+	if !h.shouldSkip() {
+		// consume the first non-probe skip — the probe is at probeInterval boundary
+		// (this is expected to skip for the first call after threshold)
+	}
+
+	wasTripped := h.recordSuccess()
+	if !wasTripped {
+		t.Error("recordSuccess should report that breaker was tripped")
+	}
+	// After recovery, shouldSkip must return false.
+	if h.shouldSkip() {
+		t.Error("should not skip after recovery")
+	}
+	// failures and skips should be zero.
+	if h.failures.Load() != 0 {
+		t.Errorf("failures should be 0, got %d", h.failures.Load())
+	}
+	if h.skips.Load() != 0 {
+		t.Errorf("skips should be 0, got %d", h.skips.Load())
+	}
+}
+
+func TestSendHealthRecordSuccessWhenHealthy(t *testing.T) {
+	var h sendHealth
+	h.recordFailure() // 1 failure, below threshold
+	wasTripped := h.recordSuccess()
+	if wasTripped {
+		t.Error("recordSuccess should return false when breaker was not tripped")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast circuit breaker integration tests
+// ---------------------------------------------------------------------------
+
+func TestBroadcastCircuitBreakerSkipsFailingClient(t *testing.T) {
+	room := NewRoom()
+
+	sender := &Client{Username: "alice", session: &mockSender{}}
+	healthy := &Client{Username: "bob", session: &mockSender{}}
+	failing := &Client{Username: "carol", session: &mockSender{err: fmt.Errorf("connection dead")}}
+
+	room.AddClient(sender)
+	room.AddClient(healthy)
+	room.AddClient(failing)
+	sender.channelID.Store(1)
+	healthy.channelID.Store(1)
+	failing.channelID.Store(1)
+
+	data := []byte{0, 0, 0, 1, 0xAA, 0xBB}
+
+	// Send enough datagrams to trip the circuit breaker on the failing client.
+	for i := 0; i < int(circuitBreakerThreshold)+10; i++ {
+		room.Broadcast(sender.ID, data)
+	}
+
+	// The healthy client should have received all datagrams.
+	healthySender := healthy.session.(*mockSender)
+	healthySender.mu.Lock()
+	healthyCount := len(healthySender.received)
+	healthySender.mu.Unlock()
+	total := int(circuitBreakerThreshold) + 10
+	if healthyCount != total {
+		t.Errorf("healthy client received %d, want %d", healthyCount, total)
+	}
+
+	// The failing client's circuit breaker should be open.
+	if failing.health.failures.Load() < circuitBreakerThreshold {
+		t.Errorf("failures=%d, want >= %d", failing.health.failures.Load(), circuitBreakerThreshold)
+	}
+
+	// Stats should show some skipped datagrams.
+	_, _, skipped, _ := room.Stats()
+	if skipped == 0 {
+		t.Error("expected skipped datagrams > 0 after circuit breaker tripped")
+	}
+}
+
+func TestBroadcastCircuitBreakerRecovery(t *testing.T) {
+	room := NewRoom()
+
+	sender := &Client{Username: "alice", session: &mockSender{}}
+	flaky := &mockSender{err: fmt.Errorf("temporary failure")}
+	receiver := &Client{Username: "bob", session: flaky}
+
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(1)
+	receiver.channelID.Store(1)
+
+	data := []byte{0, 0, 0, 1, 0xAA, 0xBB}
+
+	// Trip the circuit breaker.
+	for i := 0; i < int(circuitBreakerThreshold)+int(circuitBreakerProbeInterval); i++ {
+		room.Broadcast(sender.ID, data)
+	}
+	if receiver.health.failures.Load() < circuitBreakerThreshold {
+		t.Fatal("circuit breaker should be tripped")
+	}
+
+	// Fix the connection.
+	flaky.mu.Lock()
+	flaky.err = nil
+	flaky.mu.Unlock()
+
+	// Send enough datagrams for a probe to land and succeed.
+	for i := 0; i < int(circuitBreakerProbeInterval)*2; i++ {
+		room.Broadcast(sender.ID, data)
+	}
+
+	// The breaker should have recovered.
+	if receiver.health.failures.Load() != 0 {
+		t.Errorf("failures should be 0 after recovery, got %d", receiver.health.failures.Load())
+	}
+
+	// The receiver should have received at least the post-recovery datagrams.
+	flaky.mu.Lock()
+	received := len(flaky.received)
+	flaky.mu.Unlock()
+	if received == 0 {
+		t.Error("receiver should have received datagrams after recovery")
+	}
+}
+
+func TestBroadcastCircuitBreakerStatsSkippedCount(t *testing.T) {
+	room := NewRoom()
+
+	sender := &Client{Username: "alice", session: &mockSender{}}
+	dead := &Client{Username: "dead", session: &mockSender{err: fmt.Errorf("gone")}}
+
+	room.AddClient(sender)
+	room.AddClient(dead)
+	sender.channelID.Store(1)
+	dead.channelID.Store(1)
+
+	data := []byte{0, 0, 0, 1, 0xAA}
+
+	// Trip the breaker, then send more to accumulate skips.
+	totalSends := int(circuitBreakerThreshold) + 100
+	for i := 0; i < totalSends; i++ {
+		room.Broadcast(sender.ID, data)
+	}
+
+	_, _, skipped, _ := room.Stats()
+	// After the threshold, ~100 more sends happen. Most should be skipped
+	// (all except probes: 100/probeInterval).
+	expectedProbes := 100 / int(circuitBreakerProbeInterval)
+	expectedSkipped := uint64(100 - expectedProbes)
+	if skipped < expectedSkipped-2 || skipped > expectedSkipped+2 {
+		t.Errorf("skipped=%d, want ~%d (tolerance ±2)", skipped, expectedSkipped)
 	}
 }

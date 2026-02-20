@@ -35,8 +35,9 @@ type Room struct {
 	onRefreshChannels func() ([]ChannelInfo, error)
 
 	// Metrics (reset on each Stats call).
-	totalDatagrams atomic.Uint64
-	totalBytes     atomic.Uint64
+	totalDatagrams    atomic.Uint64
+	totalBytes        atomic.Uint64
+	skippedDatagrams  atomic.Uint64 // sends skipped by per-client circuit breakers
 }
 
 func NewRoom() *Room {
@@ -205,6 +206,7 @@ func (r *Room) RemoveClient(id uint16) bool {
 type broadcastTarget struct {
 	id      uint16
 	session DatagramSender
+	health  *sendHealth
 }
 
 // Broadcast sends a datagram to every client in the same channel as the sender,
@@ -237,15 +239,25 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 		if c.channelID.Load() != senderChannel {
 			continue
 		}
-		targets = append(targets, broadcastTarget{id: id, session: c.session})
+		targets = append(targets, broadcastTarget{id: id, session: c.session, health: &c.health})
 	}
 	r.snapshotBuf = targets // keep backing array for next call
 	r.mu.RUnlock()
 
 	for _, t := range targets {
+		if t.health.shouldSkip() {
+			r.skippedDatagrams.Add(1)
+			continue
+		}
 		if err := t.session.SendDatagram(data); err != nil {
-			// UDP-like semantics: log and continue, never block the hot path.
-			log.Printf("[room] datagram to client %d dropped: %v", t.id, err)
+			n := t.health.recordFailure()
+			if n == circuitBreakerThreshold {
+				log.Printf("[room] circuit breaker open for client %d — %d consecutive send failures", t.id, n)
+			}
+		} else if t.health.failures.Load() > 0 {
+			if t.health.recordSuccess() {
+				log.Printf("[room] circuit breaker closed for client %d — send recovered", t.id)
+			}
 		}
 	}
 }
@@ -440,10 +452,11 @@ func (r *Room) ClientCount() int {
 	return len(r.clients)
 }
 
-// Stats returns accumulated datagram/byte counts since the last call and resets them.
-func (r *Room) Stats() (datagrams, bytes uint64, clients int) {
+// Stats returns accumulated datagram/byte/skipped counts since the last call and resets them.
+func (r *Room) Stats() (datagrams, bytes, skipped uint64, clients int) {
 	datagrams = r.totalDatagrams.Swap(0)
 	bytes = r.totalBytes.Swap(0)
+	skipped = r.skippedDatagrams.Swap(0)
 	clients = r.ClientCount()
 	return
 }

@@ -40,7 +40,7 @@ func TestRoomStress500Clients(t *testing.T) {
 	data := make([]byte, 10)
 	room.Broadcast(ids[0], data)
 
-	d, b, clients := room.Stats()
+	d, b, _, clients := room.Stats()
 	if clients != n {
 		t.Errorf("stats clients: got %d, want %d", clients, n)
 	}

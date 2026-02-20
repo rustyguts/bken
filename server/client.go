@@ -14,6 +14,50 @@ import (
 	"github.com/quic-go/webtransport-go"
 )
 
+// Circuit breaker constants for datagram fan-out.
+// After circuitBreakerThreshold consecutive SendDatagram failures, the breaker
+// opens and skips that client in Broadcast.  Every circuitBreakerProbeInterval
+// skipped sends, it lets one datagram through to probe for recovery.
+const (
+	circuitBreakerThreshold     uint32 = 50 // ~1 s of voice at 50 fps
+	circuitBreakerProbeInterval uint32 = 25 // attempt a probe every 25 skips
+)
+
+// sendHealth tracks per-client datagram send success and implements a
+// lightweight circuit breaker so the server stops wasting effort on
+// unreachable peers.
+type sendHealth struct {
+	failures atomic.Uint32 // consecutive SendDatagram failures
+	skips    atomic.Uint32 // skips since the breaker opened; used for probe cadence
+}
+
+// shouldSkip returns true when the breaker is open and it is not yet time
+// for a probe attempt.  Callers should skip the send when this returns true.
+func (h *sendHealth) shouldSkip() bool {
+	if h.failures.Load() < circuitBreakerThreshold {
+		return false
+	}
+	// Breaker is open — allow a probe every probeInterval skips.
+	s := h.skips.Add(1)
+	return s%circuitBreakerProbeInterval != 0
+}
+
+// recordFailure increments the consecutive failure counter and returns
+// the new value.
+func (h *sendHealth) recordFailure() uint32 {
+	return h.failures.Add(1)
+}
+
+// recordSuccess resets the failure and skip counters.  It returns true if
+// the breaker was previously open (i.e. the send was a successful probe).
+func (h *sendHealth) recordSuccess() bool {
+	wasTripped := h.failures.Swap(0) >= circuitBreakerThreshold
+	if wasTripped {
+		h.skips.Store(0)
+	}
+	return wasTripped
+}
+
 // Client represents a connected voice client.
 type Client struct {
 	ID        uint16
@@ -22,6 +66,8 @@ type Client struct {
 
 	// session implements DatagramSender; stored as the interface so tests can mock it.
 	session DatagramSender
+
+	health sendHealth // per-client circuit breaker for datagram fan-out
 
 	ctrlMu sync.Mutex
 	ctrl   io.Writer // control stream; nil until the join handshake completes
