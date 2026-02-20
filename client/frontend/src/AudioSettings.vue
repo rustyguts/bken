@@ -23,12 +23,49 @@ const noiseLevel = ref(80)
 const testing = ref(false)
 const testError = ref('')
 
-const THEMES = ['light', 'dark', 'sunset'] as const
-type Theme = typeof THEMES[number]
-const THEME_LABELS: Record<Theme, string> = { light: 'Light', dark: 'Dark', sunset: 'Sunset' }
-const currentTheme = ref<Theme>('dark')
+const THEMES = [
+  // Light
+  { name: 'light', label: 'Light' },
+  { name: 'cupcake', label: 'Cupcake' },
+  { name: 'bumblebee', label: 'Bumblebee' },
+  { name: 'emerald', label: 'Emerald' },
+  { name: 'corporate', label: 'Corporate' },
+  { name: 'retro', label: 'Retro' },
+  { name: 'cyberpunk', label: 'Cyberpunk' },
+  { name: 'valentine', label: 'Valentine' },
+  { name: 'garden', label: 'Garden' },
+  { name: 'lofi', label: 'Lo-Fi' },
+  { name: 'pastel', label: 'Pastel' },
+  { name: 'fantasy', label: 'Fantasy' },
+  { name: 'wireframe', label: 'Wireframe' },
+  { name: 'cmyk', label: 'CMYK' },
+  { name: 'autumn', label: 'Autumn' },
+  { name: 'acid', label: 'Acid' },
+  { name: 'lemonade', label: 'Lemonade' },
+  { name: 'winter', label: 'Winter' },
+  { name: 'nord', label: 'Nord' },
+  { name: 'caramellatte', label: 'Caramel Latte' },
+  { name: 'silk', label: 'Silk' },
+  // Dark
+  { name: 'dark', label: 'Dark' },
+  { name: 'synthwave', label: 'Synthwave' },
+  { name: 'halloween', label: 'Halloween' },
+  { name: 'forest', label: 'Forest' },
+  { name: 'aqua', label: 'Aqua' },
+  { name: 'black', label: 'Black' },
+  { name: 'luxury', label: 'Luxury' },
+  { name: 'dracula', label: 'Dracula' },
+  { name: 'business', label: 'Business' },
+  { name: 'night', label: 'Night' },
+  { name: 'coffee', label: 'Coffee' },
+  { name: 'dim', label: 'Dim' },
+  { name: 'sunset', label: 'Sunset' },
+  { name: 'abyss', label: 'Abyss' },
+] as const
 
-function applyTheme(theme: Theme): void {
+const currentTheme = ref('dark')
+
+function applyTheme(theme: string): void {
   currentTheme.value = theme
   document.documentElement.setAttribute('data-theme', theme)
   localStorage.setItem('bken-theme', theme)
@@ -37,8 +74,8 @@ function applyTheme(theme: Theme): void {
 onMounted(async () => {
   inputDevices.value = (await GetInputDevices()) || []
   outputDevices.value = (await GetOutputDevices()) || []
-  const saved = localStorage.getItem('bken-theme') as Theme | null
-  if (saved && (THEMES as readonly string[]).includes(saved)) {
+  const saved = localStorage.getItem('bken-theme')
+  if (saved && THEMES.some(t => t.name === saved)) {
     currentTheme.value = saved
   }
 })
@@ -169,24 +206,29 @@ async function toggleTest(): Promise<void> {
     <div class="px-4 py-2 text-xs font-semibold uppercase tracking-wider opacity-40 border-t border-b border-base-content/10 shrink-0">
       Appearance
     </div>
-    <div class="p-6 flex flex-col gap-4 max-w-sm">
-      <fieldset class="form-control w-full">
-        <legend class="label"><span class="label-text text-xs">Theme</span></legend>
-        <div class="flex gap-2" role="radiogroup" aria-label="Theme selection">
-          <button
-            v-for="theme in THEMES"
-            :key="theme"
-            class="btn btn-sm flex-1"
-            :class="currentTheme === theme ? 'btn-primary' : 'btn-ghost border border-base-content/20'"
-            role="radio"
-            :aria-checked="currentTheme === theme"
-            :aria-label="`${THEME_LABELS[theme]} theme`"
-            @click="applyTheme(theme)"
-          >
-            {{ THEME_LABELS[theme] }}
-          </button>
-        </div>
-      </fieldset>
+    <div class="p-4">
+      <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Theme selection">
+        <button
+          v-for="theme in THEMES"
+          :key="theme.name"
+          class="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs transition-colors cursor-pointer border"
+          :class="currentTheme === theme.name
+            ? 'border-primary bg-primary/10'
+            : 'border-base-content/10 hover:border-base-content/30'"
+          role="radio"
+          :aria-checked="currentTheme === theme.name"
+          :aria-label="`${theme.label} theme`"
+          @click="applyTheme(theme.name)"
+        >
+          <div :data-theme="theme.name" class="flex gap-0.5 shrink-0">
+            <span class="w-2 h-4 rounded-l-full bg-primary"></span>
+            <span class="w-2 h-4 bg-secondary"></span>
+            <span class="w-2 h-4 bg-accent"></span>
+            <span class="w-2 h-4 rounded-r-full bg-neutral"></span>
+          </div>
+          <span class="truncate">{{ theme.label }}</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
