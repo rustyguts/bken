@@ -26,6 +26,8 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Server invite links - You could send these to people and they can join a server, would require external web service
 ### Done
 
+- Push-to-talk mode with configurable key binding (PTT gives users explicit control over mic transmission; pttMode/pttActive atomics gate capture loop in AudioEngine; App exposes SetPTTMode/PTTKeyDown/PTTKeyUp; VoiceProcessing adds PTT toggle with rebindable key button at top of voice settings; App.vue registers global keydown/keyup listeners ignoring text inputs and key-repeat; config persists ptt_enabled + ptt_key with Backquote default; 8 new tests across audio + config)
+
 - Rich link previews (server extracts first URL from chat, async fetches OpenGraph metadata with 4s timeout, broadcasts link_preview control message keyed by MsgID; client renders preview cards with image/title/description/site name; 13 server tests)
 
 - Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in (frontend filters messages by channel_id via visibleMessages computed property)
