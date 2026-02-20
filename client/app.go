@@ -333,6 +333,9 @@ func (a *App) ConnectVoice(channelID int) string {
 	go a.sendLoop()
 	go a.adaptBitrateLoop(a.audio.Done())
 	if err := a.transport.JoinChannel(int64(channelID)); err != nil {
+		// JoinChannel failed — tear down the audio we just started so we
+		// don't leave dangling capture/playback goroutines.
+		a.audio.Stop()
 		return err.Error()
 	}
 	a.audio.PlayNotification(SoundConnect)

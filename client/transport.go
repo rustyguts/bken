@@ -107,6 +107,11 @@ type Transport struct {
 	// muted holds the set of remote user IDs whose audio is suppressed locally.
 	muted mutedSet
 
+	// recvCancel cancels the current StartReceiving goroutine (if any).
+	// Protected by mu; set in StartReceiving, called in Disconnect and
+	// before spawning a replacement goroutine.
+	recvCancel context.CancelFunc
+
 	// disconnectReason is set before Disconnect is called to communicate the
 	// cause to the onDisconnected callback. Protected by mu.
 	disconnectReason string
@@ -230,22 +235,19 @@ func (t *Transport) MutedUsers() []uint16 { return t.muted.Slice() }
 // KickUser sends a kick request to the server. Only succeeds if the caller is
 // the room owner; the server enforces the authorisation check.
 func (t *Transport) KickUser(id uint16) error {
-	t.writeCtrl(ControlMsg{Type: "kick", ID: id})
-	return nil
+	return t.writeCtrl(ControlMsg{Type: "kick", ID: id})
 }
 
 // RenameServer sends a rename request to the server. Only succeeds if the
 // caller is the room owner; the server enforces the authorisation check.
 func (t *Transport) RenameServer(name string) error {
-	t.writeCtrl(ControlMsg{Type: "rename", ServerName: name})
-	return nil
+	return t.writeCtrl(ControlMsg{Type: "rename", ServerName: name})
 }
 
 // JoinChannel sends a join_channel request to the server.
 // Pass channelID=0 to leave all channels (return to lobby).
 func (t *Transport) JoinChannel(id int64) error {
-	t.writeCtrl(ControlMsg{Type: "join_channel", ChannelID: id})
-	return nil
+	return t.writeCtrl(ControlMsg{Type: "join_channel", ChannelID: id})
 }
 
 // SendChannelChat sends a channel-scoped chat message. The server routes it
@@ -255,8 +257,7 @@ func (t *Transport) SendChannelChat(channelID int64, message string) error {
 	if err := validateChat(message); err != nil {
 		return err
 	}
-	t.writeCtrl(ControlMsg{Type: "chat", Message: message, ChannelID: channelID})
-	return nil
+	return t.writeCtrl(ControlMsg{Type: "chat", Message: message, ChannelID: channelID})
 }
 
 // SendChat sends a chat message to the server for fan-out to all participants.
@@ -264,8 +265,7 @@ func (t *Transport) SendChat(message string) error {
 	if err := validateChat(message); err != nil {
 		return err
 	}
-	t.writeCtrl(ControlMsg{Type: "chat", Message: message})
-	return nil
+	return t.writeCtrl(ControlMsg{Type: "chat", Message: message})
 }
 
 // validateChat returns an error if the message is empty or too long.
@@ -280,17 +280,26 @@ func validateChat(message string) error {
 }
 
 // writeCtrl serialises a control message write; safe for concurrent callers.
-func (t *Transport) writeCtrl(msg ControlMsg) {
+func (t *Transport) writeCtrl(msg ControlMsg) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("[transport] marshal error: %v", err)
-		return
+		return fmt.Errorf("marshal: %w", err)
 	}
 	data = append(data, '\n')
 	t.ctrlMu.Lock()
 	defer t.ctrlMu.Unlock()
-	if t.ctrl != nil {
-		t.ctrl.Write(data) //nolint:errcheck — best-effort write on a closing stream
+	if t.ctrl == nil {
+		return fmt.Errorf("control stream not connected")
+	}
+	_, err = t.ctrl.Write(data)
+	return err
+}
+
+// writeCtrlBestEffort sends a control message without returning errors.
+// Used for non-critical messages (pings) where failure is handled elsewhere.
+func (t *Transport) writeCtrlBestEffort(msg ControlMsg) {
+	if err := t.writeCtrl(msg); err != nil {
+		log.Printf("[transport] best-effort write (%s): %v", msg.Type, err)
 	}
 }
 
@@ -356,7 +365,11 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	t.lastMetricsTime = time.Now()
 	t.metricsMu.Unlock()
 
-	t.writeCtrl(ControlMsg{Type: "join", Username: username})
+	if err := t.writeCtrl(ControlMsg{Type: "join", Username: username}); err != nil {
+		cancel()
+		sess.CloseWithError(0, "failed to send join")
+		return fmt.Errorf("send join: %w", err)
+	}
 
 	go t.readControl(ctx, stream)
 	go t.pingLoop(ctx)
@@ -376,6 +389,10 @@ func (t *Transport) Disconnect() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if t.recvCancel != nil {
+		t.recvCancel()
+		t.recvCancel = nil
+	}
 	if t.cancel != nil {
 		t.cancel()
 		t.cancel = nil
@@ -419,22 +436,32 @@ func (t *Transport) MyID() uint16 {
 
 // StartReceiving pumps incoming datagrams to playbackCh in a background goroutine.
 // Each datagram payload is the raw Opus bytes (header stripped).
-// The session is captured once at call time; the goroutine exits when the
-// session is closed (ReceiveDatagram returns an error).
+// Calling StartReceiving again cancels the previous goroutine before spawning a
+// new one, preventing duplicate readers on the same session.
 func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte) {
 	t.mu.Lock()
+	// Cancel any existing receive goroutine so we never have two readers.
+	if t.recvCancel != nil {
+		t.recvCancel()
+	}
 	sess := t.session
 	t.mu.Unlock()
 	if sess == nil {
 		return
 	}
 
+	rctx, cancel := context.WithCancel(ctx)
+	t.mu.Lock()
+	t.recvCancel = cancel
+	t.mu.Unlock()
+
 	go func() {
+		defer cancel()
 		speakTimers := make(map[uint16]time.Time)
 		lastSeq := make(map[uint16]uint16) // senderID → last received seq
 
 		for {
-			data, err := sess.ReceiveDatagram(ctx)
+			data, err := sess.ReceiveDatagram(rctx)
 			if err != nil {
 				return
 			}
@@ -533,7 +560,7 @@ func (t *Transport) pingLoop(ctx context.Context) {
 		case <-ticker.C:
 			ts := time.Now().UnixMilli()
 			t.lastPingTs.Store(ts)
-			t.writeCtrl(ControlMsg{Type: "ping", Ts: ts})
+			t.writeCtrlBestEffort(ControlMsg{Type: "ping", Ts: ts})
 
 			// Check pong deadline. lastPongTime is set to connection-start in
 			// Connect(), so this is only a timeout if the server stops responding.

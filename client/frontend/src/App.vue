@@ -29,6 +29,7 @@ const connectError = ref('')
 const startupAddrHint = ref('')
 const currentRoute = ref<AppRoute>('room')
 const globalUsername = ref('')
+const joiningVoice = ref(false)
 
 const { reconnecting, reconnectAttempt, reconnectSecondsLeft, startReconnect, cancelReconnect, clearTimers, setLastCredentials } = useReconnect()
 const { speakingUsers, setSpeaking, clearSpeaking, cleanup: cleanupSpeaking } = useSpeakingUsers()
@@ -142,27 +143,33 @@ async function handleConnect(payload: ConnectPayload): Promise<void> {
 }
 
 async function handleActivateChannel(payload: { addr: string; channelID: number }): Promise<void> {
-  const ok = await connectToServer(payload.addr, globalUsername.value)
-  if (!ok) return
+  if (joiningVoice.value) return
+  joiningVoice.value = true
+  try {
+    const ok = await connectToServer(payload.addr, globalUsername.value)
+    if (!ok) return
 
-  // If voice audio was stopped (via DisconnectVoice), restart it.
-  if (!voiceConnected.value) {
-    const err = await ConnectVoice(payload.channelID)
+    // If voice audio was stopped (via DisconnectVoice), restart it.
+    if (!voiceConnected.value) {
+      const err = await ConnectVoice(payload.channelID)
+      if (err) {
+        connectError.value = err
+        return
+      }
+      voiceConnected.value = true
+      connectError.value = ''
+      return
+    }
+
+    const err = await JoinChannel(payload.channelID)
     if (err) {
       connectError.value = err
       return
     }
-    voiceConnected.value = true
     connectError.value = ''
-    return
+  } finally {
+    joiningVoice.value = false
   }
-
-  const err = await JoinChannel(payload.channelID)
-  if (err) {
-    connectError.value = err
-    return
-  }
-  connectError.value = ''
 }
 
 async function handleRenameGlobalUsername(name: string): Promise<void> {

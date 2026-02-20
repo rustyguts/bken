@@ -22,7 +22,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 ### Things to work on
 
-- Join voice button sometimes does not work.
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
 - Server invite links - You could send these to people and they can join a server, would require external web service
 - File uploading in chatroom. Max size 10mb. Drag and drop should work. Or a Plus button with droptop (open top) and "Upload file"
@@ -39,3 +38,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Bug: Pressing disconnect stops voice but the UI does not update. It still shows that you are connected to the channel
 - Differentiate the idea of being "Connected" to the server vs being connected via voice. When the user clicks on the server in the sidebar they are connected over WebTransport and start getting messages. The disconnect button only disconnects them from the voice channel that they are currently in. But they are still connected to the server itself so that they can chat, browse, do other things. Switching between other servers does truly disconnect and connect to another server instance
 - Error states when you can't connect to the server or get disconnected (10s connect timeout, disconnect reason in ReconnectBanner + ServerChannels, transport cleanup on unexpected disconnect)
+- Join voice button sometimes does not work (writeCtrl now returns errors so JoinChannel/ConnectVoice failures surface to frontend; StartReceiving cancels previous goroutine preventing duplicates; ConnectVoice cleans up audio on JoinChannel failure; frontend debounces rapid Join Voice clicks)
