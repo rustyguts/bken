@@ -18,7 +18,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Write tests for your feature
 - Run all tests and linting for the repo
 - Commit and push
-- Update this document with the number of times you've worked on the feature you picked from the list below
+- Move the item to done
 
 ### Things to work on in no particular order
 
@@ -39,7 +39,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Users should be able to connect to multiple servers and switch between them
 - Users should hear sound indicating actions occuring in the app (like mute, defen, join, leave, etc)
 - UI: The inteface should always remain simple, clean, modern
-- UI: Users should  be able to switch between all the different daisy UI themes
 - UI: Beautiful settings page
 - Voice: Echo cancellation feature, enabled by default
 - Voice: Noise supression feature, enabled by default
@@ -56,3 +55,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
 - Code quality and readability
 - Repo structure and organization
+
+### Done
+
+- UI: Users should  be able to switch between all the different daisy UI themes
