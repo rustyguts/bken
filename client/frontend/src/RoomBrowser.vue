@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import UserCard from './UserCard.vue'
+import type { User } from './types'
 
 defineProps<{
-  users: { id: number; username: string }[]
+  users: User[]
   speakingUsers: Set<number>
 }>()
 </script>
@@ -15,7 +16,7 @@ defineProps<{
     <div v-if="users.length === 0" class="flex-1 flex items-center justify-center">
       <p class="text-sm opacity-25 italic">No one else is here</p>
     </div>
-    <div v-else class="flex-1 flex flex-wrap content-start gap-8 p-8 overflow-y-auto">
+    <div v-else class="flex-1 flex flex-wrap content-start gap-8 p-8 overflow-y-auto" role="list" aria-label="Connected users">
       <UserCard
         v-for="user in users"
         :key="user.id"

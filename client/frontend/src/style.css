@@ -8,7 +8,7 @@
 @import "@fontsource/ibm-plex-mono/600.css";
 
 @theme {
-    --font-sans: "IBM Plex Mono", ui-monospace, monospace;
+    --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 

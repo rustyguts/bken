@@ -5,12 +5,7 @@ import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
-import type { LogEvent } from './EventLog.vue'
-
-interface User {
-  id: number
-  username: string
-}
+import type { User, UserJoinedEvent, UserLeftEvent, SpeakingEvent, LogEvent, ConnectPayload } from './types'
 
 const connected = ref(false)
 const serverBrowserRef = ref<InstanceType<typeof ServerBrowser> | null>(null)
@@ -29,15 +24,16 @@ let countdownTimer: ReturnType<typeof setInterval> | null = null
 let lastAddr = ''
 let lastUsername = ''
 
-const BACKOFF = [1, 2, 4, 8, 16, 30] // seconds
+/** Exponential backoff delays in seconds. */
+const BACKOFF = [1, 2, 4, 8, 16, 30] as const
 
-function addEvent(text: string, type: LogEvent['type']) {
+function addEvent(text: string, type: LogEvent['type']): void {
   const d = new Date()
   const time = d.toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
   logEvents.value.push({ id: ++eventIdCounter, time, text, type })
 }
 
-function setSpeaking(id: number) {
+function setSpeaking(id: number): void {
   const next = new Set(speakingUsers.value)
   next.add(id)
   speakingUsers.value = next
@@ -51,12 +47,18 @@ function setSpeaking(id: number) {
   }, 500))
 }
 
-function clearReconnectTimers() {
+function clearSpeaking(): void {
+  speakingTimers.forEach(t => clearTimeout(t))
+  speakingTimers.clear()
+  speakingUsers.value = new Set()
+}
+
+function clearReconnectTimers(): void {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
   if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(): void {
   const delay = BACKOFF[Math.min(reconnectAttempt.value, BACKOFF.length - 1)]
   reconnectSecondsLeft.value = delay
 
@@ -68,7 +70,7 @@ function scheduleReconnect() {
     clearInterval(countdownTimer!)
     countdownTimer = null
     reconnectAttempt.value++
-    addEvent(`Reconnecting… (attempt ${reconnectAttempt.value})`, 'info')
+    addEvent(`Reconnecting... (attempt ${reconnectAttempt.value})`, 'info')
 
     const err = await Connect(lastAddr, lastUsername)
     if (!err) {
@@ -82,50 +84,14 @@ function scheduleReconnect() {
   }, delay * 1000)
 }
 
-EventsOn('connection:lost', () => {
-  if (reconnecting.value) return
+function resetState(): void {
+  connected.value = false
+  users.value = []
+  logEvents.value = []
   clearSpeaking()
-  reconnecting.value = true
-  addEvent('Connection lost', 'leave')
-  scheduleReconnect()
-})
+}
 
-EventsOn('user:list', (data: User[]) => {
-  users.value = data || []
-  if (data?.length) addEvent(`${data.length} user${data.length !== 1 ? 's' : ''} in room`, 'info')
-})
-
-EventsOn('user:joined', (data: { id: number; username: string }) => {
-  users.value = [...users.value, { id: data.id, username: data.username }]
-  addEvent(`${data.username} joined`, 'join')
-})
-
-EventsOn('user:left', (data: { id: number }) => {
-  const user = users.value.find(u => u.id === data.id)
-  users.value = users.value.filter(u => u.id !== data.id)
-  addEvent(`${user?.username ?? 'Someone'} left`, 'leave')
-})
-
-EventsOn('audio:speaking', (data: { id: number }) => {
-  setSpeaking(data.id)
-})
-
-onBeforeUnmount(() => {
-  EventsOff('connection:lost')
-  EventsOff('user:list')
-  EventsOff('user:joined')
-  EventsOff('user:left')
-  EventsOff('audio:speaking')
-  clearReconnectTimers()
-  speakingTimers.forEach(t => clearTimeout(t))
-})
-
-onMounted(async () => {
-  const auto = await GetAutoLogin()
-  if (auto.username) await handleConnect({ username: auto.username, addr: auto.addr })
-})
-
-async function handleConnect(payload: { username: string; addr: string }) {
+async function handleConnect(payload: ConnectPayload): Promise<void> {
   lastAddr = payload.addr
   lastUsername = payload.username
   users.value = []
@@ -139,32 +105,61 @@ async function handleConnect(payload: { username: string; addr: string }) {
   }
 }
 
-function clearSpeaking() {
+async function handleDisconnect(): Promise<void> {
+  clearReconnectTimers()
+  reconnecting.value = false
+  reconnectAttempt.value = 0
+  resetState()
+  await Disconnect()
+}
+
+async function handleCancelReconnect(): Promise<void> {
+  clearReconnectTimers()
+  reconnecting.value = false
+  reconnectAttempt.value = 0
+  resetState()
+  await Disconnect()
+}
+
+onMounted(async () => {
+  EventsOn('connection:lost', () => {
+    if (reconnecting.value) return
+    clearSpeaking()
+    reconnecting.value = true
+    addEvent('Connection lost', 'leave')
+    scheduleReconnect()
+  })
+
+  EventsOn('user:list', (data: User[]) => {
+    users.value = data || []
+    if (data?.length) addEvent(`${data.length} user${data.length !== 1 ? 's' : ''} in room`, 'info')
+  })
+
+  EventsOn('user:joined', (data: UserJoinedEvent) => {
+    users.value = [...users.value, { id: data.id, username: data.username }]
+    addEvent(`${data.username} joined`, 'join')
+  })
+
+  EventsOn('user:left', (data: UserLeftEvent) => {
+    const user = users.value.find(u => u.id === data.id)
+    users.value = users.value.filter(u => u.id !== data.id)
+    addEvent(`${user?.username ?? 'Someone'} left`, 'leave')
+  })
+
+  EventsOn('audio:speaking', (data: SpeakingEvent) => {
+    setSpeaking(data.id)
+  })
+
+  // Auto-login if configured
+  const auto = await GetAutoLogin()
+  if (auto.username) await handleConnect({ username: auto.username, addr: auto.addr })
+})
+
+onBeforeUnmount(() => {
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking')
+  clearReconnectTimers()
   speakingTimers.forEach(t => clearTimeout(t))
-  speakingTimers.clear()
-  speakingUsers.value = new Set()
-}
-
-function handleDisconnect() {
-  clearReconnectTimers()
-  reconnecting.value = false
-  reconnectAttempt.value = 0
-  connected.value = false
-  users.value = []
-  logEvents.value = []
-  clearSpeaking()
-}
-
-async function handleCancelReconnect() {
-  clearReconnectTimers()
-  reconnecting.value = false
-  reconnectAttempt.value = 0
-  connected.value = false
-  users.value = []
-  logEvents.value = []
-  clearSpeaking()
-  await Disconnect() // reset Go state in case a reconnect resolved in-flight
-}
+})
 </script>
 
 <template>

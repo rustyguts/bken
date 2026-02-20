@@ -1,38 +1,48 @@
----
-name: backend
-description: Go WebTransport server specialist. Use for tasks in server/ — room logic, client sessions, QUIC/WebTransport, TLS, metrics, and server tests.
----
+# Backend Server Agent
 
-You are a backend specialist for the `bken` project. Your domain is the `server/` directory.
+You are the **backend server agent** for bken, a LAN voice chat application. You own all code under `server/`.
 
-## Project context
+## Scope
 
-`bken` is a voice chat application. The server is a pure Go WebTransport (QUIC/HTTP3) server that manages a single room where clients join, send audio streams, and receive mixed audio from other participants.
+- `server/main.go` — entry point, TLS init, Room creation, graceful shutdown
+- `server/server.go` — WebTransport upgrade, HTTP/3 listener, single `/` route
+- `server/client.go` — per-session handler: control stream join handshake, datagram read loop, user joined/left broadcasts
+- `server/room.go` — `Room`: thread-safe client registry, datagram fan-out via `RLock`
+- `server/tls.go` — fresh self-signed ECDSA cert per start, SHA-256 fingerprint logging
+- `server/metrics.go` — periodic datagram/byte stats logging (silent when room empty)
+- `server/Dockerfile` — multi-stage Alpine build (`golang:1-alpine` → `alpine:latest`)
+- `server/.air.toml` — Air hot-reload config for dev
 
 ## Architecture
 
-- **`main.go`** — entry point, flag parsing, graceful shutdown, starts metrics goroutine
-- **`server.go`** — `Server` struct, WebTransport upgrade, routes all connections to `handleClient`
-- **`client.go`** — per-client session handling, stream multiplexing, read/write loops
-- **`room.go`** — `Room` struct, client registry, broadcast/mixing logic
-- **`metrics.go`** — periodic logging of room state
-- **`tls.go`** — self-signed TLS cert generation, fingerprint logging
-- **`server_test.go`**, **`room_test.go`** — integration and unit tests
+Pure Go, **no CGO**. WebTransport over QUIC (HTTP/3) using `quic-go` + `webtransport-go`.
 
-## Key dependencies
+### Wire protocol
 
-- `github.com/quic-go/quic-go` — QUIC transport
-- `github.com/quic-go/webtransport-go` — WebTransport session/stream API
-- Module: `bken/server`, Go 1.25+
+1. **Control stream** — reliable, bidirectional, newline-delimited JSON. Client opens it and sends `{"type":"join","username":"..."}`. Server responds with `user_list`, then pushes `user_joined` / `user_left`.
+2. **Voice datagrams** — unreliable. Format: `[senderID: uint16 BE][seq: uint16 BE][opus_payload]`. Server overwrites `senderID` before fan-out to prevent spoofing, broadcasts to all other sessions.
+
+### Key constraints
+
+- No CGO allowed — server must build with `CGO_ENABLED=0`
+- Single-room model: all connected clients share one voice space
+- TLS is self-signed; clients use `InsecureSkipVerify: true`
+- Server accepts `-addr` flag (default `:4433`)
+
+## Testing
+
+```bash
+cd server && go test ./...
+```
 
 ## Docker
 
-Multi-stage Alpine build, pure Go (no CGO). Run via `docker-compose.yml` at the repo root.
+Dev target uses Air for hot-reload with source mounted as volume. Prod target produces a minimal Alpine image with just the static binary.
 
 ## Guidelines
 
-- Keep the server CGO-free so the Alpine Docker build works without extra toolchain deps.
-- Prefer structured logging with `log.Printf("[server] ...")` using consistent prefixes.
-- Use context propagation for graceful shutdown everywhere.
-- Run tests with `go test ./...` inside `server/`.
-- Do not touch anything in `client/` or `client/frontend/`.
+- Keep the server dependency-free beyond `quic-go`/`webtransport-go`
+- All broadcast operations must be safe under concurrent access (use `sync.RWMutex`)
+- Log prefixes: `[server]`, `[room]`, `[metrics]`, `[tls]`
+- Datagram fan-out skips the sender
+- Control message types: `join`, `user_list`, `user_joined`, `user_left`, `ping`, `pong`

@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { GetInputDevices, GetOutputDevices, SetInputDevice, SetOutputDevice, SetVolume, SetNoiseSuppression, SetNoiseSuppressionLevel, StartTest, StopTest } from '../wailsjs/go/main/App'
+import {
+  GetInputDevices,
+  GetOutputDevices,
+  SetInputDevice,
+  SetOutputDevice,
+  SetVolume,
+  SetNoiseSuppression,
+  SetNoiseSuppressionLevel,
+  StartTest,
+  StopTest,
+} from '../wailsjs/go/main/App'
+import { main } from '../wailsjs/go/models'
 
-interface AudioDevice {
-  id: number
-  name: string
-}
-
-const inputDevices = ref<AudioDevice[]>([])
-const outputDevices = ref<AudioDevice[]>([])
+const inputDevices = ref<main.AudioDevice[]>([])
+const outputDevices = ref<main.AudioDevice[]>([])
 const selectedInput = ref(-1)
 const selectedOutput = ref(-1)
 const volume = ref(100)
@@ -22,7 +28,7 @@ type Theme = typeof THEMES[number]
 const THEME_LABELS: Record<Theme, string> = { light: 'Light', dark: 'Dark', sunset: 'Sunset' }
 const currentTheme = ref<Theme>('dark')
 
-function applyTheme(theme: Theme) {
+function applyTheme(theme: Theme): void {
   currentTheme.value = theme
   document.documentElement.setAttribute('data-theme', theme)
   localStorage.setItem('bken-theme', theme)
@@ -37,27 +43,27 @@ onMounted(async () => {
   }
 })
 
-async function handleInputChange() {
+async function handleInputChange(): Promise<void> {
   await SetInputDevice(selectedInput.value)
 }
 
-async function handleOutputChange() {
+async function handleOutputChange(): Promise<void> {
   await SetOutputDevice(selectedOutput.value)
 }
 
-async function handleVolumeChange() {
+async function handleVolumeChange(): Promise<void> {
   await SetVolume(volume.value / 100)
 }
 
-async function handleNoiseToggle() {
+async function handleNoiseToggle(): Promise<void> {
   await SetNoiseSuppression(noiseEnabled.value)
 }
 
-async function handleNoiseLevelChange() {
+async function handleNoiseLevelChange(): Promise<void> {
   await SetNoiseSuppressionLevel(noiseLevel.value)
 }
 
-async function toggleTest() {
+async function toggleTest(): Promise<void> {
   if (testing.value) {
     await StopTest()
     testing.value = false
@@ -82,7 +88,12 @@ async function toggleTest() {
     <div class="p-6 flex flex-col gap-4 max-w-sm">
       <label class="form-control w-full">
         <div class="label"><span class="label-text text-xs">Microphone</span></div>
-        <select v-model.number="selectedInput" class="select select-bordered select-sm w-full" @change="handleInputChange">
+        <select
+          v-model.number="selectedInput"
+          class="select select-bordered select-sm w-full"
+          aria-label="Microphone device"
+          @change="handleInputChange"
+        >
           <option :value="-1">Default</option>
           <option v-for="dev in inputDevices" :key="dev.id" :value="dev.id">{{ dev.name }}</option>
         </select>
@@ -90,7 +101,12 @@ async function toggleTest() {
 
       <label class="form-control w-full">
         <div class="label"><span class="label-text text-xs">Speaker</span></div>
-        <select v-model.number="selectedOutput" class="select select-bordered select-sm w-full" @change="handleOutputChange">
+        <select
+          v-model.number="selectedOutput"
+          class="select select-bordered select-sm w-full"
+          aria-label="Speaker device"
+          @change="handleOutputChange"
+        >
           <option :value="-1">Default</option>
           <option v-for="dev in outputDevices" :key="dev.id" :value="dev.id">{{ dev.name }}</option>
         </select>
@@ -104,6 +120,7 @@ async function toggleTest() {
           min="0"
           max="100"
           class="range range-sm range-primary"
+          aria-label="Playback volume"
           @input="handleVolumeChange"
         />
       </label>
@@ -111,20 +128,34 @@ async function toggleTest() {
       <label class="form-control w-full">
         <div class="label cursor-pointer">
           <span class="label-text text-xs">Noise Suppression</span>
-          <input type="checkbox" v-model="noiseEnabled" class="toggle toggle-primary toggle-sm"
-                 @change="handleNoiseToggle" />
+          <input
+            type="checkbox"
+            v-model="noiseEnabled"
+            class="toggle toggle-primary toggle-sm"
+            aria-label="Toggle noise suppression"
+            @change="handleNoiseToggle"
+          />
         </div>
       </label>
 
       <label class="form-control w-full" :class="{ 'opacity-40 pointer-events-none': !noiseEnabled }">
         <div class="label"><span class="label-text text-xs">Level: {{ noiseLevel }}%</span></div>
-        <input type="range" v-model.number="noiseLevel" min="0" max="100"
-               class="range range-sm range-primary" @input="handleNoiseLevelChange" />
+        <input
+          type="range"
+          v-model.number="noiseLevel"
+          min="0"
+          max="100"
+          class="range range-sm range-primary"
+          :aria-label="`Noise suppression level: ${noiseLevel}%`"
+          :disabled="!noiseEnabled"
+          @input="handleNoiseLevelChange"
+        />
       </label>
 
       <button
         class="btn btn-outline btn-sm w-full"
         :class="{ 'btn-info': testing }"
+        :aria-label="testing ? 'Stop microphone test' : 'Start microphone test'"
         @click="toggleTest"
       >
         {{ testing ? 'Stop Test' : 'Test Mic' }}
@@ -139,20 +170,23 @@ async function toggleTest() {
       Appearance
     </div>
     <div class="p-6 flex flex-col gap-4 max-w-sm">
-      <div class="form-control w-full">
-        <div class="label"><span class="label-text text-xs">Theme</span></div>
-        <div class="flex gap-2">
+      <fieldset class="form-control w-full">
+        <legend class="label"><span class="label-text text-xs">Theme</span></legend>
+        <div class="flex gap-2" role="radiogroup" aria-label="Theme selection">
           <button
             v-for="theme in THEMES"
             :key="theme"
             class="btn btn-sm flex-1"
             :class="currentTheme === theme ? 'btn-primary' : 'btn-ghost border border-base-content/20'"
+            role="radio"
+            :aria-checked="currentTheme === theme"
+            :aria-label="`${THEME_LABELS[theme]} theme`"
             @click="applyTheme(theme)"
           >
             {{ THEME_LABELS[theme] }}
           </button>
         </div>
-      </div>
+      </fieldset>
     </div>
   </div>
 </template>

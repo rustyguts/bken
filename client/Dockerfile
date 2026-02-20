@@ -19,10 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpipewire-0.3-dev \
     pipewire-alsa \
     pipewire-jack \
+    unzip \
     autoconf automake libtool git \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Bun to a shared location accessible by any user.
+ENV BUN_INSTALL="/usr/local/bun"
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/usr/local/bun/bin:$PATH"
 
 # rnnoise is not in Debian Bookworm main — build from source.
 RUN git clone --depth=1 https://github.com/xiph/rnnoise /tmp/rnnoise \
@@ -60,12 +64,12 @@ RUN mkdir -p \
 
 # ── dev: wails dev with source mounted at /app ────────────────────────────────
 FROM base AS dev
-CMD ["sh", "-c", "cd /app/frontend && npm install && cd /app && wails dev -tags webkit2_41"]
+CMD ["sh", "-c", "cd /app/frontend && bun install && cd /app && wails dev -tags webkit2_41"]
 
 # ── build: compile Wails desktop binary ──────────────────────────────────────
 FROM base AS build
 COPY . .
-RUN cd frontend && npm install
+RUN cd frontend && bun install
 RUN wails build -tags webkit2_41
 
 # ── prod: slim runtime with only shared libraries ─────────────────────────────

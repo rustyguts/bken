@@ -27,7 +27,7 @@ cd client && go test ./...
 cd client && wails build -tags webkit2_41
 
 # Frontend only
-cd client/frontend && npm run build
+cd client/frontend && bun run build
 ```
 
 The server accepts a `-addr` flag (default `:4433`).

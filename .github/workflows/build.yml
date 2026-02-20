@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
 
-env:
-  NODE_OPTIONS: "--max-old-space-size=4096"
-
 jobs:
   server-binary:
     name: "Server: standalone binary"
@@ -56,11 +53,7 @@ jobs:
         with:
           go-version-file: client/go.mod
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: client/frontend/package-lock.json
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install Linux dependencies
         if: matrix.build.name == 'linux'

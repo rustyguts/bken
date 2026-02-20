@@ -20,15 +20,25 @@ type NoiseCanceller struct {
 	st1     *C.DenoiseState // processes samples [480:960]
 	level   float32         // 0.0 = bypass, 1.0 = full suppression
 	enabled bool
+
+	// C buffers pre-allocated at struct level to avoid per-frame malloc/free.
+	cIn  *C.float
+	cOut *C.float
 }
 
-// NewNoiseCanceller allocates two RNNoise state instances.
+const rnnoiseFrameSize = 480 // RNNoise native frame size
+
+// NewNoiseCanceller allocates two RNNoise state instances and pre-allocates C buffers.
 func NewNoiseCanceller() *NoiseCanceller {
+	cIn := (*C.float)(C.malloc(C.size_t(rnnoiseFrameSize) * C.size_t(unsafe.Sizeof(C.float(0)))))
+	cOut := (*C.float)(C.malloc(C.size_t(rnnoiseFrameSize) * C.size_t(unsafe.Sizeof(C.float(0)))))
 	return &NoiseCanceller{
 		st0:     C.rnnoise_create(nil),
 		st1:     C.rnnoise_create(nil),
 		level:   1.0,
 		enabled: false,
+		cIn:     cIn,
+		cOut:    cOut,
 	}
 }
 
@@ -57,47 +67,40 @@ func (nc *NoiseCanceller) SetLevel(level float32) {
 // No-op when disabled or level == 0.
 func (nc *NoiseCanceller) Process(buf []float32) {
 	nc.mu.Lock()
-	enabled := nc.enabled
-	level := nc.level
-	nc.mu.Unlock()
+	defer nc.mu.Unlock()
 
-	if !enabled || level == 0 {
+	if !nc.enabled || nc.level == 0 {
 		return
 	}
 
 	// RNNoise expects float32 samples scaled to int16 range [-32768, 32767].
-	// Allocate C buffers for each half-frame (480 samples each).
-	const halfFrame = 480
-	cIn := (*C.float)(C.malloc(C.size_t(halfFrame) * C.size_t(unsafe.Sizeof(C.float(0)))))
-	defer C.free(unsafe.Pointer(cIn))
-	cOut := (*C.float)(C.malloc(C.size_t(halfFrame) * C.size_t(unsafe.Sizeof(C.float(0)))))
-	defer C.free(unsafe.Pointer(cOut))
+	inSlice := unsafe.Slice(nc.cIn, rnnoiseFrameSize)
+	outSlice := unsafe.Slice(nc.cOut, rnnoiseFrameSize)
 
-	inSlice := unsafe.Slice(cIn, halfFrame)
-	outSlice := unsafe.Slice(cOut, halfFrame)
+	level := nc.level
 
 	// Process first half [0:480].
-	for i := 0; i < halfFrame; i++ {
+	for i := 0; i < rnnoiseFrameSize; i++ {
 		inSlice[i] = C.float(buf[i] * 32767.0)
 	}
-	C.rnnoise_process_frame(nc.st0, cOut, cIn)
-	for i := 0; i < halfFrame; i++ {
+	C.rnnoise_process_frame(nc.st0, nc.cOut, nc.cIn)
+	for i := 0; i < rnnoiseFrameSize; i++ {
 		denoised := float32(outSlice[i]) / 32767.0
 		buf[i] = buf[i]*(1-level) + denoised*level
 	}
 
 	// Process second half [480:960].
-	for i := 0; i < halfFrame; i++ {
-		inSlice[i] = C.float(buf[halfFrame+i] * 32767.0)
+	for i := 0; i < rnnoiseFrameSize; i++ {
+		inSlice[i] = C.float(buf[rnnoiseFrameSize+i] * 32767.0)
 	}
-	C.rnnoise_process_frame(nc.st1, cOut, cIn)
-	for i := 0; i < halfFrame; i++ {
+	C.rnnoise_process_frame(nc.st1, nc.cOut, nc.cIn)
+	for i := 0; i < rnnoiseFrameSize; i++ {
 		denoised := float32(outSlice[i]) / 32767.0
-		buf[halfFrame+i] = buf[halfFrame+i]*(1-level) + denoised*level
+		buf[rnnoiseFrameSize+i] = buf[rnnoiseFrameSize+i]*(1-level) + denoised*level
 	}
 }
 
-// Destroy frees the underlying C RNNoise state instances.
+// Destroy frees the underlying C RNNoise state instances and pre-allocated buffers.
 func (nc *NoiseCanceller) Destroy() {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
@@ -108,5 +111,13 @@ func (nc *NoiseCanceller) Destroy() {
 	if nc.st1 != nil {
 		C.rnnoise_destroy(nc.st1)
 		nc.st1 = nil
+	}
+	if nc.cIn != nil {
+		C.free(unsafe.Pointer(nc.cIn))
+		nc.cIn = nil
+	}
+	if nc.cOut != nil {
+		C.free(unsafe.Pointer(nc.cOut))
+		nc.cOut = nil
 	}
 }

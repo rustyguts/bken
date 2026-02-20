@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import type { ConnectPayload } from './types'
+
+interface ServerEntry {
+  name: string
+  addr: string
+}
 
 const emit = defineEmits<{
-  connect: [payload: { username: string; addr: string }]
+  connect: [payload: ConnectPayload]
 }>()
 
 const username = ref('')
@@ -10,11 +16,11 @@ const error = ref('')
 const connecting = ref(false)
 const connectingAddr = ref('')
 
-const servers = ref([
+const servers = ref<ServerEntry[]>([
   { name: 'Local Dev', addr: 'localhost:4433' },
 ])
 
-function handleConnect(addr: string) {
+function handleConnect(addr: string): void {
   if (!username.value.trim()) {
     error.value = 'Please enter a username'
     return
@@ -25,7 +31,7 @@ function handleConnect(addr: string) {
   emit('connect', { username: username.value.trim(), addr })
 }
 
-function setError(msg: string) {
+function setError(msg: string): void {
   error.value = msg
   connecting.value = false
   connectingAddr.value = ''
@@ -50,6 +56,7 @@ defineExpose({ setError })
           v-model="username"
           placeholder="Enter username"
           class="input input-bordered w-full"
+          autocomplete="username"
           :disabled="connecting"
           @keydown.enter="servers.length === 1 && handleConnect(servers[0].addr)"
         />
@@ -76,9 +83,10 @@ defineExpose({ setError })
         <button
           class="btn btn-primary btn-sm"
           :disabled="connecting"
+          :aria-label="`Connect to ${server.name}`"
           @click="handleConnect(server.addr)"
         >
-          {{ connectingAddr === server.addr ? 'Connecting…' : 'Connect' }}
+          {{ connectingAddr === server.addr ? 'Connecting...' : 'Connect' }}
         </button>
       </div>
     </div>
