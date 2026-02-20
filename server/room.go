@@ -16,9 +16,10 @@ type DatagramSender interface {
 type Room struct {
 	mu         sync.RWMutex
 	clients    map[uint16]*Client
-	serverName string     // protected by mu
-	ownerID    uint16     // ID of the current room owner; 0 = no owner; protected by mu
-	onRename   func(string) // optional persistence callback, fired after Rename; protected by mu
+	serverName string        // protected by mu
+	ownerID    uint16        // ID of the current room owner; 0 = no owner; protected by mu
+	onRename   func(string)  // optional persistence callback, fired after Rename; protected by mu
+	channels   []ChannelInfo // cached channel list sent to newly-connecting clients; protected by mu
 	nextID     atomic.Uint32
 
 	// Metrics (reset on each Stats call).
@@ -174,9 +175,25 @@ func (r *Room) Clients() []UserInfo {
 
 	out := make([]UserInfo, 0, len(r.clients))
 	for _, c := range r.clients {
-		out = append(out, UserInfo{ID: c.ID, Username: c.Username})
+		out = append(out, UserInfo{ID: c.ID, Username: c.Username, ChannelID: c.channelID})
 	}
 	return out
+}
+
+// SetChannels replaces the cached channel list and broadcasts a channel_list
+// message to all currently-connected clients.
+func (r *Room) SetChannels(channels []ChannelInfo) {
+	r.mu.Lock()
+	r.channels = channels
+	r.mu.Unlock()
+	r.BroadcastControl(ControlMsg{Type: "channel_list", Channels: channels}, 0)
+}
+
+// GetChannelList returns the cached channel list.
+func (r *Room) GetChannelList() []ChannelInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.channels
 }
 
 // ClientCount returns the current number of connected clients.

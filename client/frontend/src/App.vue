@@ -7,7 +7,7 @@ import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
 import TitleBar from './TitleBar.vue'
-import type { User, UserJoinedEvent, UserLeftEvent, SpeakingEvent, LogEvent, ConnectPayload, ChatMessage } from './types'
+import type { User, UserJoinedEvent, UserLeftEvent, SpeakingEvent, LogEvent, ConnectPayload, ChatMessage, Channel } from './types'
 
 const connected = ref(false)
 const serverBrowserRef = ref<InstanceType<typeof ServerBrowser> | null>(null)
@@ -17,6 +17,9 @@ const chatMessages = ref<ChatMessage[]>([])
 const serverName = ref('')
 const ownerID = ref(0)
 const myID = ref(0)
+const channels = ref<Channel[]>([])
+/** Maps userID → channelID (0 = lobby). Updated by user:list, user:joined, user:left, channel:user_moved. */
+const userChannels = ref<Record<number, number>>({})
 const speakingUsers = ref<Set<number>>(new Set())
 const speakingTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let eventIdCounter = 0
@@ -99,6 +102,8 @@ function resetState(): void {
   serverName.value = ''
   ownerID.value = 0
   myID.value = 0
+  channels.value = []
+  userChannels.value = {}
   clearSpeaking()
 }
 
@@ -147,18 +152,33 @@ onMounted(async () => {
 
   EventsOn('user:list', (data: User[]) => {
     users.value = data || []
+    // Rebuild userChannels from the snapshot; each user now carries channel_id.
+    const map: Record<number, number> = {}
+    for (const u of (data || [])) map[u.id] = u.channel_id ?? 0
+    userChannels.value = map
     if (data?.length) addEvent(`${data.length} user${data.length !== 1 ? 's' : ''} in room`, 'info')
   })
 
   EventsOn('user:joined', (data: UserJoinedEvent) => {
     users.value = [...users.value, { id: data.id, username: data.username }]
+    userChannels.value = { ...userChannels.value, [data.id]: 0 }
     addEvent(`${data.username} joined`, 'join')
   })
 
   EventsOn('user:left', (data: UserLeftEvent) => {
     const user = users.value.find(u => u.id === data.id)
     users.value = users.value.filter(u => u.id !== data.id)
+    const { [data.id]: _, ...rest } = userChannels.value
+    userChannels.value = rest
     addEvent(`${user?.username ?? 'Someone'} left`, 'leave')
+  })
+
+  EventsOn('channel:list', (data: Channel[]) => {
+    channels.value = data || []
+  })
+
+  EventsOn('channel:user_moved', (data: { user_id: number; channel_id: number }) => {
+    userChannels.value = { ...userChannels.value, [data.user_id]: data.channel_id }
   })
 
   EventsOn('audio:speaking', (data: SpeakingEvent) => {
@@ -202,7 +222,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved')
   clearReconnectTimers()
   speakingTimers.forEach(t => clearTimeout(t))
 })
@@ -229,6 +249,8 @@ onBeforeUnmount(() => {
         :chat-messages="chatMessages"
         :owner-id="ownerID"
         :my-id="myID"
+        :channels="channels"
+        :user-channels="userChannels"
         class="flex-1 min-h-0"
         @disconnect="handleDisconnect"
         @send-chat="handleSendChat"

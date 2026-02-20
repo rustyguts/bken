@@ -42,6 +42,15 @@ func main() {
 		}
 	})
 
+	// Seed room's channel cache so newly-connecting clients receive the list.
+	if chs, err := st.GetChannels(); err == nil {
+		infos := make([]ChannelInfo, 0, len(chs))
+		for _, ch := range chs {
+			infos = append(infos, ChannelInfo{ID: ch.ID, Name: ch.Name})
+		}
+		room.SetChannels(infos)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

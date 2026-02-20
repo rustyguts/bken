@@ -16,8 +16,9 @@ import (
 
 // Client represents a connected voice client.
 type Client struct {
-	ID       uint16
-	Username string
+	ID        uint16
+	Username  string
+	channelID int64 // current channel; 0 = not in any channel; protected by the room mutex on writes
 
 	// session implements DatagramSender; stored as the interface so tests can mock it.
 	session DatagramSender
@@ -104,7 +105,12 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	// Send the current user list (and server name) to the new client.
 	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName(), OwnerID: room.OwnerID()})
 
-	// Notify all other clients that this user joined.
+	// Send the current channel list to the new client.
+	if channels := room.GetChannelList(); len(channels) > 0 {
+		client.SendControl(ControlMsg{Type: "channel_list", Channels: channels})
+	}
+
+	// Notify all other clients that this user joined (channel 0 = not in any channel).
 	room.BroadcastControl(
 		ControlMsg{Type: "user_joined", ID: client.ID, Username: client.Username},
 		client.ID,
@@ -177,6 +183,15 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		room.Rename(name)
 		room.BroadcastControl(ControlMsg{Type: "server_info", ServerName: name}, 0)
 		log.Printf("[client %d] %s renamed server to %q", client.ID, client.Username, name)
+	case "join_channel":
+		// Any client may join a channel (including channel 0 to leave all channels).
+		client.channelID = msg.ChannelID
+		room.BroadcastControl(ControlMsg{
+			Type:      "user_channel",
+			ID:        client.ID,
+			ChannelID: msg.ChannelID,
+		}, 0)
+		log.Printf("[client %d] %s joined channel %d", client.ID, client.Username, msg.ChannelID)
 	}
 }
 

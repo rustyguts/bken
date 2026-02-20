@@ -288,6 +288,39 @@ func TestRoomRenameNoCallback(t *testing.T) {
 	}
 }
 
+func TestRoomSetGetChannelList(t *testing.T) {
+	room := NewRoom()
+
+	if chs := room.GetChannelList(); chs != nil {
+		t.Errorf("expected nil before SetChannels, got %v", chs)
+	}
+
+	room.SetChannels([]ChannelInfo{{ID: 1, Name: "General"}, {ID: 2, Name: "Gaming"}})
+	chs := room.GetChannelList()
+	if len(chs) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(chs))
+	}
+	if chs[0].Name != "General" || chs[1].Name != "Gaming" {
+		t.Errorf("unexpected channels: %v", chs)
+	}
+}
+
+func TestRoomClientsIncludesChannelID(t *testing.T) {
+	room := NewRoom()
+
+	c := newTestClient("alice")
+	room.AddClient(c)
+	c.channelID = 42
+
+	users := room.Clients()
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(users))
+	}
+	if users[0].ChannelID != 42 {
+		t.Errorf("ChannelID: got %d, want 42", users[0].ChannelID)
+	}
+}
+
 func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	room := NewRoom()
 

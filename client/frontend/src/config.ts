@@ -93,3 +93,9 @@ export function KickUser(id: number): Promise<string> {
 export function RenameServer(name: string): Promise<string> {
   return bridge()['RenameServer'](name)
 }
+
+// --- Channel bindings ---
+
+export function JoinChannel(id: number): Promise<string> {
+  return bridge()['JoinChannel'](id)
+}

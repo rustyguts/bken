@@ -7,7 +7,7 @@ import MetricsBar from './MetricsBar.vue'
 import RoomBrowser from './RoomBrowser.vue'
 import AudioSettings from './AudioSettings.vue'
 import ChatPanel from './ChatPanel.vue'
-import type { User, LogEvent, ChatMessage } from './types'
+import type { User, LogEvent, ChatMessage, Channel } from './types'
 
 const props = defineProps<{
   users: User[]
@@ -16,6 +16,8 @@ const props = defineProps<{
   chatMessages: ChatMessage[]
   ownerId: number
   myId: number
+  channels: Channel[]
+  userChannels: Record<number, number>
 }>()
 
 const emit = defineEmits<{ disconnect: []; sendChat: [message: string] }>()
@@ -105,6 +107,8 @@ async function handleDisconnect(): Promise<void> {
               :speaking-users="speakingUsers"
               :owner-id="props.ownerId"
               :my-id="props.myId"
+              :channels="props.channels"
+              :user-channels="props.userChannels"
               class="h-full"
             />
             <ChatPanel

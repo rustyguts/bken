@@ -4,6 +4,13 @@
 export interface User {
   id: number
   username: string
+  channel_id?: number // 0 or absent = lobby
+}
+
+/** A voice channel on the server. */
+export interface Channel {
+  id: number
+  name: string
 }
 
 /** Payload emitted when a user joins. */

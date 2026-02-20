@@ -183,6 +183,7 @@ func (s *APIServer) handleCreateChannel(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusConflict, "channel name already exists")
 	}
+	s.refreshChannels()
 	return c.JSON(http.StatusCreated, ChannelResponse{ID: id, Name: name})
 }
 
@@ -208,6 +209,7 @@ func (s *APIServer) handleRenameChannel(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	s.refreshChannels()
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -222,5 +224,21 @@ func (s *APIServer) handleDeleteChannel(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	s.refreshChannels()
 	return c.NoContent(http.StatusNoContent)
+}
+
+// refreshChannels reloads the channel list from the store, updates the room
+// cache, and broadcasts a channel_list message to all connected clients.
+func (s *APIServer) refreshChannels() {
+	chs, err := s.store.GetChannels()
+	if err != nil {
+		log.Printf("[api] reload channels: %v", err)
+		return
+	}
+	infos := make([]ChannelInfo, 0, len(chs))
+	for _, ch := range chs {
+		infos = append(infos, ChannelInfo{ID: ch.ID, Name: ch.Name})
+	}
+	s.room.SetChannels(infos)
 }

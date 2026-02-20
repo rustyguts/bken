@@ -353,6 +353,62 @@ func TestProcessControlRenameExactly50Chars(t *testing.T) {
 	}
 }
 
+// --- processControl: join_channel ---
+
+func TestProcessControlJoinChannel(t *testing.T) {
+	room := NewRoom()
+	client, _ := newCtrlClient("alice")
+	observer, observerBuf := newCtrlClient("bob")
+	room.AddClient(client)
+	room.AddClient(observer)
+
+	processControl(ControlMsg{Type: "join_channel", ChannelID: 7}, client, room)
+
+	// Client's channelID should be updated.
+	if client.channelID != 7 {
+		t.Errorf("channelID: got %d, want 7", client.channelID)
+	}
+
+	// All clients (including sender) should receive user_channel broadcast.
+	got := decodeControl(t, observerBuf)
+	if got.Type != "user_channel" {
+		t.Errorf("type: got %q, want %q", got.Type, "user_channel")
+	}
+	if got.ID != client.ID {
+		t.Errorf("ID: got %d, want %d", got.ID, client.ID)
+	}
+	if got.ChannelID != 7 {
+		t.Errorf("ChannelID: got %d, want 7", got.ChannelID)
+	}
+}
+
+func TestProcessControlJoinChannelZeroLeaves(t *testing.T) {
+	room := NewRoom()
+	client, _ := newCtrlClient("alice")
+	room.AddClient(client)
+	client.channelID = 5
+
+	// Sending channel_id=0 means "leave all channels".
+	processControl(ControlMsg{Type: "join_channel", ChannelID: 0}, client, room)
+
+	if client.channelID != 0 {
+		t.Errorf("channelID after leave: got %d, want 0", client.channelID)
+	}
+}
+
+func TestProcessControlJoinChannelClientSnapshotUpdated(t *testing.T) {
+	room := NewRoom()
+	client, _ := newCtrlClient("alice")
+	room.AddClient(client)
+
+	processControl(ControlMsg{Type: "join_channel", ChannelID: 3}, client, room)
+
+	users := room.Clients()
+	if len(users) != 1 || users[0].ChannelID != 3 {
+		t.Errorf("Clients() snapshot: expected ChannelID=3, got %+v", users)
+	}
+}
+
 // --- processControl: unknown type ---
 
 func TestProcessControlUnknownTypeIsIgnored(t *testing.T) {

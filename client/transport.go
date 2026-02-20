@@ -37,20 +37,29 @@ func (ms *mutedSet) Slice() []uint16 {
 
 // ControlMsg mirrors the server's control message format.
 type ControlMsg struct {
-	Type       string     `json:"type"`
-	Username   string     `json:"username,omitempty"`
-	ID         uint16     `json:"id,omitempty"`
-	Users      []UserInfo `json:"users,omitempty"`
-	Ts         int64      `json:"ts,omitempty"`          // ping/pong timestamp (Unix ms)
-	Message    string     `json:"message,omitempty"`     // chat: body text
-	ServerName string     `json:"server_name,omitempty"` // user_list: human-readable server name
-	OwnerID    uint16     `json:"owner_id,omitempty"`    // user_list/owner_changed: current room owner
+	Type       string        `json:"type"`
+	Username   string        `json:"username,omitempty"`
+	ID         uint16        `json:"id,omitempty"`
+	Users      []UserInfo    `json:"users,omitempty"`
+	Ts         int64         `json:"ts,omitempty"`           // ping/pong timestamp (Unix ms)
+	Message    string        `json:"message,omitempty"`      // chat: body text
+	ServerName string        `json:"server_name,omitempty"`  // user_list: human-readable server name
+	OwnerID    uint16        `json:"owner_id,omitempty"`     // user_list/owner_changed: current room owner
+	ChannelID  int64         `json:"channel_id,omitempty"`   // join_channel/user_channel: target channel
+	Channels   []ChannelInfo `json:"channels,omitempty"`     // channel_list: full list of channels
 }
 
 // UserInfo describes a connected peer.
 type UserInfo struct {
-	ID       uint16 `json:"id"`
-	Username string `json:"username"`
+	ID        uint16 `json:"id"`
+	Username  string `json:"username"`
+	ChannelID int64  `json:"channel_id,omitempty"` // 0 = not in any channel
+}
+
+// ChannelInfo describes a voice channel.
+type ChannelInfo struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // Metrics holds connection quality metrics shown in the UI.
@@ -112,6 +121,8 @@ type Transport struct {
 	onServerInfo    func(name string)
 	onKicked        func()
 	onOwnerChanged  func(ownerID uint16)
+	onChannelList   func([]ChannelInfo)
+	onUserChannel   func(userID uint16, channelID int64)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -178,6 +189,18 @@ func (t *Transport) SetOnOwnerChanged(fn func(ownerID uint16)) {
 	t.cbMu.Unlock()
 }
 
+func (t *Transport) SetOnChannelList(fn func([]ChannelInfo)) {
+	t.cbMu.Lock()
+	t.onChannelList = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnUserChannel(fn func(userID uint16, channelID int64)) {
+	t.cbMu.Lock()
+	t.onUserChannel = fn
+	t.cbMu.Unlock()
+}
+
 // --- Per-user local muting ---
 
 // MuteUser suppresses incoming audio from the given remote user ID.
@@ -203,6 +226,13 @@ func (t *Transport) KickUser(id uint16) error {
 // caller is the room owner; the server enforces the authorisation check.
 func (t *Transport) RenameServer(name string) error {
 	t.writeCtrl(ControlMsg{Type: "rename", ServerName: name})
+	return nil
+}
+
+// JoinChannel sends a join_channel request to the server.
+// Pass channelID=0 to leave all channels (return to lobby).
+func (t *Transport) JoinChannel(id int64) error {
+	t.writeCtrl(ControlMsg{Type: "join_channel", ChannelID: id})
 	return nil
 }
 
@@ -481,6 +511,8 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onServerInfo := t.onServerInfo
 		onKicked := t.onKicked
 		onOwnerChanged := t.onOwnerChanged
+		onChannelList := t.onChannelList
+		onUserChannel := t.onUserChannel
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
@@ -538,6 +570,14 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		case "kicked":
 			if onKicked != nil {
 				onKicked()
+			}
+		case "channel_list":
+			if onChannelList != nil {
+				onChannelList(msg.Channels)
+			}
+		case "user_channel":
+			if onUserChannel != nil {
+				onUserChannel(msg.ID, msg.ChannelID)
 			}
 		}
 	}

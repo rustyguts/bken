@@ -261,6 +261,15 @@ func (a *App) wireCallbacks() {
 		runtime.EventsEmit(a.ctx, "connection:kicked", nil)
 		log.Println("[app] kicked from server")
 	})
+	a.transport.SetOnChannelList(func(channels []ChannelInfo) {
+		runtime.EventsEmit(a.ctx, "channel:list", channels)
+	})
+	a.transport.SetOnUserChannel(func(userID uint16, channelID int64) {
+		runtime.EventsEmit(a.ctx, "channel:user_moved", map[string]any{
+			"user_id":    int(userID),
+			"channel_id": channelID,
+		})
+	})
 	a.audio.OnSpeaking = func() {
 		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
 	}
@@ -412,6 +421,16 @@ func (a *App) RenameServer(name string) string {
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) KickUser(id int) string {
 	if err := a.transport.KickUser(uint16(id)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// JoinChannel sends a join_channel request for the given channel ID.
+// Pass id=0 to leave all channels (return to lobby).
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) JoinChannel(id int) string {
+	if err := a.transport.JoinChannel(int64(id)); err != nil {
 		return err.Error()
 	}
 	return ""
