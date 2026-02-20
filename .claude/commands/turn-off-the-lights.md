@@ -34,6 +34,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 - UI: The inteface should always remain simple, clean, modern
 - Server owners should be able to generate invite links from the servers public endpoint. When openened in a browser this should open the app and automatically connect you to the server
 - Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat)
+  - ✅ Server-level global chat done — see Done section
 - UI: The UI should be modular and customizable. Certain elements should be movable. Users should be able to unlock the UI and then move panels around to suite their needs
 - Performance is critical, analyze slow parts of the code and improve performance (ongoing)
 - UI: Small icons can be uploaded and set per channel
@@ -63,3 +64,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Performance: AEC hot path — pre-allocated refBuf eliminates 285 KB/s GC pressure; FeedFarEnd/Process reference extraction use bulk copy (0 allocs/op on both benchmarks)
 - Server state: embedded SQLite (modernc.org/sqlite, no CGO) with versioned migration runner; settings table with GET/PUT /api/settings; server_name defaults to "bken server"; -db flag for DB path
 - Voice reliability: atomic.Bool for connected flag (fixes data race); sendLoop triggers reconnect on SendAudio error; pongTimeout 10s→6s (faster disconnect detection); StartReceiving captures session once (no per-datagram mutex)
+- Chat: global server-level text chat over existing control stream; "chat" ControlMsg type; server stamps username/ID/timestamp (anti-spoofing); 500-char limit; Voice/Chat tabs in Room panel; ChatPanel.vue with auto-scroll; SendChat Wails bridge
