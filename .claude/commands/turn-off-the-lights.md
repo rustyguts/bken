@@ -36,7 +36,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice: Echo cancellation feature, enabled by default
 - Voice: Noise supression feature, enabled by default
 - Voice: Ability to set volume
-- Voice: Ability to turn on automatic gain control
 - Server owners should be able to generate invite links from the servers public endpoint. When openened in a browser this should open the app and automatically connect you to the server
 - Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat)
 - UI: The UI should be modular and customizable. Certain elements should be movable. Users should be able to unlock the UI and then move panels around to suite their needs
@@ -59,3 +58,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Optimized Opus audio transmission rate based on connection speed to server
 - Users can mute other users locally (client-side, no server involvement)
 - Users hear notification tones for app events (connect, join, leave, mute, unmute)
+- Voice: Automatic gain control (software AGC, enabled by default, configurable target level)
