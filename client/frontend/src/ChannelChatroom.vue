@@ -110,18 +110,17 @@ function isImageFile(name: string): boolean {
       </div>
     </Transition>
 
-    <header class="border-b border-base-content/10 px-3 py-2 flex flex-col gap-2">
-      <div class="flex items-center justify-between">
+    <header class="border-b border-base-content/10 px-3 py-1.5 flex flex-col gap-1">
+      <div class="flex items-center gap-2">
         <h2 class="text-sm font-semibold"># {{ selectedChannelName }}</h2>
-        <span class="text-[11px] opacity-50">Chatroom</span>
       </div>
 
-      <div class="flex gap-1 overflow-x-auto pb-1">
+      <div class="flex gap-1 overflow-x-auto">
         <button
           v-for="channel in channelTabs"
           :key="channel.id"
           class="btn btn-xs whitespace-nowrap relative"
-          :class="channel.id === selectedChannelId ? 'btn-primary' : 'btn-ghost'"
+          :class="channel.id === selectedChannelId ? 'btn-soft btn-primary' : 'btn-ghost'"
           @click="emit('selectChannel', channel.id)"
         >
           {{ channel.name }}
@@ -135,20 +134,20 @@ function isImageFile(name: string): boolean {
       </div>
     </header>
 
-    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto px-3 py-1 space-y-0.5">
       <div v-if="!connected" class="text-sm opacity-40 text-center pt-6">Connect to a server to start chatting</div>
       <div v-else-if="visibleMessages.length === 0" class="text-sm opacity-40 text-center pt-6">No messages in this channel yet</div>
 
       <article
         v-for="msg in visibleMessages"
         :key="msg.id"
-        class="rounded-lg border border-base-content/10 bg-base-200 p-2"
+        class="py-1 px-1.5 rounded hover:bg-base-200 transition-colors"
       >
-        <div class="flex items-center gap-2 mb-1">
-          <span class="text-xs font-semibold text-primary">{{ msg.username }}</span>
-          <span class="text-[11px] opacity-50">{{ formatTime(msg.ts) }}</span>
+        <div class="flex items-baseline gap-2">
+          <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
+          <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
+          <span v-if="msg.message" class="text-sm break-words">{{ msg.message }}</span>
         </div>
-        <p v-if="msg.message" class="text-sm break-words">{{ msg.message }}</p>
 
         <!-- File attachment -->
         <div v-if="msg.fileUrl" class="mt-1">

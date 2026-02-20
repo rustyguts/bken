@@ -179,7 +179,7 @@ function handleSendMessage(message: string): void {
       @open-settings="emit('openSettings')"
       @mute-toggle="handleMuteToggle"
       @deafen-toggle="handleDeafenToggle"
-      @disconnect="handleDisconnectVoice"
+      @leave-voice="handleDisconnectVoice"
     />
   </div>
 </template>

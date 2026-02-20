@@ -453,6 +453,13 @@ func (r *Room) MoveChannelUsersToLobby(channelID int64) {
 	}
 }
 
+// ChannelCount returns the number of cached channels.
+func (r *Room) ChannelCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.channels)
+}
+
 // NextMsgID returns a monotonically increasing message ID for chat messages.
 func (r *Room) NextMsgID() uint64 {
 	return r.nextMsgID.Add(1)

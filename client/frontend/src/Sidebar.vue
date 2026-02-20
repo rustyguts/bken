@@ -63,11 +63,8 @@ async function saveConfig(): Promise<void> {
 }
 
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '??'
-  const a = parts[0][0] ?? ''
-  const b = parts[1]?.[0] ?? parts[0][1] ?? ''
-  return `${a}${b}`.toUpperCase()
+  const first = name.trim()[0]
+  return first ? first.toUpperCase() : '?'
 }
 
 function nameHue(name: string): number {
@@ -224,7 +221,7 @@ onMounted(async () => {
         <div v-else-if="browserError" class="alert alert-error py-2 text-sm mt-2">{{ browserError }}</div>
 
         <div class="mt-3 flex gap-2">
-          <button class="btn btn-primary btn-sm flex-1" @click="connectToNewServer">
+          <button class="btn btn-soft btn-primary btn-sm flex-1" @click="connectToNewServer">
             {{ connectingAddr ? 'Connecting…' : 'Connect' }}
           </button>
           <button class="btn btn-ghost btn-sm" @click="browserOpen = false">Close</button>

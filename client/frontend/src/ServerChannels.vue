@@ -51,11 +51,8 @@ function usersForChannel(channelId: number): User[] {
 }
 
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '??'
-  const a = parts[0][0] ?? ''
-  const b = parts[1]?.[0] ?? parts[0][1] ?? ''
-  return `${a}${b}`.toUpperCase()
+  const first = name.trim()[0]
+  return first ? first.toUpperCase() : '?'
 }
 
 function selectChannel(channelId: number): void {
@@ -336,7 +333,7 @@ const moveTargets = computed(() => {
         />
         <div class="mt-3 flex gap-2 justify-end">
           <button class="btn btn-ghost btn-sm" @click="cancelCreate">Cancel</button>
-          <button class="btn btn-primary btn-sm" :disabled="!newChannelName.trim()" @click="confirmCreate">Create</button>
+          <button class="btn btn-soft btn-primary btn-sm" :disabled="!newChannelName.trim()" @click="confirmCreate">Create</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="cancelCreate">

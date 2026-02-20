@@ -387,6 +387,10 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		if msg.ChannelID == 0 {
 			return
 		}
+		// Prevent deleting the last channel — there must always be at least one.
+		if room.ChannelCount() <= 1 {
+			return
+		}
 		if err := room.DeleteChannel(msg.ChannelID); err != nil {
 			log.Printf("[client %d] delete channel %d error: %v", client.ID, msg.ChannelID, err)
 			return
@@ -419,6 +423,16 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 				client.session.SendDatagram(data) //nolint:errcheck // best-effort retransmit
 			}
 		}
+	case "rename_user":
+		// Any client may rename themselves. The server validates the name and
+		// broadcasts a user_renamed message so other clients update their user list.
+		name, err := validateName(msg.Username, MaxNameLength)
+		if err != nil {
+			return
+		}
+		client.Username = name
+		room.BroadcastControl(ControlMsg{Type: "user_renamed", ID: client.ID, Username: name}, 0)
+		log.Printf("[client %d] renamed to %q", client.ID, name)
 	case "move_user":
 		// Only the room owner may move other users between channels.
 		if room.OwnerID() != client.ID || msg.ID == 0 || msg.ID == client.ID {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import Room from './Room.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -215,6 +215,11 @@ async function handleRenameGlobalUsername(name: string): Promise<void> {
   await SaveConfig({ ...cfg, username: next })
   globalUsername.value = next
 
+  // Notify the server so future chat messages use the new name.
+  if (connected.value) {
+    await RenameUser(next)
+  }
+
   if (connectError.value.includes('username')) {
     connectError.value = ''
   }
@@ -339,6 +344,12 @@ onMounted(async () => {
     users.value = users.value.filter(u => u.id !== data.id)
     const { [data.id]: _, ...rest } = userChannels.value
     userChannels.value = rest
+  })
+
+  EventsOn('user:renamed', (data: { id: number; username: string }) => {
+    users.value = users.value.map(u =>
+      u.id === data.id ? { ...u, username: data.username } : u
+    )
   })
 
   EventsOn('channel:list', (data: Channel[]) => {
@@ -479,7 +490,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('hashchange', syncRouteFromHash)
   window.removeEventListener('keydown', handlePTTKeyDown)
   window.removeEventListener('keyup', handlePTTKeyUp)
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'chat:message', 'chat:link_preview', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:link_preview', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
   clearTimers()
   cleanupSpeaking()
 })

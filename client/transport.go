@@ -181,6 +181,7 @@ type Transport struct {
 	onChannelList        func([]ChannelInfo)
 	onUserChannel        func(userID uint16, channelID int64)
 	onLinkPreview        func(msgID uint64, channelID int64, url, title, desc, image, siteName string)
+	onUserRenamed        func(userID uint16, username string)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -271,6 +272,12 @@ func (t *Transport) SetOnLinkPreview(fn func(msgID uint64, channelID int64, url,
 	t.cbMu.Unlock()
 }
 
+func (t *Transport) SetOnUserRenamed(fn func(userID uint16, username string)) {
+	t.cbMu.Lock()
+	t.onUserRenamed = fn
+	t.cbMu.Unlock()
+}
+
 // --- Per-user local muting ---
 
 // MuteUser suppresses incoming audio from the given remote user ID.
@@ -325,6 +332,12 @@ func (t *Transport) DeleteChannel(id int64) error {
 // Only succeeds if the caller is the room owner; the server enforces the check.
 func (t *Transport) MoveUser(userID uint16, channelID int64) error {
 	return t.writeCtrl(ControlMsg{Type: "move_user", ID: userID, ChannelID: channelID})
+}
+
+// RenameUser sends a rename_user request so the server updates our username
+// for future chat messages and notifies other clients.
+func (t *Transport) RenameUser(name string) error {
+	return t.writeCtrl(ControlMsg{Type: "rename_user", Username: name})
 }
 
 // APIBaseURL returns the HTTP base URL for the server's REST API, or "" if not yet known.
@@ -800,6 +813,7 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onChannelList := t.onChannelList
 		onUserChannel := t.onUserChannel
 		onLinkPreview := t.onLinkPreview
+		onUserRenamed := t.onUserRenamed
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
@@ -885,6 +899,10 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		case "user_channel":
 			if onUserChannel != nil {
 				onUserChannel(msg.ID, msg.ChannelID)
+			}
+		case "user_renamed":
+			if onUserRenamed != nil {
+				onUserRenamed(msg.ID, msg.Username)
 			}
 		}
 	}

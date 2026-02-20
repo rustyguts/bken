@@ -110,6 +110,10 @@ export function RenameServer(name: string): Promise<string> {
   return bridge()['RenameServer'](name)
 }
 
+export function RenameUser(name: string): Promise<string> {
+  return bridge()['RenameUser'](name)
+}
+
 // --- Invite link / startup ---
 
 export function GetStartupAddr(): Promise<string> {

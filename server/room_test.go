@@ -837,3 +837,20 @@ func TestBroadcastCircuitBreakerStatsSkippedCount(t *testing.T) {
 		t.Errorf("skipped=%d, want ~%d (tolerance ±2)", skipped, expectedSkipped)
 	}
 }
+
+// --- ChannelCount ---
+
+func TestChannelCountEmpty(t *testing.T) {
+	room := NewRoom()
+	if room.ChannelCount() != 0 {
+		t.Errorf("ChannelCount: got %d, want 0", room.ChannelCount())
+	}
+}
+
+func TestChannelCountAfterSetChannels(t *testing.T) {
+	room := NewRoom()
+	room.SetChannels([]ChannelInfo{{ID: 1, Name: "General"}, {ID: 2, Name: "Music"}})
+	if room.ChannelCount() != 2 {
+		t.Errorf("ChannelCount: got %d, want 2", room.ChannelCount())
+	}
+}

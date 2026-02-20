@@ -11,7 +11,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{ toggleMute: [id: number]; kick: [id: number] }>()
 
-const initials = computed(() => props.user.username.slice(0, 2).toUpperCase())
+const initials = computed(() => {
+  const first = props.user.username.trim()[0]
+  return first ? first.toUpperCase() : '?'
+})
 </script>
 
 <template>

@@ -639,6 +639,9 @@ func TestProcessControlDeleteChannelByOwner(t *testing.T) {
 	room.SetOnDeleteChannel(func(id int64) error { deletedID = id; return nil })
 	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) { return nil, nil })
 
+	// Need at least 2 channels so last-channel protection doesn't block deletion.
+	room.SetChannels([]ChannelInfo{{ID: 5, Name: "Gaming"}, {ID: 6, Name: "Music"}})
+
 	owner, _ := newCtrlClient("alice")
 	inChannel, _ := newCtrlClient("bob")
 	room.AddClient(owner)
@@ -1153,5 +1156,130 @@ func TestProcessControlChatWithFileAndMessage(t *testing.T) {
 	}
 	if got.FileID != 7 {
 		t.Errorf("file_id: got %d, want 7", got.FileID)
+	}
+}
+
+// --- processControl: rename_user ---
+
+func TestProcessControlRenameUser(t *testing.T) {
+	room := NewRoom()
+	client, _ := newCtrlClient("alice")
+	observer, observerBuf := newCtrlClient("bob")
+	room.AddClient(client)
+	room.AddClient(observer)
+
+	processControl(ControlMsg{Type: "rename_user", Username: "  Alice2  "}, client, room)
+
+	// Client's Username should be updated.
+	if client.Username != "Alice2" {
+		t.Errorf("Username: got %q, want %q", client.Username, "Alice2")
+	}
+
+	// All clients should receive user_renamed broadcast.
+	got := decodeControl(t, observerBuf)
+	if got.Type != "user_renamed" {
+		t.Errorf("type: got %q, want %q", got.Type, "user_renamed")
+	}
+	if got.ID != client.ID {
+		t.Errorf("ID: got %d, want %d", got.ID, client.ID)
+	}
+	if got.Username != "Alice2" {
+		t.Errorf("Username: got %q, want %q", got.Username, "Alice2")
+	}
+}
+
+func TestProcessControlRenameUserEmptyRejected(t *testing.T) {
+	room := NewRoom()
+	client, _ := newCtrlClient("alice")
+	observer, observerBuf := newCtrlClient("bob")
+	room.AddClient(client)
+	room.AddClient(observer)
+
+	processControl(ControlMsg{Type: "rename_user", Username: "   "}, client, room)
+
+	if client.Username != "alice" {
+		t.Errorf("Username should remain 'alice', got %q", client.Username)
+	}
+	if observerBuf.Len() != 0 {
+		t.Error("empty rename should not broadcast")
+	}
+}
+
+func TestProcessControlRenameUserTooLong(t *testing.T) {
+	room := NewRoom()
+	client, _ := newCtrlClient("alice")
+	observer, observerBuf := newCtrlClient("bob")
+	room.AddClient(client)
+	room.AddClient(observer)
+
+	processControl(ControlMsg{Type: "rename_user", Username: strings.Repeat("x", 51)}, client, room)
+
+	if client.Username != "alice" {
+		t.Errorf("Username should remain 'alice', got %q", client.Username)
+	}
+	if observerBuf.Len() != 0 {
+		t.Error("too-long rename should not broadcast")
+	}
+}
+
+func TestProcessControlRenameUserUpdatesChat(t *testing.T) {
+	room := NewRoom()
+	client, clientBuf := newCtrlClient("alice")
+	room.AddClient(client)
+
+	// Rename.
+	processControl(ControlMsg{Type: "rename_user", Username: "NewName"}, client, room)
+	// Drain the user_renamed broadcast.
+	_ = decodeControl(t, clientBuf)
+
+	// Send a chat message — it should use the new name.
+	processControl(ControlMsg{Type: "chat", Message: "hello"}, client, room)
+	got := decodeControl(t, clientBuf)
+	if got.Username != "NewName" {
+		t.Errorf("chat username after rename: got %q, want %q", got.Username, "NewName")
+	}
+}
+
+// --- processControl: delete_channel last channel protection ---
+
+func TestProcessControlDeleteLastChannelRejected(t *testing.T) {
+	room := NewRoom()
+	var called bool
+	room.SetOnDeleteChannel(func(_ int64) error { called = true; return nil })
+	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) { return nil, nil })
+
+	// Set a single channel in the cache.
+	room.SetChannels([]ChannelInfo{{ID: 1, Name: "General"}})
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "delete_channel", ChannelID: 1}, owner, room)
+
+	if called {
+		t.Error("deleting the last remaining channel should be rejected")
+	}
+}
+
+func TestProcessControlDeleteChannelAllowedWithMultiple(t *testing.T) {
+	room := NewRoom()
+	var deletedID int64
+	room.SetOnDeleteChannel(func(id int64) error { deletedID = id; return nil })
+	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) {
+		return []ChannelInfo{{ID: 2, Name: "Music"}}, nil
+	})
+
+	// Set two channels in the cache.
+	room.SetChannels([]ChannelInfo{{ID: 1, Name: "General"}, {ID: 2, Name: "Music"}})
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "delete_channel", ChannelID: 1}, owner, room)
+
+	if deletedID != 1 {
+		t.Errorf("onDeleteChannel: got %d, want 1", deletedID)
 	}
 }

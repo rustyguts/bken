@@ -157,7 +157,7 @@ defineExpose({ setError, setStartupAddr })
           />
           <div v-if="addError" role="alert" class="alert alert-error py-1 text-xs">{{ addError }}</div>
           <div class="flex gap-2">
-            <button class="btn btn-primary btn-sm flex-1" :disabled="connecting" @click="addServer">Add</button>
+            <button class="btn btn-soft btn-primary btn-sm flex-1" :disabled="connecting" @click="addServer">Add</button>
             <button class="btn btn-ghost btn-sm" @click="cancelAdd">Cancel</button>
           </div>
         </div>
@@ -175,7 +175,7 @@ defineExpose({ setError, setStartupAddr })
         </div>
         <div class="flex gap-1 shrink-0">
           <button
-            class="btn btn-primary btn-sm"
+            class="btn btn-soft btn-primary btn-sm"
             :disabled="connecting"
             :aria-label="`Connect to ${server.name}`"
             @click="handleConnect(server.addr)"

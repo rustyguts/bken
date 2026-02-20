@@ -15,7 +15,7 @@ const emit = defineEmits<{
   'open-settings': []
   'mute-toggle': []
   'deafen-toggle': []
-  disconnect: []
+  'leave-voice': []
 }>()
 
 const modalOpen = ref(false)
@@ -23,12 +23,8 @@ const modalInput = ref('')
 const modalInputEl = ref<HTMLInputElement | null>(null)
 
 function initials(name: string): string {
-  const trimmed = name.trim()
-  if (!trimmed) return '??'
-  const parts = trimmed.split(/\s+/).filter(Boolean)
-  const a = parts[0]?.[0] ?? ''
-  const b = parts[1]?.[0] ?? parts[0]?.[1] ?? ''
-  return `${a}${b}`.toUpperCase()
+  const first = name.trim()[0]
+  return first ? first.toUpperCase() : '?'
 }
 
 async function openRenameModal(event: MouseEvent): Promise<void> {
@@ -111,12 +107,12 @@ function confirmRename(): void {
         </svg>
       </button>
 
-      <!-- Disconnect -->
+      <!-- Leave Voice Channel -->
       <button
         class="btn btn-ghost btn-sm hover:text-error"
         :disabled="!voiceConnected"
-        title="Leave Voice"
-        @click="emit('disconnect')"
+        title="Leave Voice Channel"
+        @click="emit('leave-voice')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
@@ -143,7 +139,7 @@ function confirmRename(): void {
         </div>
         <div class="modal-action">
           <button class="btn btn-ghost" @click="modalOpen = false">Cancel</button>
-          <button class="btn btn-primary" :disabled="!modalInput.trim()" @click="confirmRename">Save</button>
+          <button class="btn btn-soft btn-primary" :disabled="!modalInput.trim()" @click="confirmRename">Save</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="modalOpen = false">

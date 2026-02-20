@@ -350,6 +350,12 @@ func (a *App) wireCallbacks() {
 			"channel_id": channelID,
 		})
 	})
+	a.transport.SetOnUserRenamed(func(userID uint16, username string) {
+		wailsrt.EventsEmit(a.ctx, "user:renamed", map[string]any{
+			"id":       int(userID),
+			"username": username,
+		})
+	})
 	a.audio.OnSpeaking = func() {
 		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
 	}
@@ -579,6 +585,17 @@ func (a *App) GetMutedUsers() []int {
 		out[i] = int(id)
 	}
 	return out
+}
+
+// RenameUser updates the current user's display name on the server so that
+// future chat messages use the new name. Other clients are notified via a
+// user_renamed broadcast.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RenameUser(name string) string {
+	if err := a.transport.RenameUser(name); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // RenameServer updates the server name. Only succeeds if the caller is the

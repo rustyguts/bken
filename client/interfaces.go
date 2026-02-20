@@ -33,6 +33,7 @@ type Transporter interface {
 	SetOnOwnerChanged(fn func(ownerID uint16))
 	SetOnChannelList(fn func([]ChannelInfo))
 	SetOnUserChannel(fn func(userID uint16, channelID int64))
+	SetOnUserRenamed(fn func(userID uint16, username string))
 
 	// Chat.
 	SendChat(message string) error
@@ -46,6 +47,9 @@ type Transporter interface {
 
 	// Server management (owner-only; server enforces).
 	RenameServer(name string) error
+
+	// User management.
+	RenameUser(name string) error
 
 	// Channels.
 	JoinChannel(id int64) error
