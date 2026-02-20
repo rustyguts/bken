@@ -35,7 +35,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Server owners should be able to generate invite links from the servers public endpoint. When openened in a browser this should open the app and automatically connect you to the server
 - Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat)
 - UI: The UI should be modular and customizable. Certain elements should be movable. Users should be able to unlock the UI and then move panels around to suite their needs
-- UI: Should be very responsive to small sizes all the way up to large desktop sizes.
 - Performance is critical, analyze slow parts of the code and improve performance
 - UI: Small icons can be uploaded and set per channel
 - UI: A server icon can be uploaded and set
@@ -60,3 +59,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice: Voice Activity Detection — silent frames skipped to save CPU and bandwidth (enabled by default, configurable sensitivity)
 - Server: Echo v4 REST API on :8080 — GET /health (status + client count), GET /api/room (user list); -api-addr flag to configure or disable
 - Voice: Echo cancellation — NLMS adaptive filter (40 ms bulk delay, 10 ms taps), enabled by default, toggle in Voice Processing settings
+- UI: Responsive layout — MinWidth=400/MinHeight=300; left info panel hides below 768 px; ServerBrowser/AudioSettings/RoomBrowser use responsive padding; user cards centred
