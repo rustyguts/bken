@@ -321,6 +321,40 @@ func TestRoomClientsIncludesChannelID(t *testing.T) {
 	}
 }
 
+func TestRoomBroadcastToChannelOnlySameChannel(t *testing.T) {
+	room := NewRoom()
+
+	inChannel, inBuf := newCtrlClient("alice")
+	inChannel.channelID = 1
+	room.AddClient(inChannel)
+
+	otherChannel, otherBuf := newCtrlClient("bob")
+	otherChannel.channelID = 2
+	room.AddClient(otherChannel)
+
+	lobby, lobbyBuf := newCtrlClient("carol")
+	// lobby.channelID = 0 (default)
+	room.AddClient(lobby)
+
+	msg := ControlMsg{Type: "chat", Message: "hello channel 1", ChannelID: 1}
+	room.BroadcastToChannel(1, msg)
+
+	// Only the client in channel 1 should receive the message.
+	if inBuf.Len() == 0 {
+		t.Error("client in channel 1 should receive the message")
+	}
+	got := decodeControl(t, inBuf)
+	if got.Message != "hello channel 1" {
+		t.Errorf("message: got %q", got.Message)
+	}
+	if otherBuf.Len() != 0 {
+		t.Error("client in channel 2 should NOT receive the message")
+	}
+	if lobbyBuf.Len() != 0 {
+		t.Error("lobby client should NOT receive the message")
+	}
+}
+
 func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	room := NewRoom()
 

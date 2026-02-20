@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Disconnect, SetMuted, SetDeafened } from '../wailsjs/go/main/App'
 import Sidebar from './Sidebar.vue'
 import EventLog from './EventLog.vue'
@@ -20,19 +20,46 @@ const props = defineProps<{
   userChannels: Record<number, number>
 }>()
 
-const emit = defineEmits<{ disconnect: []; sendChat: [message: string] }>()
+const emit = defineEmits<{
+  disconnect: []
+  sendChat: [message: string]
+  sendChannelChat: [channelID: number, message: string]
+}>()
 
 const settingsOpen = ref(false)
 const muted = ref(false)
 const deafened = ref(false)
-const activeTab = ref<'voice' | 'chat'>('voice')
+const activeTab = ref<'voice' | 'chat' | 'channel'>('voice')
 const unreadChat = ref(0)
+const unreadChannel = ref(0)
+
+/** The channel the current user is in (0 = lobby). */
+const myChannelId = computed(() => props.userChannels[props.myId] ?? 0)
+
+/** Messages scoped to the server (channelId === 0). */
+const serverMessages = computed(() => props.chatMessages.filter(m => m.channelId === 0))
+
+/** Messages scoped to the user's current channel. */
+const channelMessages = computed(() => props.chatMessages.filter(m => m.channelId === myChannelId.value && myChannelId.value !== 0))
 
 watch(
   () => props.chatMessages.length,
-  () => { if (activeTab.value !== 'chat') unreadChat.value++ },
+  () => {
+    const last = props.chatMessages[props.chatMessages.length - 1]
+    if (!last) return
+    if (last.channelId === 0 && activeTab.value !== 'chat') unreadChat.value++
+    if (last.channelId !== 0 && last.channelId === myChannelId.value && activeTab.value !== 'channel') unreadChannel.value++
+  },
 )
-watch(activeTab, (tab) => { if (tab === 'chat') unreadChat.value = 0 })
+watch(activeTab, (tab) => {
+  if (tab === 'chat') unreadChat.value = 0
+  if (tab === 'channel') unreadChannel.value = 0
+})
+// When leaving a channel, switch away from channel tab.
+watch(myChannelId, (id) => {
+  if (id === 0 && activeTab.value === 'channel') activeTab.value = 'voice'
+  unreadChannel.value = 0
+})
 
 async function handleMuteToggle(): Promise<void> {
   muted.value = !muted.value
@@ -92,10 +119,17 @@ async function handleDisconnect(): Promise<void> {
               @click="activeTab = 'chat'"
             >
               Chat
-              <span
-                v-if="unreadChat > 0"
-                class="badge badge-xs badge-primary ml-1"
-              >{{ unreadChat }}</span>
+              <span v-if="unreadChat > 0" class="badge badge-xs badge-primary ml-1">{{ unreadChat }}</span>
+            </button>
+            <button
+              v-if="myChannelId !== 0"
+              role="tab"
+              class="tab"
+              :class="{ 'tab-active': activeTab === 'channel' }"
+              @click="activeTab = 'channel'"
+            >
+              Channel
+              <span v-if="unreadChannel > 0" class="badge badge-xs badge-secondary ml-1">{{ unreadChannel }}</span>
             </button>
           </div>
 
@@ -112,10 +146,16 @@ async function handleDisconnect(): Promise<void> {
               class="h-full"
             />
             <ChatPanel
-              v-else
-              :messages="chatMessages"
+              v-else-if="activeTab === 'chat'"
+              :messages="serverMessages"
               class="h-full"
               @send="emit('sendChat', $event)"
+            />
+            <ChatPanel
+              v-else-if="activeTab === 'channel'"
+              :messages="channelMessages"
+              class="h-full"
+              @send="emit('sendChannelChat', myChannelId, $event)"
             />
           </div>
         </div>

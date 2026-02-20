@@ -146,15 +146,27 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		client.SendControl(ControlMsg{Type: "pong", Timestamp: msg.Timestamp})
 	case "chat":
 		// Relay to all clients (including sender) so everyone sees the message.
-		// Server stamps the authoritative username and timestamp to prevent spoofing.
-		if msg.Message != "" && len(msg.Message) <= 500 {
-			room.BroadcastControl(ControlMsg{
-				Type:      "chat",
-				ID:        client.ID,
-				Username:  client.Username,
-				Message:   msg.Message,
-				Timestamp: time.Now().UnixMilli(),
-			}, 0)
+		// Server stamps the authoritative username, timestamp, and channel_id to
+		// prevent spoofing.  When the client requests a channel-scoped message
+		// (ChannelID != 0), the server uses the SENDER'S actual channelID —
+		// ignoring the client-supplied value — so clients cannot fake routing.
+		if msg.Message == "" || len(msg.Message) > 500 {
+			return
+		}
+		out := ControlMsg{
+			Type:      "chat",
+			ID:        client.ID,
+			Username:  client.Username,
+			Message:   msg.Message,
+			Timestamp: time.Now().UnixMilli(),
+		}
+		if msg.ChannelID != 0 && client.channelID != 0 {
+			// Channel-scoped: fan out only to users in the sender's current channel.
+			out.ChannelID = client.channelID
+			room.BroadcastToChannel(client.channelID, out)
+		} else {
+			// Server-level: fan out to everyone.
+			room.BroadcastControl(out, 0)
 		}
 	case "kick":
 		// Only the room owner may kick. Owners cannot kick themselves.

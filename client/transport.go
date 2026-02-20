@@ -117,12 +117,13 @@ type Transport struct {
 	onUserLeft      func(uint16)
 	onAudioReceived func(uint16)
 	onDisconnected  func()
-	onChatMessage   func(username, message string, ts int64)
-	onServerInfo    func(name string)
-	onKicked        func()
-	onOwnerChanged  func(ownerID uint16)
-	onChannelList   func([]ChannelInfo)
-	onUserChannel   func(userID uint16, channelID int64)
+	onChatMessage        func(username, message string, ts int64)
+	onChannelChatMessage func(channelID int64, username, message string, ts int64)
+	onServerInfo         func(name string)
+	onKicked             func()
+	onOwnerChanged       func(ownerID uint16)
+	onChannelList        func([]ChannelInfo)
+	onUserChannel        func(userID uint16, channelID int64)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -168,6 +169,12 @@ func (t *Transport) SetOnDisconnected(fn func()) {
 func (t *Transport) SetOnChatMessage(fn func(username, message string, ts int64)) {
 	t.cbMu.Lock()
 	t.onChatMessage = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnChannelChatMessage(fn func(channelID int64, username, message string, ts int64)) {
+	t.cbMu.Lock()
+	t.onChannelChatMessage = fn
 	t.cbMu.Unlock()
 }
 
@@ -233,6 +240,17 @@ func (t *Transport) RenameServer(name string) error {
 // Pass channelID=0 to leave all channels (return to lobby).
 func (t *Transport) JoinChannel(id int64) error {
 	t.writeCtrl(ControlMsg{Type: "join_channel", ChannelID: id})
+	return nil
+}
+
+// SendChannelChat sends a channel-scoped chat message. The server routes it
+// only to users currently in the sender's channel. If the caller is not in a
+// channel, the server falls back to global broadcast.
+func (t *Transport) SendChannelChat(channelID int64, message string) error {
+	if message == "" || len(message) > 500 {
+		return nil
+	}
+	t.writeCtrl(ControlMsg{Type: "chat", Message: message, ChannelID: channelID})
 	return nil
 }
 
@@ -508,6 +526,7 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onUserJoined := t.onUserJoined
 		onUserLeft := t.onUserLeft
 		onChat := t.onChatMessage
+		onChannelChat := t.onChannelChatMessage
 		onServerInfo := t.onServerInfo
 		onKicked := t.onKicked
 		onOwnerChanged := t.onOwnerChanged
@@ -556,8 +575,14 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 				t.smoothedRTT.Store(math.Float64bits(next))
 			}
 		case "chat":
-			if onChat != nil {
-				onChat(msg.Username, msg.Message, msg.Ts)
+			if msg.ChannelID != 0 {
+				if onChannelChat != nil {
+					onChannelChat(msg.ChannelID, msg.Username, msg.Message, msg.Ts)
+				}
+			} else {
+				if onChat != nil {
+					onChat(msg.Username, msg.Message, msg.Ts)
+				}
 			}
 		case "server_info":
 			if msg.ServerName != "" && onServerInfo != nil {

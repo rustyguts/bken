@@ -45,8 +45,9 @@ export interface ConnectPayload {
 
 /** A single chat message received from the server. */
 export interface ChatMessage {
-  id: number       // client-side counter for v-for keys
+  id: number         // client-side counter for v-for keys
   username: string
   message: string
-  ts: number       // Unix ms timestamp (server-stamped)
+  ts: number         // Unix ms timestamp (server-stamped)
+  channelId: number  // 0 = server-wide, non-zero = channel-scoped
 }

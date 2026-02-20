@@ -99,3 +99,7 @@ export function RenameServer(name: string): Promise<string> {
 export function JoinChannel(id: number): Promise<string> {
   return bridge()['JoinChannel'](id)
 }
+
+export function SendChannelChat(channelID: number, message: string): Promise<string> {
+  return bridge()['SendChannelChat'](channelID, message)
+}

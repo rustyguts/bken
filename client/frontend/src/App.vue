@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat } from './config'
+import { ApplyConfig, SendChat, SendChannelChat } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
@@ -125,6 +125,10 @@ async function handleSendChat(message: string): Promise<void> {
   await SendChat(message)
 }
 
+async function handleSendChannelChat(channelID: number, message: string): Promise<void> {
+  await SendChannelChat(channelID, message)
+}
+
 async function handleDisconnect(): Promise<void> {
   clearReconnectTimers()
   reconnecting.value = false
@@ -185,10 +189,10 @@ onMounted(async () => {
     setSpeaking(data.id)
   })
 
-  EventsOn('chat:message', (data: { username: string; message: string; ts: number }) => {
+  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number }) => {
     chatMessages.value = [
       ...chatMessages.value,
-      { id: ++chatIdCounter, username: data.username, message: data.message, ts: data.ts },
+      { id: ++chatIdCounter, username: data.username, message: data.message, ts: data.ts, channelId: data.channel_id ?? 0 },
     ]
   })
 
@@ -254,6 +258,7 @@ onBeforeUnmount(() => {
         class="flex-1 min-h-0"
         @disconnect="handleDisconnect"
         @send-chat="handleSendChat"
+        @send-channel-chat="handleSendChannelChat"
       />
       <ServerBrowser v-else key="browser" ref="serverBrowserRef" class="flex-1 min-h-0" @connect="handleConnect" />
     </Transition>

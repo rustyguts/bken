@@ -244,9 +244,18 @@ func (a *App) wireCallbacks() {
 	})
 	a.transport.SetOnChatMessage(func(username, message string, ts int64) {
 		runtime.EventsEmit(a.ctx, "chat:message", map[string]any{
-			"username": username,
-			"message":  message,
-			"ts":       ts,
+			"username":   username,
+			"message":    message,
+			"ts":         ts,
+			"channel_id": 0,
+		})
+	})
+	a.transport.SetOnChannelChatMessage(func(channelID int64, username, message string, ts int64) {
+		runtime.EventsEmit(a.ctx, "chat:message", map[string]any{
+			"username":   username,
+			"message":    message,
+			"ts":         ts,
+			"channel_id": channelID,
 		})
 	})
 	a.transport.SetOnServerInfo(func(name string) {
@@ -431,6 +440,15 @@ func (a *App) KickUser(id int) string {
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) JoinChannel(id int) string {
 	if err := a.transport.JoinChannel(int64(id)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// SendChannelChat sends a channel-scoped chat message to all users in that channel.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) SendChannelChat(channelID int, message string) string {
+	if err := a.transport.SendChannelChat(int64(channelID), message); err != nil {
 		return err.Error()
 	}
 	return ""

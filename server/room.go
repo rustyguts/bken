@@ -168,6 +168,19 @@ func (r *Room) BroadcastControl(msg ControlMsg, excludeID uint16) {
 	}
 }
 
+// BroadcastToChannel sends a control message to all clients currently in channelID.
+// Sends to every matching client including the sender (excludeID=0 semantics).
+func (r *Room) BroadcastToChannel(channelID int64, msg ControlMsg) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, c := range r.clients {
+		if c.channelID == channelID {
+			c.SendControl(msg)
+		}
+	}
+}
+
 // Clients returns a snapshot of all connected clients (safe to use after releasing the lock).
 func (r *Room) Clients() []UserInfo {
 	r.mu.RLock()
