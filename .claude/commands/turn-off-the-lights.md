@@ -22,8 +22,26 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 ### Things to work on
 
+- Automatically connect to the server when clicked on in the sidebar. It should automatically connect always. The voice join button just starts listenting / transmitting voice traffic for the given channel. Distinguish between server connection / disconnection and voice channel connection / disconnection.
+- Don't use cards for channel ui. Increase the size slightly of the user avatars.
+- Allow admins to delete channels
+- Allow admins to set a channel emoji
+- Bug: When the user updates their global name it is not changes in the chatroom. It does not need to change for previous messages but it must change for messages sent after the name has been changed
+- Only show the users first character in Avatars on the client
+- Allow users to edit and delete their own messages, not other peoples messages. Show icons on hover only
+- Allow owners to delete any message. Show the trash icon on hover
+- Remove the text "Chatroom" in the top right of the chatroom
+- Bug: The disconnect button should only be enabled if the user is in a voice channel. The disconnect button should never disconnect a user from a server. That is only done by switching between servers.The disconnect button can be renamed in code to "Leave Voice Channel"
+- Admin: Owners can edit channel names.
+- Owners can see a server settings page which control settings on the server side. Move server name edit to this new server settings panel. Put the settings icon next to the create channel icon
+- DaisyUI: Use daisyui soft buttons globall across all parts of the client. Those look nice.
+- Condsense the chat room UI. Show more messages in the space you have.
+- Every server should start with a default channel if none exist. The default channel cannot be deleted.
+- The client should generate a private/public key pair. The server uses the public key to know who the user is. Plumb this up with role based authentication. There is "OWNER" and "USER"
+
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
 - Server invite links - You could send these to people and they can join a server, would require external web service
+
 ### Done
 
 - Push-to-talk mode with configurable key binding (PTT gives users explicit control over mic transmission; pttMode/pttActive atomics gate capture loop in AudioEngine; App exposes SetPTTMode/PTTKeyDown/PTTKeyUp; VoiceProcessing adds PTT toggle with rebindable key button at top of voice settings; App.vue registers global keydown/keyup listeners ignoring text inputs and key-repeat; config persists ptt_enabled + ptt_key with Backquote default; 8 new tests across audio + config)

@@ -14,6 +14,14 @@ export function ConnectVoice(arg1) {
   return window['go']['main']['App']['ConnectVoice'](arg1);
 }
 
+export function CreateChannel(arg1) {
+  return window['go']['main']['App']['CreateChannel'](arg1);
+}
+
+export function DeleteChannel(arg1) {
+  return window['go']['main']['App']['DeleteChannel'](arg1);
+}
+
 export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }
@@ -62,8 +70,24 @@ export function KickUser(arg1) {
   return window['go']['main']['App']['KickUser'](arg1);
 }
 
+export function MoveUserToChannel(arg1, arg2) {
+  return window['go']['main']['App']['MoveUserToChannel'](arg1, arg2);
+}
+
 export function MuteUser(arg1) {
   return window['go']['main']['App']['MuteUser'](arg1);
+}
+
+export function PTTKeyDown() {
+  return window['go']['main']['App']['PTTKeyDown']();
+}
+
+export function PTTKeyUp() {
+  return window['go']['main']['App']['PTTKeyUp']();
+}
+
+export function RenameChannel(arg1, arg2) {
+  return window['go']['main']['App']['RenameChannel'](arg1, arg2);
 }
 
 export function RenameServer(arg1) {
@@ -118,6 +142,10 @@ export function SetOutputDevice(arg1) {
   return window['go']['main']['App']['SetOutputDevice'](arg1);
 }
 
+export function SetPTTMode(arg1) {
+  return window['go']['main']['App']['SetPTTMode'](arg1);
+}
+
 export function SetVAD(arg1) {
   return window['go']['main']['App']['SetVAD'](arg1);
 }
@@ -140,4 +168,12 @@ export function StopTest() {
 
 export function UnmuteUser(arg1) {
   return window['go']['main']['App']['UnmuteUser'](arg1);
+}
+
+export function UploadFile(arg1) {
+  return window['go']['main']['App']['UploadFile'](arg1);
+}
+
+export function UploadFileFromPath(arg1, arg2) {
+  return window['go']['main']['App']['UploadFileFromPath'](arg1, arg2);
 }

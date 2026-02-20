@@ -27,6 +27,8 @@ export namespace config {
 	    aec_enabled: boolean;
 	    vad_enabled: boolean;
 	    vad_threshold: number;
+	    ptt_enabled: boolean;
+	    ptt_key: string;
 	    servers: ServerEntry[];
 	
 	    static createFrom(source: any = {}) {
@@ -47,6 +49,8 @@ export namespace config {
 	        this.aec_enabled = source["aec_enabled"];
 	        this.vad_enabled = source["vad_enabled"];
 	        this.vad_threshold = source["vad_threshold"];
+	        this.ptt_enabled = source["ptt_enabled"];
+	        this.ptt_key = source["ptt_key"];
 	        this.servers = this.convertValues(source["servers"], ServerEntry);
 	    }
 	
@@ -108,11 +112,13 @@ export namespace main {
 	    bitrate_kbps: number;
 	    opus_target_kbps: number;
 	    quality_level: string;
-
+	    capture_dropped: number;
+	    playback_dropped: number;
+	
 	    static createFrom(source: any = {}) {
 	        return new Metrics(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.rtt_ms = source["rtt_ms"];
@@ -121,6 +127,8 @@ export namespace main {
 	        this.bitrate_kbps = source["bitrate_kbps"];
 	        this.opus_target_kbps = source["opus_target_kbps"];
 	        this.quality_level = source["quality_level"];
+	        this.capture_dropped = source["capture_dropped"];
+	        this.playback_dropped = source["playback_dropped"];
 	    }
 	}
 

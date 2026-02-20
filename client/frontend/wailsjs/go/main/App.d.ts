@@ -9,6 +9,10 @@ export function Connect(arg1:string,arg2:string):Promise<string>;
 
 export function ConnectVoice(arg1:number):Promise<string>;
 
+export function CreateChannel(arg1:string):Promise<string>;
+
+export function DeleteChannel(arg1:number):Promise<string>;
+
 export function Disconnect():Promise<void>;
 
 export function DisconnectVoice():Promise<string>;
@@ -33,7 +37,15 @@ export function JoinChannel(arg1:number):Promise<string>;
 
 export function KickUser(arg1:number):Promise<string>;
 
+export function MoveUserToChannel(arg1:number,arg2:number):Promise<string>;
+
 export function MuteUser(arg1:number):Promise<void>;
+
+export function PTTKeyDown():Promise<void>;
+
+export function PTTKeyUp():Promise<void>;
+
+export function RenameChannel(arg1:number,arg2:string):Promise<string>;
 
 export function RenameServer(arg1:string):Promise<string>;
 
@@ -61,6 +73,8 @@ export function SetNoiseSuppressionLevel(arg1:number):Promise<void>;
 
 export function SetOutputDevice(arg1:number):Promise<void>;
 
+export function SetPTTMode(arg1:boolean):Promise<void>;
+
 export function SetVAD(arg1:boolean):Promise<void>;
 
 export function SetVADThreshold(arg1:number):Promise<void>;
@@ -72,3 +86,7 @@ export function StartTest():Promise<string>;
 export function StopTest():Promise<void>;
 
 export function UnmuteUser(arg1:number):Promise<void>;
+
+export function UploadFile(arg1:number):Promise<string>;
+
+export function UploadFileFromPath(arg1:number,arg2:string):Promise<string>;
