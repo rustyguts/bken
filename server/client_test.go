@@ -506,6 +506,191 @@ func TestProcessControlJoinChannelClientSnapshotUpdated(t *testing.T) {
 	}
 }
 
+// --- processControl: create_channel ---
+
+func TestProcessControlCreateChannelByOwner(t *testing.T) {
+	room := NewRoom()
+	var createdName string
+	room.SetOnCreateChannel(func(name string) (int64, error) { createdName = name; return 42, nil })
+	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) {
+		return []ChannelInfo{{ID: 42, Name: createdName}}, nil
+	})
+
+	owner, _ := newCtrlClient("alice")
+	observer, observerBuf := newCtrlClient("bob")
+	room.AddClient(owner)
+	room.AddClient(observer)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "create_channel", Message: "  Gaming  "}, owner, room)
+
+	if createdName != "Gaming" {
+		t.Errorf("onCreateChannel: got %q, want %q", createdName, "Gaming")
+	}
+	// Observer should receive a channel_list broadcast.
+	got := decodeControl(t, observerBuf)
+	if got.Type != "channel_list" {
+		t.Errorf("broadcast type: got %q, want %q", got.Type, "channel_list")
+	}
+	if len(got.Channels) != 1 || got.Channels[0].Name != "Gaming" {
+		t.Errorf("channels: got %+v, want [{42 Gaming}]", got.Channels)
+	}
+}
+
+func TestProcessControlCreateChannelByNonOwner(t *testing.T) {
+	room := NewRoom()
+	var called bool
+	room.SetOnCreateChannel(func(_ string) (int64, error) { called = true; return 0, nil })
+
+	owner, _ := newCtrlClient("alice")
+	attacker, _ := newCtrlClient("eve")
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "create_channel", Message: "Hacked"}, attacker, room)
+
+	if called {
+		t.Error("non-owner should not be able to create channels")
+	}
+}
+
+func TestProcessControlCreateChannelEmptyName(t *testing.T) {
+	room := NewRoom()
+	var called bool
+	room.SetOnCreateChannel(func(_ string) (int64, error) { called = true; return 0, nil })
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "create_channel", Message: "   "}, owner, room)
+
+	if called {
+		t.Error("empty channel name should be rejected")
+	}
+}
+
+// --- processControl: rename_channel ---
+
+func TestProcessControlRenameChannelByOwner(t *testing.T) {
+	room := NewRoom()
+	var renamedID int64
+	var renamedName string
+	room.SetOnRenameChannel(func(id int64, name string) error {
+		renamedID = id
+		renamedName = name
+		return nil
+	})
+	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) {
+		return []ChannelInfo{{ID: renamedID, Name: renamedName}}, nil
+	})
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "rename_channel", ChannelID: 5, Message: "Music"}, owner, room)
+
+	if renamedID != 5 || renamedName != "Music" {
+		t.Errorf("onRenameChannel: got (%d, %q), want (5, %q)", renamedID, renamedName, "Music")
+	}
+}
+
+func TestProcessControlRenameChannelByNonOwner(t *testing.T) {
+	room := NewRoom()
+	var called bool
+	room.SetOnRenameChannel(func(_ int64, _ string) error { called = true; return nil })
+
+	owner, _ := newCtrlClient("alice")
+	attacker, _ := newCtrlClient("eve")
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "rename_channel", ChannelID: 5, Message: "Hacked"}, attacker, room)
+
+	if called {
+		t.Error("non-owner should not be able to rename channels")
+	}
+}
+
+func TestProcessControlRenameChannelZeroID(t *testing.T) {
+	room := NewRoom()
+	var called bool
+	room.SetOnRenameChannel(func(_ int64, _ string) error { called = true; return nil })
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "rename_channel", ChannelID: 0, Message: "Lobby2"}, owner, room)
+
+	if called {
+		t.Error("renaming channel 0 (lobby) should be rejected")
+	}
+}
+
+// --- processControl: delete_channel ---
+
+func TestProcessControlDeleteChannelByOwner(t *testing.T) {
+	room := NewRoom()
+	var deletedID int64
+	room.SetOnDeleteChannel(func(id int64) error { deletedID = id; return nil })
+	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) { return nil, nil })
+
+	owner, _ := newCtrlClient("alice")
+	inChannel, _ := newCtrlClient("bob")
+	room.AddClient(owner)
+	room.AddClient(inChannel)
+	room.ClaimOwnership(owner.ID)
+	inChannel.channelID.Store(5)
+
+	processControl(ControlMsg{Type: "delete_channel", ChannelID: 5}, owner, room)
+
+	if deletedID != 5 {
+		t.Errorf("onDeleteChannel: got %d, want 5", deletedID)
+	}
+	// User in deleted channel should be moved to lobby.
+	if inChannel.channelID.Load() != 0 {
+		t.Errorf("user should be moved to lobby, got channel %d", inChannel.channelID.Load())
+	}
+}
+
+func TestProcessControlDeleteChannelByNonOwner(t *testing.T) {
+	room := NewRoom()
+	var called bool
+	room.SetOnDeleteChannel(func(_ int64) error { called = true; return nil })
+
+	owner, _ := newCtrlClient("alice")
+	attacker, _ := newCtrlClient("eve")
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "delete_channel", ChannelID: 5}, attacker, room)
+
+	if called {
+		t.Error("non-owner should not be able to delete channels")
+	}
+}
+
+func TestProcessControlDeleteChannelZeroID(t *testing.T) {
+	room := NewRoom()
+	var called bool
+	room.SetOnDeleteChannel(func(_ int64) error { called = true; return nil })
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "delete_channel", ChannelID: 0}, owner, room)
+
+	if called {
+		t.Error("deleting channel 0 (lobby) should be rejected")
+	}
+}
+
 // --- processControl: unknown type ---
 
 func TestProcessControlUnknownTypeIsIgnored(t *testing.T) {

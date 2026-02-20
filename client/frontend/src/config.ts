@@ -113,3 +113,17 @@ export function ConnectVoice(channelID: number): Promise<string> {
 export function SendChannelChat(channelID: number, message: string): Promise<string> {
   return bridge()['SendChannelChat'](channelID, message)
 }
+
+// --- Channel management bindings (owner-only) ---
+
+export function CreateChannel(name: string): Promise<string> {
+  return bridge()['CreateChannel'](name)
+}
+
+export function RenameChannel(id: number, name: string): Promise<string> {
+  return bridge()['RenameChannel'](id, name)
+}
+
+export function DeleteChannel(id: number): Promise<string> {
+  return bridge()['DeleteChannel'](id)
+}

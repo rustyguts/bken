@@ -45,4 +45,7 @@ type Transporter interface {
 	// Channels.
 	JoinChannel(id int64) error
 	SendChannelChat(channelID int64, message string) error
+	CreateChannel(name string) error
+	RenameChannel(id int64, name string) error
+	DeleteChannel(id int64) error
 }

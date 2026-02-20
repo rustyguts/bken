@@ -34,6 +34,9 @@ const emit = defineEmits<{
   disconnectVoice: []
   sendChat: [message: string]
   sendChannelChat: [channelID: number, message: string]
+  createChannel: [name: string]
+  renameChannel: [channelID: number, name: string]
+  deleteChannel: [channelID: number]
 }>()
 
 const muted = ref(false)
@@ -42,6 +45,7 @@ const selectedChannelId = ref(0)
 const selectedServerAddr = ref('')
 
 const myChannelId = computed(() => props.userChannels[props.myId] ?? 0)
+const isOwner = computed(() => props.ownerId !== 0 && props.ownerId === props.myId)
 
 watch(myChannelId, (id) => {
   selectedChannelId.value = id
@@ -132,8 +136,12 @@ function handleSendMessage(message: string): void {
       :server-name="serverName"
       :speaking-users="speakingUsers"
       :connect-error="connectError"
+      :is-owner="isOwner"
       @join="handleJoinChannel"
       @select="handleSelectChannel"
+      @create-channel="emit('createChannel', $event)"
+      @rename-channel="(id, name) => emit('renameChannel', id, name)"
+      @delete-channel="emit('deleteChannel', $event)"
     />
 
     <ChannelChatroom

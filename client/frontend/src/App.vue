@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import Room from './Room.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -194,6 +194,18 @@ async function handleSendChat(message: string): Promise<void> {
 
 async function handleSendChannelChat(channelID: number, message: string): Promise<void> {
   await SendChannelChat(channelID, message)
+}
+
+async function handleCreateChannel(name: string): Promise<void> {
+  await CreateChannel(name)
+}
+
+async function handleRenameChannel(channelID: number, name: string): Promise<void> {
+  await RenameChannel(channelID, name)
+}
+
+async function handleDeleteChannel(channelID: number): Promise<void> {
+  await DeleteChannel(channelID)
 }
 
 async function handleDisconnectVoice(): Promise<void> {
@@ -396,6 +408,9 @@ onBeforeUnmount(() => {
           @disconnect-voice="handleDisconnectVoice"
           @send-chat="handleSendChat"
           @send-channel-chat="handleSendChannelChat"
+          @create-channel="handleCreateChannel"
+          @rename-channel="handleRenameChannel"
+          @delete-channel="handleDeleteChannel"
         />
       </Transition>
     </div>

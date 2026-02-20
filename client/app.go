@@ -485,6 +485,33 @@ func (a *App) SendChat(message string) string {
 	return ""
 }
 
+// CreateChannel asks the server to create a new channel.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) CreateChannel(name string) string {
+	if err := a.transport.CreateChannel(name); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// RenameChannel asks the server to rename a channel.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RenameChannel(id int, name string) string {
+	if err := a.transport.RenameChannel(int64(id), name); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// DeleteChannel asks the server to delete a channel.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) DeleteChannel(id int) string {
+	if err := a.transport.DeleteChannel(int64(id)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // sendLoop reads encoded audio from the capture channel and forwards it via
 // transport. Exits when the audio engine stops or on send error.
 // On send error, it closes the transport session so that readControl detects

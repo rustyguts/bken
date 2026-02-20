@@ -250,6 +250,24 @@ func (t *Transport) JoinChannel(id int64) error {
 	return t.writeCtrl(ControlMsg{Type: "join_channel", ChannelID: id})
 }
 
+// CreateChannel asks the server to create a new channel with the given name.
+// Only succeeds if the caller is the room owner; the server enforces the check.
+func (t *Transport) CreateChannel(name string) error {
+	return t.writeCtrl(ControlMsg{Type: "create_channel", Message: name})
+}
+
+// RenameChannel asks the server to rename a channel.
+// Only succeeds if the caller is the room owner; the server enforces the check.
+func (t *Transport) RenameChannel(id int64, name string) error {
+	return t.writeCtrl(ControlMsg{Type: "rename_channel", ChannelID: id, Message: name})
+}
+
+// DeleteChannel asks the server to delete a channel.
+// Only succeeds if the caller is the room owner; the server enforces the check.
+func (t *Transport) DeleteChannel(id int64) error {
+	return t.writeCtrl(ControlMsg{Type: "delete_channel", ChannelID: id})
+}
+
 // SendChannelChat sends a channel-scoped chat message. The server routes it
 // only to users currently in the sender's channel. If the caller is not in a
 // channel, the server falls back to global broadcast.

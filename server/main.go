@@ -43,6 +43,24 @@ func main() {
 		return st.SetSetting("server_name", name)
 	})
 
+	// Wire channel CRUD callbacks to the store.
+	room.SetOnCreateChannel(func(name string) (int64, error) {
+		return st.CreateChannel(name)
+	})
+	room.SetOnRenameChannel(func(id int64, name string) error {
+		return st.RenameChannel(id, name)
+	})
+	room.SetOnDeleteChannel(func(id int64) error {
+		return st.DeleteChannel(id)
+	})
+	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) {
+		chs, err := st.GetChannels()
+		if err != nil {
+			return nil, err
+		}
+		return convertChannels(chs), nil
+	})
+
 	// Seed room's channel cache so newly-connecting clients receive the list.
 	if chs, err := st.GetChannels(); err == nil {
 		room.SetChannels(convertChannels(chs))

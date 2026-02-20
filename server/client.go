@@ -225,6 +225,53 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			ChannelID: msg.ChannelID,
 		}, 0)
 		log.Printf("[client %d] %s joined channel %d", client.ID, client.Username, msg.ChannelID)
+	case "create_channel":
+		// Only the room owner may create channels.
+		if room.OwnerID() != client.ID {
+			return
+		}
+		name, err := validateName(msg.Message, MaxNameLength)
+		if err != nil {
+			return
+		}
+		id, err := room.CreateChannel(name)
+		if err != nil {
+			log.Printf("[client %d] create channel error: %v", client.ID, err)
+			return
+		}
+		log.Printf("[client %d] %s created channel %d %q", client.ID, client.Username, id, name)
+	case "rename_channel":
+		// Only the room owner may rename channels.
+		if room.OwnerID() != client.ID {
+			return
+		}
+		if msg.ChannelID == 0 {
+			return
+		}
+		name, err := validateName(msg.Message, MaxNameLength)
+		if err != nil {
+			return
+		}
+		if err := room.RenameChannel(msg.ChannelID, name); err != nil {
+			log.Printf("[client %d] rename channel %d error: %v", client.ID, msg.ChannelID, err)
+			return
+		}
+		log.Printf("[client %d] %s renamed channel %d to %q", client.ID, client.Username, msg.ChannelID, name)
+	case "delete_channel":
+		// Only the room owner may delete channels.
+		if room.OwnerID() != client.ID {
+			return
+		}
+		if msg.ChannelID == 0 {
+			return
+		}
+		if err := room.DeleteChannel(msg.ChannelID); err != nil {
+			log.Printf("[client %d] delete channel %d error: %v", client.ID, msg.ChannelID, err)
+			return
+		}
+		// Move users who were in the deleted channel back to the lobby.
+		room.MoveChannelUsersToLobby(msg.ChannelID)
+		log.Printf("[client %d] %s deleted channel %d", client.ID, client.Username, msg.ChannelID)
 	}
 }
 

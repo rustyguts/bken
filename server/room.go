@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -23,6 +24,12 @@ type Room struct {
 	onRename   func(string) error // optional persistence callback, fired after Rename; protected by mu
 	channels   []ChannelInfo // cached channel list sent to newly-connecting clients; protected by mu
 	nextID     atomic.Uint32
+
+	// Channel CRUD persistence callbacks — set via setters; called outside the mutex.
+	onCreateChannel func(name string) (int64, error)
+	onRenameChannel func(id int64, name string) error
+	onDeleteChannel func(id int64) error
+	onRefreshChannels func() ([]ChannelInfo, error)
 
 	// Metrics (reset on each Stats call).
 	totalDatagrams atomic.Uint64
@@ -279,6 +286,113 @@ func (r *Room) GetChannelList() []ChannelInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.channels
+}
+
+// SetOnCreateChannel registers a callback for creating a channel in the store.
+func (r *Room) SetOnCreateChannel(fn func(name string) (int64, error)) {
+	r.mu.Lock()
+	r.onCreateChannel = fn
+	r.mu.Unlock()
+}
+
+// SetOnRenameChannel registers a callback for renaming a channel in the store.
+func (r *Room) SetOnRenameChannel(fn func(id int64, name string) error) {
+	r.mu.Lock()
+	r.onRenameChannel = fn
+	r.mu.Unlock()
+}
+
+// SetOnDeleteChannel registers a callback for deleting a channel from the store.
+func (r *Room) SetOnDeleteChannel(fn func(id int64) error) {
+	r.mu.Lock()
+	r.onDeleteChannel = fn
+	r.mu.Unlock()
+}
+
+// SetOnRefreshChannels registers a callback that reloads the channel list from the store.
+func (r *Room) SetOnRefreshChannels(fn func() ([]ChannelInfo, error)) {
+	r.mu.Lock()
+	r.onRefreshChannels = fn
+	r.mu.Unlock()
+}
+
+// CreateChannel creates a channel in the store and broadcasts the updated list.
+func (r *Room) CreateChannel(name string) (int64, error) {
+	r.mu.RLock()
+	cb := r.onCreateChannel
+	r.mu.RUnlock()
+	if cb == nil {
+		return 0, fmt.Errorf("channel creation not configured")
+	}
+	id, err := cb(name)
+	if err != nil {
+		return 0, err
+	}
+	r.refreshChannels()
+	return id, nil
+}
+
+// RenameChannel renames a channel in the store and broadcasts the updated list.
+func (r *Room) RenameChannel(id int64, name string) error {
+	r.mu.RLock()
+	cb := r.onRenameChannel
+	r.mu.RUnlock()
+	if cb == nil {
+		return fmt.Errorf("channel rename not configured")
+	}
+	if err := cb(id, name); err != nil {
+		return err
+	}
+	r.refreshChannels()
+	return nil
+}
+
+// DeleteChannel deletes a channel from the store and broadcasts the updated list.
+func (r *Room) DeleteChannel(id int64) error {
+	r.mu.RLock()
+	cb := r.onDeleteChannel
+	r.mu.RUnlock()
+	if cb == nil {
+		return fmt.Errorf("channel deletion not configured")
+	}
+	if err := cb(id); err != nil {
+		return err
+	}
+	r.refreshChannels()
+	return nil
+}
+
+// refreshChannels reloads the channel list from the store and broadcasts it.
+func (r *Room) refreshChannels() {
+	r.mu.RLock()
+	cb := r.onRefreshChannels
+	r.mu.RUnlock()
+	if cb == nil {
+		return
+	}
+	channels, err := cb()
+	if err != nil {
+		log.Printf("[room] refresh channels: %v", err)
+		return
+	}
+	r.SetChannels(channels)
+}
+
+// MoveChannelUsersToLobby moves all users currently in channelID to channel 0
+// (lobby) and broadcasts a user_channel update for each moved user.
+func (r *Room) MoveChannelUsersToLobby(channelID int64) {
+	r.mu.RLock()
+	var moved []uint16
+	for _, c := range r.clients {
+		if c.channelID.Load() == channelID {
+			c.channelID.Store(0)
+			moved = append(moved, c.ID)
+		}
+	}
+	r.mu.RUnlock()
+	for _, id := range moved {
+		r.BroadcastControl(ControlMsg{Type: "user_channel", ID: id, ChannelID: 0}, 0)
+	}
 }
 
 // ClientCount returns the current number of connected clients.
