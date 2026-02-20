@@ -34,10 +34,10 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
       - ${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0:${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0
       - client-go-cache:/go
-      - client-bun-cache:/app/frontend/node_modules
+      - client-node-modules:/app/frontend/node_modules
     depends_on:
       - server
 
 volumes:
   client-go-cache:
-  client-bun-cache:
+  client-node-modules:
