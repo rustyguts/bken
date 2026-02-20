@@ -493,6 +493,10 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 			if onChat != nil {
 				onChat(msg.Username, msg.Message, msg.Ts)
 			}
+		case "server_info":
+			if msg.ServerName != "" && onServerInfo != nil {
+				onServerInfo(msg.ServerName)
+			}
 		}
 	}
 

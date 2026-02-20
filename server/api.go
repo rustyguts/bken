@@ -93,6 +93,10 @@ func (s *APIServer) handlePutSettings(c echo.Context) error {
 	if err := s.store.SetSetting("server_name", req.ServerName); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	// Update live room state so new connections see the new name without a restart,
+	// and push a server_info message to all currently-connected clients.
+	s.room.SetServerName(req.ServerName)
+	s.room.BroadcastControl(ControlMsg{Type: "server_info", ServerName: req.ServerName}, 0)
 	return c.NoContent(http.StatusNoContent)
 }
 

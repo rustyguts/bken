@@ -226,6 +226,25 @@ func TestPutAndGetSettings(t *testing.T) {
 	}
 }
 
+func TestPutSettingsUpdatesRoomNameLive(t *testing.T) {
+	room := NewRoom()
+	api := newTestAPI(t, room)
+
+	body := strings.NewReader(`{"server_name":"Live Name"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+	req.Header.Set("Content-Type", echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.Request().Header.Set("Content-Type", echo.MIMEApplicationJSON)
+
+	if err := api.handlePutSettings(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if got := room.ServerName(); got != "Live Name" {
+		t.Errorf("room.ServerName after PUT: got %q, want %q", got, "Live Name")
+	}
+}
+
 func TestPutSettingsRejectsEmptyName(t *testing.T) {
 	api := newTestAPI(t, NewRoom())
 
