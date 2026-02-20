@@ -52,18 +52,14 @@ async function handleJoinChannel(id: number): Promise<void> {
       <div v-for="ch in channels" :key="ch.id" class="px-3 pt-2 pb-1">
         <!-- Channel header: click to join -->
         <button
-          class="flex items-center gap-1.5 w-full text-left px-1 py-0.5 rounded-md transition-opacity"
-          :class="myChannelId === ch.id
-            ? 'opacity-100 text-primary font-semibold'
-            : 'opacity-50 hover:opacity-80 font-semibold'"
+          class="btn btn-ghost btn-block h-auto min-h-0 justify-start gap-1.5 px-1 py-0.5 rounded-md transition-opacity font-semibold"
+          :class="myChannelId === ch.id ? 'opacity-100 text-primary' : 'opacity-50 hover:opacity-80'"
           @click="handleJoinChannel(ch.id)"
           :title="myChannelId === ch.id ? 'Your current channel' : `Join ${ch.name}`"
         >
           <span class="text-[10px]">{{ myChannelId === ch.id ? '●' : '○' }}</span>
           <span class="text-xs uppercase tracking-wider">{{ ch.name }}</span>
-          <span class="text-xs font-normal opacity-50 ml-auto">
-            {{ usersInChannel(ch.id).length }}
-          </span>
+          <span class="badge badge-sm badge-ghost ml-auto">{{ usersInChannel(ch.id).length }}</span>
         </button>
 
         <!-- Users in this channel -->
@@ -89,7 +85,7 @@ async function handleJoinChannel(id: number): Promise<void> {
         <div class="flex items-center gap-1.5 px-1 py-0.5 opacity-35 mb-0.5">
           <span class="text-[10px]">○</span>
           <span class="text-xs uppercase tracking-wider font-semibold">Lobby</span>
-          <span class="text-xs font-normal opacity-50 ml-auto">{{ usersInChannel(0).length }}</span>
+          <span class="badge badge-sm badge-ghost ml-auto">{{ usersInChannel(0).length }}</span>
         </div>
         <div class="flex flex-wrap justify-start gap-3 px-2 py-1" role="list">
           <UserCard

@@ -147,7 +147,7 @@ defineExpose({ setError })
             :disabled="connecting"
             @keydown.enter="addServer"
           />
-          <div v-if="addError" class="text-error text-xs">{{ addError }}</div>
+          <div v-if="addError" role="alert" class="alert alert-error py-1 text-xs">{{ addError }}</div>
           <div class="flex gap-2">
             <button class="btn btn-primary btn-sm flex-1" :disabled="connecting" @click="addServer">Add</button>
             <button class="btn btn-ghost btn-sm" @click="cancelAdd">Cancel</button>

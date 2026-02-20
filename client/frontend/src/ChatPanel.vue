@@ -55,7 +55,7 @@ function formatTime(ts: number): string {
         type="text"
         placeholder="Send a message…"
         maxlength="500"
-        class="input input-sm flex-1 min-w-0"
+        class="input input-sm input-bordered flex-1 min-w-0"
         @keydown.enter.prevent="send"
       />
       <button class="btn btn-sm btn-primary" :disabled="!input.trim()" @click="send">Send</button>

@@ -22,16 +22,18 @@ const initials = computed(() => props.user.username.slice(0, 2).toUpperCase())
   >
     <!-- Avatar -->
     <div class="relative">
-      <div
-        class="w-16 h-16 rounded-full flex items-center justify-center text-lg font-bold bg-primary text-primary-content ring-3 ring-offset-2 ring-offset-base-100 transition-all duration-150"
-        :class="[speaking && !muted ? 'ring-success' : 'ring-transparent', muted ? 'opacity-40' : '']"
-      >
-        {{ initials }}
+      <div class="avatar avatar-placeholder">
+        <div
+          class="bg-primary text-primary-content w-16 rounded-full ring-3 ring-offset-2 ring-offset-base-100 transition-all duration-150"
+          :class="[speaking && !muted ? 'ring-success' : 'ring-transparent', muted ? 'opacity-40' : '']"
+        >
+          <span class="text-lg font-bold">{{ initials }}</span>
+        </div>
       </div>
-      <!-- Muted badge -->
+      <!-- Muted indicator badge -->
       <div
         v-if="muted"
-        class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-error flex items-center justify-center"
+        class="badge badge-error absolute -bottom-1 -right-1 w-5 h-5 !p-0"
         aria-hidden="true"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3 text-error-content">
