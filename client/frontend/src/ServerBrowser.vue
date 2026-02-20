@@ -78,7 +78,15 @@ function cancelAdd(): void {
   addError.value = ''
 }
 
-defineExpose({ setError })
+/** Pre-populate the server list with an invited server from a bken:// link. */
+async function setStartupAddr(addr: string): Promise<void> {
+  if (!addr || servers.value.some(s => s.addr === addr)) return
+  servers.value = [...servers.value, { name: 'Invited Server', addr }]
+  const cfg = await GetConfig()
+  await SaveConfig({ ...cfg, servers: servers.value })
+}
+
+defineExpose({ setError, setStartupAddr })
 </script>
 
 <template>

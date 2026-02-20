@@ -18,12 +18,13 @@ import (
 // Wails-bound methods (Connect, Disconnect, Get*, Set*) are callable from JS.
 // Keep this struct thin — delegate to Transport and AudioEngine.
 type App struct {
-	ctx       context.Context
-	audio     *AudioEngine
-	transport Transporter
-	nc        *NoiseCanceller
-	connected atomic.Bool // true while a voice session is active; safe for concurrent access
-	testUser  *TestUser   // non-nil when BKEN_TEST_USER is configured
+	ctx         context.Context
+	audio       *AudioEngine
+	transport   Transporter
+	nc          *NoiseCanceller
+	connected   atomic.Bool // true while a voice session is active; safe for concurrent access
+	testUser    *TestUser   // non-nil when BKEN_TEST_USER is configured
+	startupAddr string      // host:port extracted from a bken:// CLI argument, if any
 
 	// Metrics cache: updated every 5 s by adaptBitrateLoop; read by GetMetrics.
 	metricsMu     sync.Mutex
@@ -60,6 +61,13 @@ func (a *App) shutdown(_ context.Context) {
 type AutoLogin struct {
 	Username string `json:"username"`
 	Addr     string `json:"addr"`
+}
+
+// GetStartupAddr returns the host:port extracted from a bken:// command-line
+// argument passed when the app was launched (e.g. by clicking an invite link
+// in a browser). Returns "" if no bken:// argument was provided.
+func (a *App) GetStartupAddr() string {
+	return a.startupAddr
 }
 
 // GetAutoLogin returns credentials from BKEN_USERNAME / BKEN_ADDR env vars.

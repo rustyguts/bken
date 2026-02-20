@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
@@ -225,9 +225,20 @@ onMounted(async () => {
   // AGC, and volume are active even if the user never opens the settings panel.
   await ApplyConfig()
 
-  // Auto-login if configured
-  const auto = await GetAutoLogin()
-  if (auto.username) await handleConnect({ username: auto.username, addr: auto.addr })
+  // Priority: env-var auto-login > bken:// invite link > normal server browser.
+  const [auto, startupAddr] = await Promise.all([GetAutoLogin(), GetStartupAddr()])
+  if (auto.username) {
+    await handleConnect({ username: auto.username, addr: auto.addr })
+  } else if (startupAddr) {
+    const cfg = await GetConfig()
+    if (cfg.username) {
+      // Saved username + invite link — connect immediately.
+      await handleConnect({ username: cfg.username, addr: startupAddr })
+    } else {
+      // No username yet — pre-populate the server browser with the invited server.
+      serverBrowserRef.value?.setStartupAddr(startupAddr)
+    }
+  }
 })
 
 onBeforeUnmount(() => {

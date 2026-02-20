@@ -94,6 +94,12 @@ export function RenameServer(name: string): Promise<string> {
   return bridge()['RenameServer'](name)
 }
 
+// --- Invite link / startup ---
+
+export function GetStartupAddr(): Promise<string> {
+  return bridge()['GetStartupAddr']()
+}
+
 // --- Channel bindings ---
 
 export function JoinChannel(id: number): Promise<string> {
