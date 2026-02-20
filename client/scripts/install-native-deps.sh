@@ -36,7 +36,11 @@ build_and_install_rnnoise() {
   ./autogen.sh
   ./configure --prefix="${install_prefix}" --disable-shared --enable-static
   make -j"$(cpu_count)"
-  run_root make install
+  if [[ -d "${install_prefix}" && -w "${install_prefix}" ]] || [[ -w "$(dirname "${install_prefix}")" ]]; then
+    make install
+  else
+    run_root make install
+  fi
   popd >/dev/null
   rm -rf "${tmp_dir}"
 }
@@ -51,7 +55,7 @@ install_macos() {
   brew install portaudio opus opusfile autoconf automake libtool pkg-config git wget
 
   if ! pkg-config --exists rnnoise; then
-    build_and_install_rnnoise "/usr/local"
+    build_and_install_rnnoise "$(brew --prefix)"
   fi
 }
 

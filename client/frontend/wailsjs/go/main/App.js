@@ -22,12 +22,20 @@ export function DeleteChannel(arg1) {
   return window['go']['main']['App']['DeleteChannel'](arg1);
 }
 
+export function DeleteMessage(arg1) {
+  return window['go']['main']['App']['DeleteMessage'](arg1);
+}
+
 export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }
 
 export function DisconnectVoice() {
   return window['go']['main']['App']['DisconnectVoice']();
+}
+
+export function EditMessage(arg1, arg2) {
+  return window['go']['main']['App']['EditMessage'](arg1, arg2);
 }
 
 export function GetAutoLogin() {
@@ -92,6 +100,10 @@ export function RenameChannel(arg1, arg2) {
 
 export function RenameServer(arg1) {
   return window['go']['main']['App']['RenameServer'](arg1);
+}
+
+export function RenameUser(arg1) {
+  return window['go']['main']['App']['RenameUser'](arg1);
 }
 
 export function SaveConfig(arg1) {

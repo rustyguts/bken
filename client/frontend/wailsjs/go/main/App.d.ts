@@ -13,9 +13,13 @@ export function CreateChannel(arg1:string):Promise<string>;
 
 export function DeleteChannel(arg1:number):Promise<string>;
 
+export function DeleteMessage(arg1:number):Promise<string>;
+
 export function Disconnect():Promise<void>;
 
 export function DisconnectVoice():Promise<string>;
+
+export function EditMessage(arg1:number,arg2:string):Promise<string>;
 
 export function GetAutoLogin():Promise<main.AutoLogin>;
 
@@ -48,6 +52,8 @@ export function PTTKeyUp():Promise<void>;
 export function RenameChannel(arg1:number,arg2:string):Promise<string>;
 
 export function RenameServer(arg1:string):Promise<string>;
+
+export function RenameUser(arg1:string):Promise<string>;
 
 export function SaveConfig(arg1:config.Config):Promise<void>;
 
