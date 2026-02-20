@@ -29,7 +29,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Server should have more state. Recommend embedded sqlite database.
   - ✅ Foundation is done — see Done section
 - Client should follow daisy ui for all UI styling
-- Users should be able to move between channels
+- ✅ Users can move between channels — see Done section
 - Users should be able to connect to multiple servers and switch between them
   - ✅ Server list management done — see Done section
 - UI: The inteface should always remain simple, clean, modern
@@ -73,3 +73,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Owner can rename server: pencil icon hover-reveals in TitleBar (owner-only); inline input (max 50 chars, trim whitespace); Enter/confirm-button confirms, Escape/blur cancels; rename ControlMsg → server validates owner, updates SQLite via callback, broadcasts server_info to all clients; 5 rename tests in client_test.go + 2 in room_test.go
 - API validation consistency: PUT /api/settings trims whitespace + enforces 50-char max (mirrors in-session rename); GET /api/room now includes owner_id (0 when empty); 8 new tests covering too-long, whitespace-only, trim, malformed JSON, owner_id presence
 - Owner channel CRUD: SQLite migration v2 adds channels table; store exposes GetChannels/CreateChannel/RenameChannel/DeleteChannel/ChannelCount; REST API GET/POST/PUT/DELETE /api/channels with trim+50-char validation; "General" channel seeded on first run; 9 store tests + 9 API tests
+- Users move between channels: server sends channel_list in handshake + after API mutations; join_channel ControlMsg → server updates channelID + broadcasts user_channel to all; Room caches channel list; RoomBrowser shows channel-grouped view (click header to join, lobby for channel 0); 5 new tests; UserInfo includes channel_id
