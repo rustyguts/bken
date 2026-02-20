@@ -14,6 +14,9 @@ POLL_INTERVAL="${POLL_INTERVAL:-30}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
+CHILD_PID=""
+SHUTDOWN=false
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
@@ -21,6 +24,10 @@ log() {
 handle_sigint() {
   echo ""
   log "Interrupted — shutting down factory."
+  SHUTDOWN=true
+  if [[ -n "$CHILD_PID" ]]; then
+    kill "$CHILD_PID" 2>/dev/null || true
+  fi
   exit 0
 }
 
@@ -34,8 +41,19 @@ while true; do
   claude --dangerously-skip-permissions \
     --print \
     --continue \
-    "/turn-off-the-lights"
+    "/turn-off-the-lights" &
+  CHILD_PID=$!
+  wait "$CHILD_PID" || true
+  CHILD_PID=""
+
+  $SHUTDOWN && break
 
   log "Claude Code session complete. Sleeping ${POLL_INTERVAL}s..."
-  sleep "$POLL_INTERVAL"
+
+  sleep "$POLL_INTERVAL" &
+  CHILD_PID=$!
+  wait "$CHILD_PID" || true
+  CHILD_PID=""
+
+  $SHUTDOWN && break
 done
