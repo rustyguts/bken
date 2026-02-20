@@ -31,7 +31,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Client should follow daisy ui for all UI styling
 - Users should be able to move between channels
 - Users should be able to connect to multiple servers and switch between them
-- Users should hear sound indicating actions occuring in the app (like mute, defen, join, leave, etc)
 - UI: The inteface should always remain simple, clean, modern
 - UI: Beautiful settings page
 - Voice: Echo cancellation feature, enabled by default
@@ -59,3 +58,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Reliable connection and disconnection between client and server
 - Optimized Opus audio transmission rate based on connection speed to server
 - Users can mute other users locally (client-side, no server involvement)
+- Users hear notification tones for app events (connect, join, leave, mute, unmute)
