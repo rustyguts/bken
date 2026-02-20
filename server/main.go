@@ -10,7 +10,8 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":4433", "listen address")
+	addr    := flag.String("addr",     ":4433", "WebTransport listen address")
+	apiAddr := flag.String("api-addr", ":8080", "REST API listen address (empty to disable)")
 	flag.Parse()
 
 	tlsConfig, fingerprint := generateTLSConfig()
@@ -32,6 +33,13 @@ func main() {
 
 	// Start metrics logging.
 	go RunMetrics(ctx, room, 5*time.Second)
+
+	// Start REST API server if an address is configured.
+	if *apiAddr != "" {
+		api := NewAPIServer(room)
+		go api.Run(ctx, *apiAddr)
+		log.Printf("[api] listening on %s", *apiAddr)
+	}
 
 	srv := NewServer(*addr, tlsConfig, room)
 	if err := srv.Run(ctx); err != nil {
