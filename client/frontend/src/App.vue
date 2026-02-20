@@ -166,20 +166,25 @@ onBeforeUnmount(() => {
 <template>
   <main class="flex flex-col h-full">
     <TitleBar />
-    <ReconnectBanner
-      v-if="reconnecting"
-      :attempt="reconnectAttempt"
-      :seconds-until-retry="reconnectSecondsLeft"
-      @cancel="handleCancelReconnect"
-    />
-    <Room
-      v-if="connected || reconnecting"
-      :users="users"
-      :speaking-users="speakingUsers"
-      :log-events="logEvents"
-      class="flex-1 min-h-0"
-      @disconnect="handleDisconnect"
-    />
-    <ServerBrowser v-else ref="serverBrowserRef" class="flex-1 min-h-0" @connect="handleConnect" />
+    <Transition name="slide-down">
+      <ReconnectBanner
+        v-if="reconnecting"
+        :attempt="reconnectAttempt"
+        :seconds-until-retry="reconnectSecondsLeft"
+        @cancel="handleCancelReconnect"
+      />
+    </Transition>
+    <Transition name="fade" mode="out-in">
+      <Room
+        v-if="connected || reconnecting"
+        key="room"
+        :users="users"
+        :speaking-users="speakingUsers"
+        :log-events="logEvents"
+        class="flex-1 min-h-0"
+        @disconnect="handleDisconnect"
+      />
+      <ServerBrowser v-else key="browser" ref="serverBrowserRef" class="flex-1 min-h-0" @connect="handleConnect" />
+    </Transition>
   </main>
 </template>

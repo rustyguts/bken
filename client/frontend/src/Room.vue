@@ -56,9 +56,11 @@ async function handleDisconnect(): Promise<void> {
     </div>
 
     <!-- Right panel: room or settings -->
-    <div class="flex-1 min-w-0">
-      <AudioSettings v-if="settingsOpen" />
-      <RoomBrowser v-else :users="users" :speaking-users="speakingUsers" />
+    <div class="flex-1 min-w-0 relative">
+      <Transition name="fade" mode="out-in">
+        <AudioSettings v-if="settingsOpen" key="settings" class="absolute inset-0" />
+        <RoomBrowser v-else key="room" :users="users" :speaking-users="speakingUsers" class="absolute inset-0" />
+      </Transition>
     </div>
   </div>
 </template>
