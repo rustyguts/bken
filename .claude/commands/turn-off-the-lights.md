@@ -22,7 +22,6 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 ### Things to work on
 
-- Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in
 - Error states when you can't connect to the server or get disconnected
 - Join voice button sometimes does not work.
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
@@ -35,6 +34,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 ### Done
 
+- Bug: All messages are shown regardless of the channel you are in. You should only see the chatroom messages for the channel that you are in (frontend filters messages by channel_id via visibleMessages computed property)
 - Set a default global username. Right now users cant join a server unless their username is set. Generate one if one is not defined. Store the global username in the client state db
 - Bug: I can hear voice from people in other channels. You should only receive voice packets for the channel that you are in
 - Bug: Pressing disconnect stops voice but the UI does not update. It still shows that you are connected to the channel
