@@ -241,6 +241,13 @@ func (a *App) wireCallbacks() {
 		runtime.EventsEmit(a.ctx, "connection:lost", nil)
 		log.Println("[app] connection lost unexpectedly")
 	})
+	a.transport.SetOnChatMessage(func(username, message string, ts int64) {
+		runtime.EventsEmit(a.ctx, "chat:message", map[string]any{
+			"username": username,
+			"message":  message,
+			"ts":       ts,
+		})
+	})
 	a.audio.OnSpeaking = func() {
 		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
 	}
@@ -375,6 +382,15 @@ func (a *App) GetMutedUsers() []int {
 		out[i] = int(id)
 	}
 	return out
+}
+
+// SendChat sends a chat message to the server for fan-out to all participants.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) SendChat(message string) string {
+	if err := a.transport.SendChat(message); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // sendLoop reads encoded audio from the capture channel and forwards it via

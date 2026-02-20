@@ -41,7 +41,8 @@ type ControlMsg struct {
 	Username string     `json:"username,omitempty"`
 	ID       uint16     `json:"id,omitempty"`
 	Users    []UserInfo `json:"users,omitempty"`
-	Ts       int64      `json:"ts,omitempty"` // ping/pong timestamp (Unix ms)
+	Ts       int64      `json:"ts,omitempty"`      // ping/pong timestamp (Unix ms)
+	Message  string     `json:"message,omitempty"` // chat: body text
 }
 
 // UserInfo describes a connected peer.
@@ -105,6 +106,7 @@ type Transport struct {
 	onUserLeft      func(uint16)
 	onAudioReceived func(uint16)
 	onDisconnected  func()
+	onChatMessage   func(username, message string, ts int64)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -147,6 +149,12 @@ func (t *Transport) SetOnDisconnected(fn func()) {
 	t.cbMu.Unlock()
 }
 
+func (t *Transport) SetOnChatMessage(fn func(username, message string, ts int64)) {
+	t.cbMu.Lock()
+	t.onChatMessage = fn
+	t.cbMu.Unlock()
+}
+
 // --- Per-user local muting ---
 
 // MuteUser suppresses incoming audio from the given remote user ID.
@@ -160,6 +168,15 @@ func (t *Transport) IsUserMuted(id uint16) bool { return t.muted.Has(id) }
 
 // MutedUsers returns the IDs of all currently muted remote users.
 func (t *Transport) MutedUsers() []uint16 { return t.muted.Slice() }
+
+// SendChat sends a chat message to the server for fan-out to all participants.
+func (t *Transport) SendChat(message string) error {
+	if message == "" || len(message) > 500 {
+		return nil
+	}
+	t.writeCtrl(ControlMsg{Type: "chat", Message: message})
+	return nil
+}
 
 // writeCtrl serialises a control message write; safe for concurrent callers.
 func (t *Transport) writeCtrl(msg ControlMsg) {
@@ -423,6 +440,7 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onUserList := t.onUserList
 		onUserJoined := t.onUserJoined
 		onUserLeft := t.onUserLeft
+		onChat := t.onChatMessage
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
@@ -458,6 +476,10 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 					next = 0.125*sample + 0.875*old // EWMA α=0.125 (RFC 6298)
 				}
 				t.smoothedRTT.Store(math.Float64bits(next))
+			}
+		case "chat":
+			if onChat != nil {
+				onChat(msg.Username, msg.Message, msg.Ts)
 			}
 		}
 	}

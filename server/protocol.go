@@ -7,6 +7,7 @@ type ControlMsg struct {
 	ID        uint16     `json:"id,omitempty"`
 	Users     []UserInfo `json:"users,omitempty"`
 	Timestamp int64      `json:"ts,omitempty"` // ping/pong Unix ms
+	Message   string     `json:"message,omitempty"` // chat: body text (max 500 chars)
 }
 
 // UserInfo is a brief snapshot of a connected user, used in user_list messages.

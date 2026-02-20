@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"testing"
 )
 
@@ -157,6 +158,55 @@ func TestStartReceivingNilSessionNoGoroutine(t *testing.T) {
 	tr.StartReceiving(t.Context(), ch)
 	// If a goroutine had been started and accessed t.session unsafely, the
 	// race detector would catch it. The test itself just verifies no panic.
+}
+
+// --- ControlMsg JSON tests ---
+
+func TestChatControlMsgJSON(t *testing.T) {
+	msg := ControlMsg{
+		Type:     "chat",
+		Username: "alice",
+		Message:  "hello world",
+		Ts:       1708456789000,
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out ControlMsg
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Type != "chat" {
+		t.Errorf("type: got %q, want %q", out.Type, "chat")
+	}
+	if out.Username != "alice" {
+		t.Errorf("username: got %q, want %q", out.Username, "alice")
+	}
+	if out.Message != "hello world" {
+		t.Errorf("message: got %q, want %q", out.Message, "hello world")
+	}
+	if out.Ts != 1708456789000 {
+		t.Errorf("ts: got %d, want %d", out.Ts, 1708456789000)
+	}
+}
+
+func TestSendChatEmpty(t *testing.T) {
+	tr := NewTransport()
+	if err := tr.SendChat(""); err != nil {
+		t.Errorf("expected nil for empty message, got %v", err)
+	}
+}
+
+func TestSendChatTooLong(t *testing.T) {
+	tr := NewTransport()
+	long := make([]byte, 501)
+	for i := range long {
+		long[i] = 'a'
+	}
+	if err := tr.SendChat(string(long)); err != nil {
+		t.Errorf("expected nil for oversized message (early return), got %v", err)
+	}
 }
 
 func TestConnectClearsMutes(t *testing.T) {

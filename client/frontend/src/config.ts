@@ -77,3 +77,9 @@ export function UnmuteUser(id: number): Promise<void> {
 export function GetMutedUsers(): Promise<number[]> {
   return bridge()['GetMutedUsers']()
 }
+
+// --- Chat bindings ---
+
+export function SendChat(message: string): Promise<string> {
+  return bridge()['SendChat'](message)
+}

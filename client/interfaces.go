@@ -25,4 +25,8 @@ type Transporter interface {
 	SetOnUserLeft(fn func(uint16))
 	SetOnAudioReceived(fn func(uint16))
 	SetOnDisconnected(fn func())
+	SetOnChatMessage(fn func(username, message string, ts int64))
+
+	// Chat.
+	SendChat(message string) error
 }

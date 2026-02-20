@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/quic-go/webtransport-go"
 )
@@ -112,8 +113,21 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 		if err := json.Unmarshal(line, &msg); err != nil {
 			continue
 		}
-		if msg.Type == "ping" {
+		switch msg.Type {
+		case "ping":
 			client.SendControl(ControlMsg{Type: "pong", Timestamp: msg.Timestamp})
+		case "chat":
+			// Relay to all clients (including sender) so everyone sees the message.
+			// Server stamps the authoritative username and timestamp to prevent spoofing.
+			if msg.Message != "" && len(msg.Message) <= 500 {
+				room.BroadcastControl(ControlMsg{
+					Type:      "chat",
+					ID:        client.ID,
+					Username:  client.Username,
+					Message:   msg.Message,
+					Timestamp: time.Now().UnixMilli(),
+				}, 0)
+			}
 		}
 	}
 }

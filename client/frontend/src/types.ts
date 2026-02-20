@@ -35,3 +35,11 @@ export interface ConnectPayload {
   username: string
   addr: string
 }
+
+/** A single chat message received from the server. */
+export interface ChatMessage {
+  id: number       // client-side counter for v-for keys
+  username: string
+  message: string
+  ts: number       // Unix ms timestamp (server-stamped)
+}

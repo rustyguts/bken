@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig } from './config'
+import { ApplyConfig, SendChat } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
 import TitleBar from './TitleBar.vue'
-import type { User, UserJoinedEvent, UserLeftEvent, SpeakingEvent, LogEvent, ConnectPayload } from './types'
+import type { User, UserJoinedEvent, UserLeftEvent, SpeakingEvent, LogEvent, ConnectPayload, ChatMessage } from './types'
 
 const connected = ref(false)
 const serverBrowserRef = ref<InstanceType<typeof ServerBrowser> | null>(null)
 const users = ref<User[]>([])
 const logEvents = ref<LogEvent[]>([])
+const chatMessages = ref<ChatMessage[]>([])
 const speakingUsers = ref<Set<number>>(new Set())
 const speakingTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let eventIdCounter = 0
+let chatIdCounter = 0
 
 // Reconnect state
 const reconnecting = ref(false)
@@ -90,6 +92,7 @@ function resetState(): void {
   connected.value = false
   users.value = []
   logEvents.value = []
+  chatMessages.value = []
   clearSpeaking()
 }
 
@@ -105,6 +108,10 @@ async function handleConnect(payload: ConnectPayload): Promise<void> {
     connected.value = true
     addEvent('Connected', 'info')
   }
+}
+
+async function handleSendChat(message: string): Promise<void> {
+  await SendChat(message)
 }
 
 async function handleDisconnect(): Promise<void> {
@@ -152,6 +159,13 @@ onMounted(async () => {
     setSpeaking(data.id)
   })
 
+  EventsOn('chat:message', (data: { username: string; message: string; ts: number }) => {
+    chatMessages.value = [
+      ...chatMessages.value,
+      { id: ++chatIdCounter, username: data.username, message: data.message, ts: data.ts },
+    ]
+  })
+
   // Apply saved audio settings before doing anything else so noise suppression,
   // AGC, and volume are active even if the user never opens the settings panel.
   await ApplyConfig()
@@ -162,7 +176,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message')
   clearReconnectTimers()
   speakingTimers.forEach(t => clearTimeout(t))
 })
@@ -186,8 +200,10 @@ onBeforeUnmount(() => {
         :users="users"
         :speaking-users="speakingUsers"
         :log-events="logEvents"
+        :chat-messages="chatMessages"
         class="flex-1 min-h-0"
         @disconnect="handleDisconnect"
+        @send-chat="handleSendChat"
       />
       <ServerBrowser v-else key="browser" ref="serverBrowserRef" class="flex-1 min-h-0" @connect="handleConnect" />
     </Transition>
