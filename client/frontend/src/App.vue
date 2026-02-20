@@ -5,6 +5,7 @@ import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
+import TitleBar from './TitleBar.vue'
 import type { User, UserJoinedEvent, UserLeftEvent, SpeakingEvent, LogEvent, ConnectPayload } from './types'
 
 const connected = ref(false)
@@ -163,7 +164,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="h-full">
+  <main class="flex flex-col h-full">
+    <TitleBar />
     <ReconnectBanner
       v-if="reconnecting"
       :attempt="reconnectAttempt"
@@ -175,8 +177,9 @@ onBeforeUnmount(() => {
       :users="users"
       :speaking-users="speakingUsers"
       :log-events="logEvents"
+      class="flex-1 min-h-0"
       @disconnect="handleDisconnect"
     />
-    <ServerBrowser v-else ref="serverBrowserRef" @connect="handleConnect" />
+    <ServerBrowser v-else ref="serverBrowserRef" class="flex-1 min-h-0" @connect="handleConnect" />
   </main>
 </template>
