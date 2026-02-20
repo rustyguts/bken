@@ -23,6 +23,12 @@ const (
 	circuitBreakerProbeInterval uint32 = 25 // attempt a probe every 25 skips
 )
 
+// NACK retransmission constants.
+const (
+	dgramCacheSize = 128 // per-sender ring buffer slots (~2.5 s at 50 fps)
+	maxNACKSeqs    = 10  // max sequence numbers per NACK request
+)
+
 // sendHealth tracks per-client datagram send success and implements a
 // lightweight circuit breaker so the server stops wasting effort on
 // unreachable peers.
@@ -58,6 +64,13 @@ func (h *sendHealth) recordSuccess() bool {
 	return wasTripped
 }
 
+// cachedDatagram is a single entry in the per-sender datagram ring buffer.
+type cachedDatagram struct {
+	seq  uint16
+	data []byte // full datagram copy (header + opus payload)
+	set  bool   // true once this slot has been written at least once
+}
+
 // Client represents a connected voice client.
 type Client struct {
 	ID        uint16
@@ -69,10 +82,40 @@ type Client struct {
 
 	health sendHealth // per-client circuit breaker for datagram fan-out
 
+	// dgramMu protects the datagram cache. Written by readDatagrams goroutine,
+	// read by processControl (NACK handler). Contention is minimal since
+	// NACKs are infrequent relative to the 50 fps datagram rate.
+	dgramMu    sync.Mutex
+	dgramCache [dgramCacheSize]cachedDatagram
+
 	ctrlMu sync.Mutex
 	ctrl   io.Writer // control stream; nil until the join handshake completes
 	cancel context.CancelFunc
 	closer io.Closer // closes the underlying connection; nil in unit tests
+}
+
+// cacheDatagram stores a copy of the datagram in the per-sender ring buffer,
+// indexed by seq mod dgramCacheSize. Called from the readDatagrams goroutine.
+func (c *Client) cacheDatagram(seq uint16, data []byte) {
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	idx := seq % dgramCacheSize
+	c.dgramMu.Lock()
+	c.dgramCache[idx] = cachedDatagram{seq: seq, data: cp, set: true}
+	c.dgramMu.Unlock()
+}
+
+// getCachedDatagram retrieves a cached datagram by sequence number.
+// Returns nil if the slot doesn't contain the requested sequence.
+func (c *Client) getCachedDatagram(seq uint16) []byte {
+	idx := seq % dgramCacheSize
+	c.dgramMu.Lock()
+	defer c.dgramMu.Unlock()
+	entry := c.dgramCache[idx]
+	if entry.set && entry.seq == seq {
+		return entry.data
+	}
+	return nil
 }
 
 // sendRaw writes a pre-marshaled, newline-terminated JSON message to the control stream.
@@ -188,7 +231,7 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	log.Printf("[client %d] %s connected", client.ID, client.Username)
 
 	// Start the datagram relay goroutine.
-	go readDatagrams(ctx, sess, room, client.ID)
+	go readDatagrams(ctx, sess, room, client)
 
 	// Process control messages until the client disconnects.
 	for {
@@ -351,6 +394,31 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		// Move users who were in the deleted channel back to the lobby.
 		room.MoveChannelUsersToLobby(msg.ChannelID)
 		log.Printf("[client %d] %s deleted channel %d", client.ID, client.Username, msg.ChannelID)
+	case "nack":
+		// Client requests retransmission of missed voice packets from a specific sender.
+		// The server looks up cached datagrams and resends them to the requester only.
+		if msg.ID == 0 || msg.ID == client.ID || len(msg.Seqs) == 0 {
+			return
+		}
+		seqs := msg.Seqs
+		if len(seqs) > maxNACKSeqs {
+			seqs = seqs[:maxNACKSeqs]
+		}
+		sender := room.GetClient(msg.ID)
+		if sender == nil {
+			return
+		}
+		// Only retransmit to clients in the same voice channel as the sender.
+		senderCh := sender.channelID.Load()
+		clientCh := client.channelID.Load()
+		if senderCh == 0 || clientCh != senderCh {
+			return
+		}
+		for _, seq := range seqs {
+			if data := sender.getCachedDatagram(seq); data != nil {
+				client.session.SendDatagram(data) //nolint:errcheck // best-effort retransmit
+			}
+		}
 	case "move_user":
 		// Only the room owner may move other users between channels.
 		if room.OwnerID() != client.ID || msg.ID == 0 || msg.ID == client.ID {
@@ -371,14 +439,15 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 }
 
 // readDatagrams relays incoming voice datagrams from one client to all others.
-// It stamps the sender ID into the datagram header before fan-out to prevent spoofing.
-func readDatagrams(ctx context.Context, sess *webtransport.Session, room *Room, senderID uint16) {
+// It stamps the sender ID into the datagram header before fan-out to prevent
+// spoofing, and caches each datagram for NACK-based retransmission.
+func readDatagrams(ctx context.Context, sess *webtransport.Session, room *Room, client *Client) {
 	for {
 		data, err := sess.ReceiveDatagram(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
 				// Not a clean shutdown — log so operators can see unexpected drops.
-				log.Printf("[client %d] datagram read error: %v", senderID, err)
+				log.Printf("[client %d] datagram read error: %v", client.ID, err)
 			}
 			return
 		}
@@ -386,7 +455,12 @@ func readDatagrams(ctx context.Context, sess *webtransport.Session, room *Room, 
 			continue // need header; reject oversized packets
 		}
 		// Overwrite the client-supplied sender ID to prevent spoofing.
-		binary.BigEndian.PutUint16(data[:2], senderID)
-		room.Broadcast(senderID, data)
+		binary.BigEndian.PutUint16(data[:2], client.ID)
+
+		// Cache for NACK retransmission before broadcasting.
+		seq := binary.BigEndian.Uint16(data[2:4])
+		client.cacheDatagram(seq, data)
+
+		room.Broadcast(client.ID, data)
 	}
 }

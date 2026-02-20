@@ -59,6 +59,7 @@ type ControlMsg struct {
 	LinkDesc   string        `json:"link_desc,omitempty"`   // link_preview: page description
 	LinkImage  string        `json:"link_image,omitempty"`  // link_preview: preview image URL
 	LinkSite   string        `json:"link_site,omitempty"`   // link_preview: site name
+	Seqs       []uint16      `json:"seqs,omitempty"`        // nack: missing sequence numbers for retransmission
 }
 
 // UserInfo describes a connected peer.
@@ -582,12 +583,14 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- Tagged
 		defer cancel()
 		speakTimers := make(map[uint16]time.Time)
 		lastSeq := make(map[uint16]uint16)      // senderID → last received seq
+		hasSeq := make(map[uint16]bool)          // whether lastSeq contains a valid entry
 		lastSeen := make(map[uint16]time.Time)   // senderID → last packet time
 		lastArrival := make(map[uint16]time.Time) // senderID → arrival time of previous packet
 		var pruneCounter int
 
 		const expectedGapMs = 20.0 // one Opus frame = 20 ms
 		const jitterAlpha = 1.0 / 16.0 // RFC 3550 jitter gain
+		const maxNACKGap = 5 // only NACK small gaps; larger = sustained loss, let FEC/PLC handle
 
 		for {
 			data, err := sess.ReceiveDatagram(rctx)
@@ -606,40 +609,62 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- Tagged
 			}
 
 			now := time.Now()
+			lastSeen[userID] = now
 
-			// Sequence-gap packet loss accounting.
-			if prev, ok := lastSeq[userID]; ok {
+			// Sequence-gap packet loss accounting. Only count forward progress
+			// (diff in [1, 1000)) to avoid corrupting metrics when retransmitted
+			// or reordered packets arrive with older sequence numbers.
+			forwardProgress := false
+			if prev, has := lastSeq[userID]; has && hasSeq[userID] {
 				diff := int(seq) - int(prev)
 				if diff < 0 {
 					diff += 65536 // uint16 wraparound
 				}
-				if diff > 0 {
+				if diff > 0 && diff < 1000 {
+					forwardProgress = true
+					lastSeq[userID] = seq
 					t.expectedPackets.Add(uint64(diff))
 					if diff > 1 {
 						t.lostPackets.Add(uint64(diff - 1))
+						// NACK missing packets for small gaps. On LAN with
+						// <1ms RTT, retransmissions arrive well within the
+						// jitter buffer window (20ms+), giving 100% recovery
+						// vs the ~80% quality of FEC/PLC.
+						if diff <= maxNACKGap+1 {
+							seqs := make([]uint16, 0, diff-1)
+							for i := 1; i < diff; i++ {
+								seqs = append(seqs, prev+uint16(i))
+							}
+							go t.writeCtrlBestEffort(ControlMsg{Type: "nack", ID: userID, Seqs: seqs})
+						}
 					}
 				}
+				// else: retransmitted/reordered packet — deliver to jitter
+				// buffer without updating lastSeq or loss counters.
+			} else {
+				forwardProgress = true
+				lastSeq[userID] = seq
+				hasSeq[userID] = true
 			}
-			lastSeq[userID] = seq
-			lastSeen[userID] = now
 
-			// Inter-arrival jitter: measure |actual_gap - expected_gap| and
-			// smooth with EWMA (gain 1/16, per RFC 3550). Only count samples
-			// where the gap is < 100 ms to avoid VAD silence gaps inflating
-			// the jitter estimate.
-			if prev, ok := lastArrival[userID]; ok {
-				gapMs := float64(now.Sub(prev).Microseconds()) / 1000.0
-				if gapMs < 100.0 {
-					d := gapMs - expectedGapMs
-					if d < 0 {
-						d = -d
+			// Inter-arrival jitter: only measure on forward-progress packets.
+			// Retransmissions would have artificial inter-arrival times that
+			// inflate the jitter estimate.
+			if forwardProgress {
+				if prev, ok := lastArrival[userID]; ok {
+					gapMs := float64(now.Sub(prev).Microseconds()) / 1000.0
+					if gapMs < 100.0 {
+						d := gapMs - expectedGapMs
+						if d < 0 {
+							d = -d
+						}
+						old := math.Float64frombits(t.smoothedJitter.Load())
+						next := old + jitterAlpha*(d-old)
+						t.smoothedJitter.Store(math.Float64bits(next))
 					}
-					old := math.Float64frombits(t.smoothedJitter.Load())
-					next := old + jitterAlpha*(d-old)
-					t.smoothedJitter.Store(math.Float64bits(next))
 				}
+				lastArrival[userID] = now
 			}
-			lastArrival[userID] = now
 
 			// Speaking notification, throttled per user to ~80 ms.
 			t.cbMu.RLock()
@@ -661,6 +686,7 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- Tagged
 					if now.Sub(seen) > 30*time.Second {
 						delete(lastSeen, id)
 						delete(lastSeq, id)
+						delete(hasSeq, id)
 						delete(speakTimers, id)
 						delete(lastArrival, id)
 					}

@@ -809,6 +809,251 @@ func TestProcessControlMoveUserZeroID(t *testing.T) {
 	}
 }
 
+// --- datagram cache ---
+
+func TestCacheDatagram(t *testing.T) {
+	c := newTestClient("alice")
+	data := []byte{0, 1, 0, 42, 0xAA, 0xBB}
+
+	c.cacheDatagram(42, data)
+	got := c.getCachedDatagram(42)
+	if got == nil {
+		t.Fatal("expected cached datagram, got nil")
+	}
+	if string(got) != string(data) {
+		t.Errorf("cached data = %x, want %x", got, data)
+	}
+}
+
+func TestCacheDatagramEvictsOldEntry(t *testing.T) {
+	c := newTestClient("alice")
+	data1 := []byte{0, 1, 0, 5, 0xAA}
+	data2 := []byte{0, 1, 0, 5, 0xBB, 0xCC}
+
+	c.cacheDatagram(5, data1)
+	// seq 5 + dgramCacheSize wraps to the same slot.
+	c.cacheDatagram(5+dgramCacheSize, data2)
+
+	// Old entry should be gone.
+	if got := c.getCachedDatagram(5); got != nil {
+		t.Error("old entry should have been evicted")
+	}
+	// New entry should be present.
+	got := c.getCachedDatagram(5 + dgramCacheSize)
+	if got == nil {
+		t.Fatal("new entry should be present")
+	}
+	if string(got) != string(data2) {
+		t.Errorf("cached data = %x, want %x", got, data2)
+	}
+}
+
+func TestCacheDatagramMiss(t *testing.T) {
+	c := newTestClient("alice")
+	if got := c.getCachedDatagram(99); got != nil {
+		t.Errorf("expected nil for uncached seq, got %x", got)
+	}
+}
+
+func TestCacheDatagramCopiesData(t *testing.T) {
+	c := newTestClient("alice")
+	data := []byte{0, 1, 0, 1, 0xAA, 0xBB}
+	c.cacheDatagram(1, data)
+
+	// Mutate the original — cached copy should be unaffected.
+	data[4] = 0xFF
+	got := c.getCachedDatagram(1)
+	if got[4] != 0xAA {
+		t.Error("cache should store an independent copy of the data")
+	}
+}
+
+// --- processControl: nack ---
+
+func TestProcessControlNACKRetransmits(t *testing.T) {
+	room := NewRoom()
+	sender := newTestClient("alice")
+	receiver := newTestClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(1)
+	receiver.channelID.Store(1)
+
+	// Cache some datagrams on the sender.
+	for seq := uint16(10); seq < 15; seq++ {
+		data := make([]byte, 6)
+		data[0], data[1] = 0, byte(sender.ID)
+		data[2], data[3] = 0, byte(seq)
+		data[4], data[5] = 0xAA, byte(seq)
+		sender.cacheDatagram(seq, data)
+	}
+
+	// Bob sends a NACK for seq 11 and 13.
+	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{11, 13}}, receiver, room)
+
+	// Bob should have received 2 retransmitted datagrams.
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 2 {
+		t.Fatalf("expected 2 retransmitted datagrams, got %d", count)
+	}
+}
+
+func TestProcessControlNACKMissingSender(t *testing.T) {
+	room := NewRoom()
+	receiver := newTestClient("bob")
+	room.AddClient(receiver)
+	receiver.channelID.Store(1)
+
+	// NACK for a sender that doesn't exist — should not panic.
+	processControl(ControlMsg{Type: "nack", ID: 9999, Seqs: []uint16{1}}, receiver, room)
+
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 0 {
+		t.Errorf("expected no retransmissions for missing sender, got %d", count)
+	}
+}
+
+func TestProcessControlNACKDifferentChannel(t *testing.T) {
+	room := NewRoom()
+	sender := newTestClient("alice")
+	receiver := newTestClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(1)
+	receiver.channelID.Store(2) // different channel
+
+	sender.cacheDatagram(1, []byte{0, 0, 0, 1, 0xAA})
+	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{1}}, receiver, room)
+
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 0 {
+		t.Errorf("NACK across channels should be rejected, got %d retransmissions", count)
+	}
+}
+
+func TestProcessControlNACKSenderInLobby(t *testing.T) {
+	room := NewRoom()
+	sender := newTestClient("alice")
+	receiver := newTestClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(0) // lobby
+	receiver.channelID.Store(0)
+
+	sender.cacheDatagram(1, []byte{0, 0, 0, 1, 0xAA})
+	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{1}}, receiver, room)
+
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 0 {
+		t.Errorf("NACK in lobby should be rejected, got %d retransmissions", count)
+	}
+}
+
+func TestProcessControlNACKCacheMiss(t *testing.T) {
+	room := NewRoom()
+	sender := newTestClient("alice")
+	receiver := newTestClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(1)
+	receiver.channelID.Store(1)
+
+	// NACK for a seq that was never cached.
+	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{99}}, receiver, room)
+
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 0 {
+		t.Errorf("expected no retransmissions for cache miss, got %d", count)
+	}
+}
+
+func TestProcessControlNACKTruncatesLargeRequest(t *testing.T) {
+	room := NewRoom()
+	sender := newTestClient("alice")
+	receiver := newTestClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(1)
+	receiver.channelID.Store(1)
+
+	// Cache 20 datagrams.
+	for seq := uint16(0); seq < 20; seq++ {
+		data := make([]byte, 5)
+		data[2], data[3] = byte(seq>>8), byte(seq)
+		sender.cacheDatagram(seq, data)
+	}
+
+	// Send a NACK with more than maxNACKSeqs entries.
+	seqs := make([]uint16, 20)
+	for i := range seqs {
+		seqs[i] = uint16(i)
+	}
+	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: seqs}, receiver, room)
+
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count > maxNACKSeqs {
+		t.Errorf("expected at most %d retransmissions, got %d", maxNACKSeqs, count)
+	}
+}
+
+func TestProcessControlNACKSelfIgnored(t *testing.T) {
+	room := NewRoom()
+	client, _ := newCtrlClient("alice")
+	room.AddClient(client)
+	client.channelID.Store(1)
+
+	client.cacheDatagram(1, []byte{0, 0, 0, 1, 0xAA})
+	// NACKing your own ID should be ignored.
+	processControl(ControlMsg{Type: "nack", ID: client.ID, Seqs: []uint16{1}}, client, room)
+
+	ms := client.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 0 {
+		t.Errorf("self-NACK should be ignored, got %d retransmissions", count)
+	}
+}
+
+func TestProcessControlNACKEmptySeqs(t *testing.T) {
+	room := NewRoom()
+	sender := newTestClient("alice")
+	receiver := newTestClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(1)
+	receiver.channelID.Store(1)
+
+	// Empty seqs list should be silently ignored.
+	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{}}, receiver, room)
+
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 0 {
+		t.Errorf("NACK with empty seqs should be ignored, got %d retransmissions", count)
+	}
+}
+
 // --- processControl: unknown type ---
 
 func TestProcessControlUnknownTypeIsIgnored(t *testing.T) {

@@ -49,6 +49,7 @@ type ControlMsg struct {
 	LinkDesc   string        `json:"link_desc,omitempty"`    // link_preview: page description
 	LinkImage  string        `json:"link_image,omitempty"`   // link_preview: preview image URL
 	LinkSite   string        `json:"link_site,omitempty"`    // link_preview: site name
+	Seqs       []uint16      `json:"seqs,omitempty"`         // nack: requested sequence numbers for retransmission
 }
 
 // UserInfo is a brief snapshot of a connected user, used in user_list messages.

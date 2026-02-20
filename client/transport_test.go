@@ -625,6 +625,50 @@ func TestOnDisconnectedCallbackSignature(t *testing.T) {
 	}
 }
 
+// --- NACK control message tests ---
+
+func TestNACKControlMsgJSON(t *testing.T) {
+	msg := ControlMsg{
+		Type: "nack",
+		ID:   42,
+		Seqs: []uint16{10, 11, 12},
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out ControlMsg
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Type != "nack" {
+		t.Errorf("type: got %q, want %q", out.Type, "nack")
+	}
+	if out.ID != 42 {
+		t.Errorf("id: got %d, want 42", out.ID)
+	}
+	if len(out.Seqs) != 3 || out.Seqs[0] != 10 || out.Seqs[1] != 11 || out.Seqs[2] != 12 {
+		t.Errorf("seqs: got %v, want [10 11 12]", out.Seqs)
+	}
+}
+
+func TestNACKControlMsgOmitsEmptySeqs(t *testing.T) {
+	msg := ControlMsg{Type: "ping"}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// "seqs" should not appear in JSON when nil/empty.
+	if string(data) != `{"type":"ping"}` {
+		// Just check it doesn't contain "seqs".
+		var m map[string]interface{}
+		json.Unmarshal(data, &m)
+		if _, ok := m["seqs"]; ok {
+			t.Error("seqs field should be omitted when empty")
+		}
+	}
+}
+
 // --- Benchmarks ---
 
 func BenchmarkDgramBuildPooled(b *testing.B) {
