@@ -17,6 +17,24 @@ import (
 	"github.com/quic-go/webtransport-go"
 )
 
+// mutedSet is a concurrent set of uint16 user IDs.
+type mutedSet struct{ m sync.Map }
+
+func (ms *mutedSet) Add(id uint16)    { ms.m.Store(id, struct{}{}) }
+func (ms *mutedSet) Remove(id uint16) { ms.m.Delete(id) }
+func (ms *mutedSet) Has(id uint16) bool {
+	_, ok := ms.m.Load(id)
+	return ok
+}
+func (ms *mutedSet) Clear() {
+	ms.m.Range(func(k, _ any) bool { ms.m.Delete(k); return true })
+}
+func (ms *mutedSet) Slice() []uint16 {
+	var out []uint16
+	ms.m.Range(func(k, _ any) bool { out = append(out, k.(uint16)); return true })
+	return out
+}
+
 // ControlMsg mirrors the server's control message format.
 type ControlMsg struct {
 	Type     string     `json:"type"`
@@ -73,6 +91,9 @@ type Transport struct {
 	lostPackets     atomic.Uint64
 	expectedPackets atomic.Uint64
 
+	// muted holds the set of remote user IDs whose audio is suppressed locally.
+	muted mutedSet
+
 	// lastMetricsTime is the timestamp of the previous GetMetrics call.
 	metricsMu       sync.Mutex
 	lastMetricsTime time.Time
@@ -126,6 +147,20 @@ func (t *Transport) SetOnDisconnected(fn func()) {
 	t.cbMu.Unlock()
 }
 
+// --- Per-user local muting ---
+
+// MuteUser suppresses incoming audio from the given remote user ID.
+func (t *Transport) MuteUser(id uint16) { t.muted.Add(id) }
+
+// UnmuteUser re-enables incoming audio from the given remote user ID.
+func (t *Transport) UnmuteUser(id uint16) { t.muted.Remove(id) }
+
+// IsUserMuted reports whether audio from id is currently suppressed.
+func (t *Transport) IsUserMuted(id uint16) bool { return t.muted.Has(id) }
+
+// MutedUsers returns the IDs of all currently muted remote users.
+func (t *Transport) MutedUsers() []uint16 { return t.muted.Slice() }
+
 // writeCtrl serialises a control message write; safe for concurrent callers.
 func (t *Transport) writeCtrl(msg ControlMsg) {
 	data, err := json.Marshal(msg)
@@ -143,6 +178,9 @@ func (t *Transport) writeCtrl(msg ControlMsg) {
 // Connect establishes a WebTransport session and sends the join message.
 // Callbacks must be registered via Set* methods before calling Connect.
 func (t *Transport) Connect(ctx context.Context, addr, username string) error {
+	// Reset per-session state.
+	t.muted.Clear()
+
 	ctx, cancel := context.WithCancel(ctx)
 	t.mu.Lock()
 	t.cancel = cancel
@@ -262,6 +300,11 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- []byte
 
 			userID, seq, opusData, ok := ParseDatagram(data)
 			if !ok {
+				continue
+			}
+
+			// Drop audio from locally muted users before any further processing.
+			if t.muted.Has(userID) {
 				continue
 			}
 

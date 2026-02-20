@@ -12,6 +12,12 @@ type Transporter interface {
 	MyID() uint16
 	GetMetrics() Metrics
 
+	// Per-user local muting — purely client-side, no server involvement.
+	MuteUser(id uint16)
+	UnmuteUser(id uint16)
+	IsUserMuted(id uint16) bool
+	MutedUsers() []uint16
+
 	// Callback setters — prefer setters over exported fields so the interface
 	// can be satisfied by both the real Transport and test doubles.
 	SetOnUserList(fn func([]UserInfo))

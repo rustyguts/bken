@@ -292,6 +292,27 @@ func (a *App) IsConnected() bool {
 	return a.connected
 }
 
+// MuteUser suppresses incoming audio from the given remote user.
+// id is the server-assigned numeric user ID.
+func (a *App) MuteUser(id int) {
+	a.transport.MuteUser(uint16(id))
+}
+
+// UnmuteUser re-enables incoming audio from the given remote user.
+func (a *App) UnmuteUser(id int) {
+	a.transport.UnmuteUser(uint16(id))
+}
+
+// GetMutedUsers returns the IDs of all currently muted remote users.
+func (a *App) GetMutedUsers() []int {
+	ids := a.transport.MutedUsers()
+	out := make([]int, len(ids))
+	for i, id := range ids {
+		out[i] = int(id)
+	}
+	return out
+}
+
 // sendLoop reads encoded audio from the capture channel and forwards it via
 // transport. Exits when the audio engine stops or on send error.
 func (a *App) sendLoop() {

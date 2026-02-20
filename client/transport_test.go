@@ -91,3 +91,70 @@ func TestMarshalParseRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// --- mute set tests ---
+
+func TestMuteUserBasic(t *testing.T) {
+	tr := NewTransport()
+
+	if tr.IsUserMuted(1) {
+		t.Fatal("user 1 should not be muted initially")
+	}
+	tr.MuteUser(1)
+	if !tr.IsUserMuted(1) {
+		t.Fatal("user 1 should be muted after MuteUser")
+	}
+	tr.UnmuteUser(1)
+	if tr.IsUserMuted(1) {
+		t.Fatal("user 1 should not be muted after UnmuteUser")
+	}
+}
+
+func TestMuteUserMultiple(t *testing.T) {
+	tr := NewTransport()
+
+	tr.MuteUser(10)
+	tr.MuteUser(20)
+	tr.MuteUser(30)
+
+	for _, id := range []uint16{10, 20, 30} {
+		if !tr.IsUserMuted(id) {
+			t.Errorf("user %d should be muted", id)
+		}
+	}
+	if tr.IsUserMuted(99) {
+		t.Error("user 99 should not be muted")
+	}
+
+	ids := tr.MutedUsers()
+	if len(ids) != 3 {
+		t.Errorf("MutedUsers() len = %d, want 3", len(ids))
+	}
+}
+
+func TestMutedSetClear(t *testing.T) {
+	var ms mutedSet
+	ms.Add(1)
+	ms.Add(2)
+	ms.Clear()
+
+	if ms.Has(1) || ms.Has(2) {
+		t.Error("all entries should be cleared")
+	}
+	if len(ms.Slice()) != 0 {
+		t.Error("Slice should be empty after Clear")
+	}
+}
+
+func TestConnectClearsMutes(t *testing.T) {
+	tr := NewTransport()
+	tr.MuteUser(5)
+	tr.MuteUser(6)
+
+	// Simulate the mute-clear that happens at the start of Connect.
+	tr.muted.Clear()
+
+	if tr.IsUserMuted(5) || tr.IsUserMuted(6) {
+		t.Error("mutes should be cleared after reset")
+	}
+}

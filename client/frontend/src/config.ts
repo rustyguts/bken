@@ -28,3 +28,17 @@ export function GetConfig(): Promise<Config> {
 export function SaveConfig(cfg: Config): Promise<void> {
   return bridge()['SaveConfig'](cfg)
 }
+
+// --- Per-user local mute bindings ---
+
+export function MuteUser(id: number): Promise<void> {
+  return bridge()['MuteUser'](id)
+}
+
+export function UnmuteUser(id: number): Promise<void> {
+  return bridge()['UnmuteUser'](id)
+}
+
+export function GetMutedUsers(): Promise<number[]> {
+  return bridge()['GetMutedUsers']()
+}

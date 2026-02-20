@@ -1,11 +1,28 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import UserCard from './UserCard.vue'
+import { MuteUser, UnmuteUser } from './config'
 import type { User } from './types'
 
 defineProps<{
   users: User[]
   speakingUsers: Set<number>
 }>()
+
+const mutedUsers = ref<Set<number>>(new Set())
+
+async function handleToggleMute(id: number): Promise<void> {
+  if (mutedUsers.value.has(id)) {
+    mutedUsers.value.delete(id)
+    // Trigger Vue reactivity by replacing the set.
+    mutedUsers.value = new Set(mutedUsers.value)
+    await UnmuteUser(id)
+  } else {
+    mutedUsers.value.add(id)
+    mutedUsers.value = new Set(mutedUsers.value)
+    await MuteUser(id)
+  }
+}
 </script>
 
 <template>
@@ -22,6 +39,8 @@ defineProps<{
         :key="user.id"
         :user="user"
         :speaking="speakingUsers.has(user.id)"
+        :muted="mutedUsers.has(user.id)"
+        @toggle-mute="handleToggleMute"
       />
     </div>
   </div>
