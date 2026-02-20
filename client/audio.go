@@ -45,11 +45,14 @@ type paStream interface {
 type opusEncoder interface {
 	Encode(pcm []int16, data []byte) (int, error)
 	SetBitrate(bitrate int) error
+	SetInBandFEC(fec bool) error
+	SetPacketLossPerc(lossPerc int) error
 }
 
 // opusDecoder abstracts Opus decoding for testing.
 type opusDecoder interface {
 	Decode(data []byte, pcm []int16) (int, error)
+	DecodeFEC(data []byte, pcm []int16) error
 }
 
 // AudioEngine manages audio capture, playback, Opus encoding/decoding.
@@ -237,6 +240,25 @@ func (ae *AudioEngine) CurrentBitrate() int {
 	return int(ae.currentBitrate.Load())
 }
 
+// SetPacketLoss tells the Opus encoder the expected packet loss percentage
+// so it can tune how much FEC redundancy to embed. lossPercent is clamped
+// to [0, 100]. Called by adaptBitrateLoop every 5 s with measured loss.
+func (ae *AudioEngine) SetPacketLoss(lossPercent int) {
+	if lossPercent < 0 {
+		lossPercent = 0
+	}
+	if lossPercent > 100 {
+		lossPercent = 100
+	}
+	ae.mu.Lock()
+	if ae.encoder != nil {
+		if err := ae.encoder.SetPacketLossPerc(lossPercent); err != nil {
+			log.Printf("[audio] SetPacketLossPerc %d%%: %v", lossPercent, err)
+		}
+	}
+	ae.mu.Unlock()
+}
+
 // Start initializes the Opus codec and starts capture/playback streams.
 func (ae *AudioEngine) Start() error {
 	ae.mu.Lock()
@@ -251,6 +273,8 @@ func (ae *AudioEngine) Start() error {
 		return err
 	}
 	enc.SetBitrate(opusBitrate)
+	enc.SetInBandFEC(true)
+	enc.SetPacketLossPerc(5) // initial estimate; updated by adaptBitrateLoop
 	ae.encoder = enc
 	ae.currentBitrate.Store(opusBitrate / 1000)
 
@@ -544,6 +568,16 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 				var err error
 				if f.OpusData != nil {
 					n, err = dec.Decode(f.OpusData, pcm)
+				} else if f.FECData != nil {
+					// FEC recovery: the next frame's Opus data embeds a
+					// low-bitrate copy of this lost frame. Better quality
+					// than pure PLC because it uses actual encoded data.
+					if fecErr := dec.DecodeFEC(f.FECData, pcm); fecErr != nil {
+						// FEC failed — fall back to PLC.
+						n, err = dec.Decode(nil, pcm)
+					} else {
+						n = FrameSize
+					}
 				} else {
 					// Packet loss concealment: Opus extrapolates from its internal
 					// state to fill the gap with a plausible waveform.

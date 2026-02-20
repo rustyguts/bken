@@ -415,6 +415,9 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 					currentKbps, nextKbps, m.PacketLoss*100, m.RTTMs)
 				a.audio.SetBitrate(nextKbps)
 			}
+			// Feed measured packet loss into the Opus encoder so it tunes
+			// how much FEC redundancy to embed in each frame.
+			a.audio.SetPacketLoss(int(m.PacketLoss * 100))
 			m.OpusTargetKbps = nextKbps
 			a.metricsMu.Lock()
 			a.cachedMetrics = m

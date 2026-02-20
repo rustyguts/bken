@@ -108,6 +108,106 @@ func TestMissingFramePLC(t *testing.T) {
 	}
 }
 
+func TestMissingFrameFECDataFromNextFrame(t *testing.T) {
+	b := New(2)
+
+	// Push seq 50 and 51 to prime.
+	b.Push(1, 50, []byte{50})
+	b.Push(1, 51, []byte{51})
+
+	// Pop seq 50 — present.
+	f := b.Pop()
+	if f[0].OpusData == nil {
+		t.Fatal("frame 50 should be present")
+	}
+
+	// Pop seq 51 — present.
+	f = b.Pop()
+	if f[0].OpusData == nil {
+		t.Fatal("frame 51 should be present")
+	}
+
+	// Push seq 53 (skipping 52) — seq 53 is in the buffer as the "next" frame.
+	b.Push(1, 53, []byte{53})
+
+	// Pop seq 52 — missing, but seq 53 is available for FEC.
+	f = b.Pop()
+	if len(f) != 1 {
+		t.Fatalf("expected 1 frame, got %d", len(f))
+	}
+	if f[0].OpusData != nil {
+		t.Error("frame 52 OpusData should be nil (missing)")
+	}
+	if f[0].FECData == nil {
+		t.Fatal("frame 52 FECData should contain seq 53's data for FEC recovery")
+	}
+	if f[0].FECData[0] != 53 {
+		t.Errorf("FECData should be seq 53's opus data, got %v", f[0].FECData)
+	}
+
+	// Pop seq 53 — present and normal.
+	f = b.Pop()
+	if len(f) != 1 || f[0].OpusData == nil {
+		t.Fatal("frame 53 should be present")
+	}
+}
+
+func TestMissingFrameNoFECWhenNextAlsoMissing(t *testing.T) {
+	b := New(2)
+
+	// Push seq 50 and 51 to prime.
+	b.Push(1, 50, []byte{50})
+	b.Push(1, 51, []byte{51})
+
+	// Pop both.
+	b.Pop()
+	b.Pop()
+
+	// Push seq 54 (skipping 52 and 53).
+	b.Push(1, 54, []byte{54})
+
+	// Pop seq 52 — missing, and seq 53 is also missing, so no FEC.
+	f := b.Pop()
+	if len(f) != 1 {
+		t.Fatalf("expected 1 frame, got %d", len(f))
+	}
+	if f[0].OpusData != nil {
+		t.Error("frame 52 OpusData should be nil")
+	}
+	if f[0].FECData != nil {
+		t.Error("frame 52 FECData should be nil when next frame is also missing")
+	}
+}
+
+func TestConsecutiveLossOnlyFirstGetsFEC(t *testing.T) {
+	b := New(2)
+
+	b.Push(1, 50, []byte{50})
+	b.Push(1, 51, []byte{51})
+
+	// Pop both primed frames.
+	b.Pop()
+	b.Pop()
+
+	// Push seq 54 only (52 and 53 are lost).
+	b.Push(1, 54, []byte{54})
+
+	// Pop seq 52: missing, next (53) also missing → no FEC.
+	f := b.Pop()
+	if f[0].FECData != nil {
+		t.Error("seq 52: no FEC expected when seq 53 is also missing")
+	}
+
+	// Pop seq 53: missing, but next (54) is present → FEC available.
+	f = b.Pop()
+	if f[0].OpusData != nil {
+		t.Error("seq 53 OpusData should be nil")
+	}
+	if f[0].FECData == nil || f[0].FECData[0] != 54 {
+		t.Error("seq 53 should have FEC data from seq 54")
+	}
+}
+
 func TestMultipleSenders(t *testing.T) {
 	b := New(1) // depth 1 for fast priming
 

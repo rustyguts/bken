@@ -19,7 +19,9 @@ const (
 // Frame is a single voice frame output from the jitter buffer.
 type Frame struct {
 	SenderID uint16
-	OpusData []byte // nil signals a missing packet (caller should do PLC)
+	OpusData []byte // nil signals a missing packet (caller should do PLC or FEC)
+	FECData  []byte // when OpusData is nil and the NEXT frame is available, this holds
+	// that frame's Opus data so the caller can use DecodeFEC for better recovery
 }
 
 // slot holds one opus packet in the ring buffer.
@@ -127,9 +129,15 @@ func (b *Buffer) Pop() []Frame {
 			frames = append(frames, Frame{SenderID: id, OpusData: s.ring[idx].opus})
 			s.ring[idx] = slot{} // clear
 		} else {
-			// Missing frame — signal PLC to the caller.
+			// Missing frame — check if the NEXT frame is available for FEC recovery.
 			s.ring[idx] = slot{} // clear any stale data
-			frames = append(frames, Frame{SenderID: id, OpusData: nil})
+			f := Frame{SenderID: id}
+			nextSeq := s.nextPlay + 1
+			nextIdx := int(nextSeq) & ringMask
+			if s.ring[nextIdx].set && s.ring[nextIdx].seq == nextSeq {
+				f.FECData = s.ring[nextIdx].opus
+			}
+			frames = append(frames, f)
 		}
 		s.nextPlay++
 	}
