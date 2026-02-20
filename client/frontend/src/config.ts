@@ -15,6 +15,7 @@ export interface Config {
   volume: number
   noise_enabled: boolean
   noise_level: number
+  aec_enabled: boolean
   agc_enabled: boolean
   agc_level: number
   vad_enabled: boolean
@@ -31,6 +32,12 @@ export function GetConfig(): Promise<Config> {
 
 export function SaveConfig(cfg: Config): Promise<void> {
   return bridge()['SaveConfig'](cfg)
+}
+
+// --- AEC bindings ---
+
+export function SetAEC(enabled: boolean): Promise<void> {
+  return bridge()['SetAEC'](enabled)
 }
 
 // --- AGC bindings ---

@@ -12,13 +12,14 @@ import {
   StopTest,
 } from '../wailsjs/go/main/App'
 import { main } from '../wailsjs/go/models'
-import { GetConfig, SaveConfig, SetAGC, SetAGCLevel, SetVAD, SetVADThreshold } from './config'
+import { GetConfig, SaveConfig, SetAEC, SetAGC, SetAGCLevel, SetVAD, SetVADThreshold } from './config'
 
 const inputDevices = ref<main.AudioDevice[]>([])
 const outputDevices = ref<main.AudioDevice[]>([])
 const selectedInput = ref(-1)
 const selectedOutput = ref(-1)
 const volume = ref(100)
+const aecEnabled = ref(true)
 const noiseEnabled = ref(false)
 const noiseLevel = ref(80)
 const agcEnabled = ref(true)
@@ -78,6 +79,7 @@ async function persistConfig(): Promise<void> {
     input_device_id: selectedInput.value,
     output_device_id: selectedOutput.value,
     volume: volume.value / 100,
+    aec_enabled: aecEnabled.value,
     noise_enabled: noiseEnabled.value,
     noise_level: noiseLevel.value,
     agc_enabled: agcEnabled.value,
@@ -106,6 +108,7 @@ onMounted(async () => {
   if (cfg.input_device_id !== -1) selectedInput.value = cfg.input_device_id
   if (cfg.output_device_id !== -1) selectedOutput.value = cfg.output_device_id
   volume.value = Math.round(cfg.volume * 100)
+  aecEnabled.value = cfg.aec_enabled
   noiseEnabled.value = cfg.noise_enabled
   noiseLevel.value = cfg.noise_level
   agcEnabled.value = cfg.agc_enabled
@@ -140,6 +143,11 @@ async function handleOutputChange(): Promise<void> {
 
 async function handleVolumeChange(): Promise<void> {
   await SetVolume(volume.value / 100)
+  await persistConfig()
+}
+
+async function handleAECToggle(): Promise<void> {
+  await SetAEC(aecEnabled.value)
   await persistConfig()
 }
 
@@ -300,6 +308,25 @@ async function toggleTest(): Promise<void> {
         </div>
 
         <div class="rounded-xl border border-base-content/10 bg-base-200/40 p-4 flex flex-col gap-4">
+
+          <!-- Echo Cancellation -->
+          <div>
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium leading-none">Echo Cancellation</p>
+                <p class="text-xs opacity-50 mt-0.5">Remove speaker feedback from mic</p>
+              </div>
+              <input
+                type="checkbox"
+                v-model="aecEnabled"
+                class="toggle toggle-primary toggle-sm"
+                aria-label="Toggle echo cancellation"
+                @change="handleAECToggle"
+              />
+            </div>
+          </div>
+
+          <div class="divider my-0 opacity-30"></div>
 
           <!-- Noise Suppression -->
           <div>

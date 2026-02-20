@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"client/internal/aec"
 	"client/internal/agc"
 	"client/internal/vad"
 
@@ -74,6 +75,9 @@ type AudioEngine struct {
 	// synthesised by PlayNotification. Mixed into the output after voice decoding.
 	notifCh chan []float32
 
+	aecProc    *aec.AEC
+	aecEnabled atomic.Bool
+
 	agcProc    *agc.AGC
 	agcEnabled atomic.Bool
 
@@ -100,6 +104,7 @@ func NewAudioEngine() *AudioEngine {
 		inputDeviceID:  -1,
 		outputDeviceID: -1,
 		volume:         1.0,
+		aecProc:        aec.New(frameSize),
 		agcProc:        agc.New(),
 		vadProc:        vad.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
@@ -172,6 +177,13 @@ func (ae *AudioEngine) SetVolume(vol float64) {
 	ae.mu.Lock()
 	ae.volume = vol
 	ae.mu.Unlock()
+}
+
+// SetAEC enables or disables acoustic echo cancellation on the capture path.
+// Enabling resets the adaptive filter weights for a clean start.
+func (ae *AudioEngine) SetAEC(enabled bool) {
+	ae.aecProc.SetEnabled(enabled)
+	ae.aecEnabled.Store(enabled)
 }
 
 // SetAGC enables or disables automatic gain control on the capture path.
@@ -416,6 +428,12 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			return
 		}
 
+		// Apply acoustic echo cancellation before any other processing so the
+		// downstream stages (noise suppression, AGC, VAD) see a cleaner signal.
+		if ae.aecEnabled.Load() {
+			ae.aecProc.Process(buf)
+		}
+
 		// Compute RMS once; reuse for both speaking detection and VAD.
 		rms := vad.RMS(buf)
 
@@ -525,6 +543,11 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 			}
 		default:
 		}
+
+		// Feed the final output buffer to the AEC as the far-end reference.
+		// Done after all mixing (voice + notifications) so the reference
+		// matches exactly what the speakers will emit.
+		ae.aecProc.FeedFarEnd(buf)
 
 		if err := ae.playbackStream.Write(); err != nil {
 			if ae.running.Load() {

@@ -34,6 +34,9 @@ func TestDefault(t *testing.T) {
 	if cfg.AGCLevel <= 0 {
 		t.Errorf("expected positive default AGC level, got %d", cfg.AGCLevel)
 	}
+	if !cfg.AECEnabled {
+		t.Error("expected echo cancellation enabled by default")
+	}
 	if !cfg.VADEnabled {
 		t.Error("expected VAD enabled by default")
 	}
@@ -52,6 +55,7 @@ func TestSaveAndLoad(t *testing.T) {
 		InputDeviceID:  2,
 		OutputDeviceID: 3,
 		Volume:         0.75,
+		AECEnabled:     true,
 		NoiseEnabled:   true,
 		NoiseLevel:     60,
 		AGCEnabled:     true,
@@ -79,6 +83,9 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.Volume != cfg.Volume {
 		t.Errorf("volume: want %v got %v", cfg.Volume, loaded.Volume)
+	}
+	if loaded.AECEnabled != cfg.AECEnabled {
+		t.Errorf("aec enabled: want %v got %v", cfg.AECEnabled, loaded.AECEnabled)
 	}
 	if loaded.NoiseEnabled != cfg.NoiseEnabled {
 		t.Errorf("noise enabled: want %v got %v", cfg.NoiseEnabled, loaded.NoiseEnabled)

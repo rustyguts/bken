@@ -99,6 +99,12 @@ func (a *App) SetVolume(vol float64) {
 	a.audio.SetVolume(vol)
 }
 
+// SetAEC enables or disables acoustic echo cancellation on the capture path.
+// Enabling resets the adaptive filter for a clean start.
+func (a *App) SetAEC(enabled bool) {
+	a.audio.SetAEC(enabled)
+}
+
 // SetAGC enables or disables automatic gain control on the capture path.
 func (a *App) SetAGC(enabled bool) {
 	a.audio.SetAGC(enabled)
@@ -322,6 +328,7 @@ func (a *App) GetConfig() Config {
 func (a *App) ApplyConfig() {
 	cfg := LoadConfig()
 	a.audio.SetVolume(cfg.Volume)
+	a.audio.SetAEC(cfg.AECEnabled)
 	a.audio.SetAGC(cfg.AGCEnabled)
 	a.audio.SetAGCLevel(cfg.AGCLevel)
 	a.audio.SetVAD(cfg.VADEnabled)
