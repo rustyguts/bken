@@ -22,17 +22,12 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 ### Things to work on in no particular order
 
-- Reliable connection and disconnection between client and server
-- Optimized Opus audio transmission rate based on connection speed to server
 - Basic roles for the server. Owner / Member.
   - Owners can kick members from the server
   - Owners can create channels in the server and CRUD the channels
   - Owners can set the name of the server
 - Server should have state. Recommend embedded sqlite database.
   - Database should have safe and reliable migrations that can grow over time
-- Client should also have state. Recommend simple json or yaml config file, sqlite feels too overkill
-- Client should have a frameless GUI frame
-- Client should have smooth transitions
 - Client should follow daisy ui for all UI styling
 - Users should be able to move between channels
 - Users should be able to mute other users
@@ -58,4 +53,9 @@ This is a client/server voice over ip application. Clients running the bken desk
 
 ### Done
 
-- UI: Users should  be able to switch between all the different daisy UI themes
+- UI: Users should be able to switch between all the different daisy UI themes
+- Client should have a frameless GUI frame
+- Client should have smooth transitions
+- Client should also have state (JSON config file at ~/.config/bken/config.json)
+- Reliable connection and disconnection between client and server
+- Optimized Opus audio transmission rate based on connection speed to server
