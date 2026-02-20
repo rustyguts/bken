@@ -37,12 +37,13 @@ func (ms *mutedSet) Slice() []uint16 {
 
 // ControlMsg mirrors the server's control message format.
 type ControlMsg struct {
-	Type     string     `json:"type"`
-	Username string     `json:"username,omitempty"`
-	ID       uint16     `json:"id,omitempty"`
-	Users    []UserInfo `json:"users,omitempty"`
-	Ts       int64      `json:"ts,omitempty"`      // ping/pong timestamp (Unix ms)
-	Message  string     `json:"message,omitempty"` // chat: body text
+	Type       string     `json:"type"`
+	Username   string     `json:"username,omitempty"`
+	ID         uint16     `json:"id,omitempty"`
+	Users      []UserInfo `json:"users,omitempty"`
+	Ts         int64      `json:"ts,omitempty"`          // ping/pong timestamp (Unix ms)
+	Message    string     `json:"message,omitempty"`     // chat: body text
+	ServerName string     `json:"server_name,omitempty"` // user_list: human-readable server name
 }
 
 // UserInfo describes a connected peer.
@@ -107,6 +108,7 @@ type Transport struct {
 	onAudioReceived func(uint16)
 	onDisconnected  func()
 	onChatMessage   func(username, message string, ts int64)
+	onServerInfo    func(name string)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -152,6 +154,12 @@ func (t *Transport) SetOnDisconnected(fn func()) {
 func (t *Transport) SetOnChatMessage(fn func(username, message string, ts int64)) {
 	t.cbMu.Lock()
 	t.onChatMessage = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnServerInfo(fn func(name string)) {
+	t.cbMu.Lock()
+	t.onServerInfo = fn
 	t.cbMu.Unlock()
 }
 
@@ -441,6 +449,7 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onUserJoined := t.onUserJoined
 		onUserLeft := t.onUserLeft
 		onChat := t.onChatMessage
+		onServerInfo := t.onServerInfo
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
@@ -454,6 +463,9 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 			}
 			if onUserList != nil {
 				onUserList(msg.Users)
+			}
+			if msg.ServerName != "" && onServerInfo != nil {
+				onServerInfo(msg.ServerName)
 			}
 		case "user_joined":
 			if onUserJoined != nil {

@@ -168,6 +168,21 @@ func TestRoomBroadcastSkipsSender(t *testing.T) {
 	}
 }
 
+func TestRoomSetGetServerName(t *testing.T) {
+	room := NewRoom()
+	if room.ServerName() != "" {
+		t.Errorf("expected empty server name initially, got %q", room.ServerName())
+	}
+	room.SetServerName("My Server")
+	if room.ServerName() != "My Server" {
+		t.Errorf("expected %q, got %q", "My Server", room.ServerName())
+	}
+	room.SetServerName("Updated")
+	if room.ServerName() != "Updated" {
+		t.Errorf("expected %q, got %q", "Updated", room.ServerName())
+	}
+}
+
 func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	room := NewRoom()
 

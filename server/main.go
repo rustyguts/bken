@@ -30,6 +30,11 @@ func main() {
 
 	room := NewRoom()
 
+	// Seed room with persisted server name so connecting clients see it immediately.
+	if name, ok, err := st.GetSetting("server_name"); err == nil && ok {
+		room.SetServerName(name)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

@@ -14,9 +14,10 @@ type DatagramSender interface {
 
 // Room holds all connected clients and handles voice datagram fan-out.
 type Room struct {
-	mu      sync.RWMutex
-	clients map[uint16]*Client
-	nextID  atomic.Uint32
+	mu         sync.RWMutex
+	clients    map[uint16]*Client
+	serverName string // protected by mu
+	nextID     atomic.Uint32
 
 	// Metrics (reset on each Stats call).
 	totalDatagrams atomic.Uint64
@@ -27,6 +28,20 @@ func NewRoom() *Room {
 	return &Room{
 		clients: make(map[uint16]*Client),
 	}
+}
+
+// SetServerName updates the human-readable server name sent to connecting clients.
+func (r *Room) SetServerName(name string) {
+	r.mu.Lock()
+	r.serverName = name
+	r.mu.Unlock()
+}
+
+// ServerName returns the current server name.
+func (r *Room) ServerName() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.serverName
 }
 
 // AddClient registers a client, assigns it a unique ID, and returns that ID.

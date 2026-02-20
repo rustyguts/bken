@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { Disconnect, SetMuted, SetDeafened } from '../wailsjs/go/main/App'
 import Sidebar from './Sidebar.vue'
 import EventLog from './EventLog.vue'
@@ -9,7 +9,7 @@ import AudioSettings from './AudioSettings.vue'
 import ChatPanel from './ChatPanel.vue'
 import type { User, LogEvent, ChatMessage } from './types'
 
-defineProps<{
+const props = defineProps<{
   users: User[]
   speakingUsers: Set<number>
   logEvents: LogEvent[]
@@ -22,6 +22,13 @@ const settingsOpen = ref(false)
 const muted = ref(false)
 const deafened = ref(false)
 const activeTab = ref<'voice' | 'chat'>('voice')
+const unreadChat = ref(0)
+
+watch(
+  () => props.chatMessages.length,
+  () => { if (activeTab.value !== 'chat') unreadChat.value++ },
+)
+watch(activeTab, (tab) => { if (tab === 'chat') unreadChat.value = 0 })
 
 async function handleMuteToggle(): Promise<void> {
   muted.value = !muted.value
@@ -81,6 +88,10 @@ async function handleDisconnect(): Promise<void> {
               @click="activeTab = 'chat'"
             >
               Chat
+              <span
+                v-if="unreadChat > 0"
+                class="badge badge-xs badge-primary ml-1"
+              >{{ unreadChat }}</span>
             </button>
           </div>
 

@@ -248,6 +248,9 @@ func (a *App) wireCallbacks() {
 			"ts":       ts,
 		})
 	})
+	a.transport.SetOnServerInfo(func(name string) {
+		runtime.EventsEmit(a.ctx, "server:info", map[string]any{"name": name})
+	})
 	a.audio.OnSpeaking = func() {
 		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
 	}

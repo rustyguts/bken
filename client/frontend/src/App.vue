@@ -14,6 +14,7 @@ const serverBrowserRef = ref<InstanceType<typeof ServerBrowser> | null>(null)
 const users = ref<User[]>([])
 const logEvents = ref<LogEvent[]>([])
 const chatMessages = ref<ChatMessage[]>([])
+const serverName = ref('')
 const speakingUsers = ref<Set<number>>(new Set())
 const speakingTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let eventIdCounter = 0
@@ -93,6 +94,7 @@ function resetState(): void {
   users.value = []
   logEvents.value = []
   chatMessages.value = []
+  serverName.value = ''
   clearSpeaking()
 }
 
@@ -166,6 +168,10 @@ onMounted(async () => {
     ]
   })
 
+  EventsOn('server:info', (data: { name: string }) => {
+    serverName.value = data.name
+  })
+
   // Apply saved audio settings before doing anything else so noise suppression,
   // AGC, and volume are active even if the user never opens the settings panel.
   await ApplyConfig()
@@ -176,7 +182,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'audio:speaking', 'chat:message', 'server:info')
   clearReconnectTimers()
   speakingTimers.forEach(t => clearTimeout(t))
 })
@@ -184,7 +190,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="flex flex-col h-full">
-    <TitleBar />
+    <TitleBar :server-name="serverName" />
     <Transition name="slide-down">
       <ReconnectBanner
         v-if="reconnecting"

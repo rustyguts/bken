@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
+
+defineProps<{ serverName?: string }>()
 </script>
 
 <template>
@@ -7,8 +9,14 @@ import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/r
     class="flex items-center h-8 shrink-0 bg-base-300 border-b border-base-content/10 select-none"
     style="--wails-draggable: drag"
   >
-    <!-- App name — draggable -->
-    <span class="px-3 text-xs font-semibold tracking-widest opacity-40 pointer-events-none">bken</span>
+    <!-- App name + optional server name — draggable -->
+    <div class="px-3 flex items-center gap-2 pointer-events-none">
+      <span class="text-xs font-semibold tracking-widest opacity-40">bken</span>
+      <template v-if="serverName">
+        <span class="opacity-20 text-xs">›</span>
+        <span class="text-xs opacity-60 truncate max-w-[180px]">{{ serverName }}</span>
+      </template>
+    </div>
 
     <div class="flex-1" />
 

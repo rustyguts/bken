@@ -86,8 +86,8 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	client.Username = joinMsg.Username
 	room.AddClient(client)
 
-	// Send the current user list to the new client.
-	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients()})
+	// Send the current user list (and server name) to the new client.
+	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName()})
 
 	// Notify all other clients that this user joined.
 	room.BroadcastControl(
