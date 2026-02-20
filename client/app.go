@@ -240,14 +240,15 @@ func (a *App) wireCallbacks() {
 	a.transport.SetOnAudioReceived(func(userID uint16) {
 		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(userID)})
 	})
-	a.transport.SetOnDisconnected(func() {
+	a.transport.SetOnDisconnected(func(reason string) {
 		if !a.connected.Load() {
 			return // user-initiated disconnect, ignore
 		}
 		a.connected.Store(false)
 		a.audio.Stop()
-		runtime.EventsEmit(a.ctx, "connection:lost", nil)
-		log.Println("[app] connection lost unexpectedly")
+		a.transport.Disconnect() // ensure full transport cleanup (cancel ctx, close session)
+		runtime.EventsEmit(a.ctx, "connection:lost", map[string]any{"reason": reason})
+		log.Printf("[app] connection lost: %s", reason)
 	})
 	a.transport.SetOnChatMessage(func(username, message string, ts int64) {
 		runtime.EventsEmit(a.ctx, "chat:message", map[string]any{

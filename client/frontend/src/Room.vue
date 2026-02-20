@@ -131,6 +131,7 @@ function handleSendMessage(message: string): void {
       :selected-channel-id="selectedChannelId"
       :server-name="serverName"
       :speaking-users="speakingUsers"
+      :connect-error="connectError"
       @join="handleJoinChannel"
       @select="handleSelectChannel"
     />

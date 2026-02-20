@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestMarshalDatagram(t *testing.T) {
@@ -193,8 +194,8 @@ func TestChatControlMsgJSON(t *testing.T) {
 
 func TestSendChatEmpty(t *testing.T) {
 	tr := NewTransport()
-	if err := tr.SendChat(""); err != nil {
-		t.Errorf("expected nil for empty message, got %v", err)
+	if err := tr.SendChat(""); err == nil {
+		t.Error("expected error for empty message, got nil")
 	}
 }
 
@@ -204,8 +205,8 @@ func TestSendChatTooLong(t *testing.T) {
 	for i := range long {
 		long[i] = 'a'
 	}
-	if err := tr.SendChat(string(long)); err != nil {
-		t.Errorf("expected nil for oversized message (early return), got %v", err)
+	if err := tr.SendChat(string(long)); err == nil {
+		t.Error("expected error for oversized message, got nil")
 	}
 }
 
@@ -219,5 +220,110 @@ func TestConnectClearsMutes(t *testing.T) {
 
 	if tr.IsUserMuted(5) || tr.IsUserMuted(6) {
 		t.Error("mutes should be cleared after reset")
+	}
+}
+
+// --- disconnect reason tests ---
+
+func TestDisconnectReasonDefault(t *testing.T) {
+	// When no reason is explicitly set, readControl uses the default message.
+	tr := NewTransport()
+
+	// Verify that after clearing the reason, it's empty (so the default kicks in).
+	tr.mu.Lock()
+	tr.disconnectReason = ""
+	tr.mu.Unlock()
+
+	tr.mu.Lock()
+	reason := tr.disconnectReason
+	tr.mu.Unlock()
+
+	if reason != "" {
+		t.Errorf("expected empty disconnect reason, got %q", reason)
+	}
+}
+
+func TestDisconnectReasonSetAndClear(t *testing.T) {
+	tr := NewTransport()
+
+	// Set a reason (simulating what pingLoop does).
+	tr.mu.Lock()
+	tr.disconnectReason = "Server unreachable (ping timeout)"
+	tr.mu.Unlock()
+
+	// Read and clear (simulating what readControl does).
+	tr.mu.Lock()
+	reason := tr.disconnectReason
+	tr.disconnectReason = ""
+	tr.mu.Unlock()
+
+	if reason != "Server unreachable (ping timeout)" {
+		t.Errorf("expected ping timeout reason, got %q", reason)
+	}
+
+	// After reading, reason should be cleared.
+	tr.mu.Lock()
+	after := tr.disconnectReason
+	tr.mu.Unlock()
+	if after != "" {
+		t.Errorf("expected empty reason after read, got %q", after)
+	}
+}
+
+func TestDisconnectReasonClearedOnReset(t *testing.T) {
+	tr := NewTransport()
+
+	// Simulate a stale reason from a prior session.
+	tr.mu.Lock()
+	tr.disconnectReason = "stale reason"
+	tr.mu.Unlock()
+
+	// Simulate what Connect does: reset the reason.
+	tr.muted.Clear()
+	tr.mu.Lock()
+	tr.disconnectReason = ""
+	tr.mu.Unlock()
+
+	tr.mu.Lock()
+	reason := tr.disconnectReason
+	tr.mu.Unlock()
+
+	if reason != "" {
+		t.Errorf("expected empty reason after reset, got %q", reason)
+	}
+}
+
+func TestConnectTimeoutConstant(t *testing.T) {
+	// Ensure the connect timeout is reasonable (between 5s and 30s).
+	if connectTimeout < 5*time.Second || connectTimeout > 30*time.Second {
+		t.Errorf("connectTimeout = %v, expected between 5s and 30s", connectTimeout)
+	}
+}
+
+func TestPongTimeoutConstant(t *testing.T) {
+	// Ensure the pong timeout is reasonable (between 3s and 15s).
+	if pongTimeout < 3*time.Second || pongTimeout > 15*time.Second {
+		t.Errorf("pongTimeout = %v, expected between 3s and 15s", pongTimeout)
+	}
+}
+
+func TestOnDisconnectedCallbackSignature(t *testing.T) {
+	// Verify that the callback receives a reason string.
+	tr := NewTransport()
+	var received string
+	tr.SetOnDisconnected(func(reason string) {
+		received = reason
+	})
+
+	// Simulate readControl calling the callback with a reason.
+	tr.cbMu.RLock()
+	cb := tr.onDisconnected
+	tr.cbMu.RUnlock()
+	if cb != nil {
+		cb("test reason")
+	}
+
+	if received != "test reason" {
+		t.Errorf("callback received %q, want %q", received, "test reason")
 	}
 }

@@ -107,6 +107,10 @@ type Transport struct {
 	// muted holds the set of remote user IDs whose audio is suppressed locally.
 	muted mutedSet
 
+	// disconnectReason is set before Disconnect is called to communicate the
+	// cause to the onDisconnected callback. Protected by mu.
+	disconnectReason string
+
 	// lastMetricsTime is the timestamp of the previous GetMetrics call.
 	metricsMu       sync.Mutex
 	lastMetricsTime time.Time
@@ -117,7 +121,7 @@ type Transport struct {
 	onUserJoined         func(uint16, string)
 	onUserLeft           func(uint16)
 	onAudioReceived      func(uint16)
-	onDisconnected       func()
+	onDisconnected       func(reason string)
 	onChatMessage        func(username, message string, ts int64)
 	onChannelChatMessage func(channelID int64, username, message string, ts int64)
 	onServerInfo         func(name string)
@@ -161,7 +165,7 @@ func (t *Transport) SetOnAudioReceived(fn func(uint16)) {
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnDisconnected(fn func()) {
+func (t *Transport) SetOnDisconnected(fn func(reason string)) {
 	t.cbMu.Lock()
 	t.onDisconnected = fn
 	t.cbMu.Unlock()
@@ -290,11 +294,24 @@ func (t *Transport) writeCtrl(msg ControlMsg) {
 	}
 }
 
+// connectTimeout is the maximum time allowed for the initial WebTransport
+// dial + control stream open + join handshake.
+const connectTimeout = 10 * time.Second
+
 // Connect establishes a WebTransport session and sends the join message.
 // Callbacks must be registered via Set* methods before calling Connect.
 func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	// Reset per-session state.
 	t.muted.Clear()
+	t.mu.Lock()
+	t.disconnectReason = ""
+	t.mu.Unlock()
+
+	// Apply a dial timeout so the caller isn't blocked indefinitely when the
+	// server is unreachable. The timeout only covers the handshake; once
+	// connected the session-scoped context takes over.
+	dialCtx, dialCancel := context.WithTimeout(ctx, connectTimeout)
+	defer dialCancel()
 
 	ctx, cancel := context.WithCancel(ctx)
 	t.mu.Lock()
@@ -309,7 +326,7 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 		},
 	}
 
-	_, sess, err := d.Dial(ctx, "https://"+addr, http.Header{})
+	_, sess, err := d.Dial(dialCtx, "https://"+addr, http.Header{})
 	if err != nil {
 		cancel()
 		return err
@@ -523,6 +540,9 @@ func (t *Transport) pingLoop(ctx context.Context) {
 			lastPong := t.lastPongTime.Load()
 			if lastPong > 0 && time.Since(time.Unix(0, lastPong)) > pongTimeout {
 				log.Printf("[transport] pong timeout — server unreachable, disconnecting")
+				t.mu.Lock()
+				t.disconnectReason = "Server unreachable (ping timeout)"
+				t.mu.Unlock()
 				t.Disconnect()
 				return
 			}
@@ -628,11 +648,21 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		}
 	}
 
+	// Determine disconnect reason: if one was set (e.g. by pingLoop), use it;
+	// otherwise default to a generic message.
+	t.mu.Lock()
+	reason := t.disconnectReason
+	t.disconnectReason = ""
+	t.mu.Unlock()
+	if reason == "" {
+		reason = "Connection closed by server"
+	}
+
 	t.cbMu.RLock()
 	onDisconnected := t.onDisconnected
 	t.cbMu.RUnlock()
 	if onDisconnected != nil {
-		onDisconnected()
+		onDisconnected(reason)
 	}
 }
 

@@ -24,7 +24,7 @@ type Transporter interface {
 	SetOnUserJoined(fn func(uint16, string))
 	SetOnUserLeft(fn func(uint16))
 	SetOnAudioReceived(fn func(uint16))
-	SetOnDisconnected(fn func())
+	SetOnDisconnected(fn func(reason string))
 	SetOnChatMessage(fn func(username, message string, ts int64))
 	SetOnChannelChatMessage(fn func(channelID int64, username, message string, ts int64))
 	SetOnServerInfo(fn func(name string))

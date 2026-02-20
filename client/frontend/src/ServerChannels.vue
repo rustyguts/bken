@@ -10,6 +10,7 @@ const props = defineProps<{
   selectedChannelId: number
   serverName: string
   speakingUsers: Set<number>
+  connectError: string
 }>()
 
 const emit = defineEmits<{
@@ -56,6 +57,10 @@ function isConnectedToChannel(channelId: number): boolean {
   <section class="flex flex-col h-full min-h-0">
     <div class="px-3 py-2 border-b border-base-content/10">
       <h2 class="text-xs font-semibold uppercase tracking-widest opacity-50">{{ serverName || 'Server' }}</h2>
+    </div>
+
+    <div v-if="connectError" class="mx-2 mt-2 rounded-md bg-error/10 border border-error/30 px-3 py-2 text-xs text-error">
+      {{ connectError }}
     </div>
 
     <div class="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">

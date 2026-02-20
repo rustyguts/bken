@@ -221,9 +221,11 @@ onMounted(async () => {
   syncRouteFromHash()
   window.addEventListener('hashchange', syncRouteFromHash)
 
-  EventsOn('connection:lost', () => {
+  EventsOn('connection:lost', (data: { reason: string } | null) => {
+    const reason = data?.reason || 'Connection lost'
     connected.value = false
     voiceConnected.value = false
+    connectError.value = reason
     startReconnect(
       () => { connected.value = true; voiceConnected.value = true; connectError.value = '' },
       () => {},
@@ -345,6 +347,7 @@ onBeforeUnmount(() => {
           v-if="reconnecting"
           :attempt="reconnectAttempt"
           :seconds-until-retry="reconnectSecondsLeft"
+          :reason="connectError"
           @cancel="handleCancelReconnect"
         />
       </Transition>
