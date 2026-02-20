@@ -109,6 +109,18 @@ func (a *App) SetAGCLevel(level int) {
 	a.audio.SetAGCLevel(level)
 }
 
+// SetVAD enables or disables voice activity detection.
+// When enabled, silent frames are not encoded or transmitted.
+func (a *App) SetVAD(enabled bool) {
+	a.audio.SetVAD(enabled)
+}
+
+// SetVADThreshold sets VAD sensitivity (0–100). Higher values require louder
+// speech to be considered active and suppress more background sound.
+func (a *App) SetVADThreshold(level int) {
+	a.audio.SetVADThreshold(level)
+}
+
 // SetNoiseSuppression enables or disables noise suppression.
 // The NoiseCanceller is created lazily on first call.
 func (a *App) SetNoiseSuppression(enabled bool) {
@@ -312,6 +324,8 @@ func (a *App) ApplyConfig() {
 	a.audio.SetVolume(cfg.Volume)
 	a.audio.SetAGC(cfg.AGCEnabled)
 	a.audio.SetAGCLevel(cfg.AGCLevel)
+	a.audio.SetVAD(cfg.VADEnabled)
+	a.audio.SetVADThreshold(cfg.VADThreshold)
 	a.SetNoiseSuppression(cfg.NoiseEnabled)
 	a.SetNoiseSuppressionLevel(cfg.NoiseLevel)
 	if cfg.InputDeviceID >= 0 {

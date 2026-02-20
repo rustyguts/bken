@@ -12,7 +12,7 @@ import {
   StopTest,
 } from '../wailsjs/go/main/App'
 import { main } from '../wailsjs/go/models'
-import { GetConfig, SaveConfig, SetAGC, SetAGCLevel } from './config'
+import { GetConfig, SaveConfig, SetAGC, SetAGCLevel, SetVAD, SetVADThreshold } from './config'
 
 const inputDevices = ref<main.AudioDevice[]>([])
 const outputDevices = ref<main.AudioDevice[]>([])
@@ -23,6 +23,8 @@ const noiseEnabled = ref(false)
 const noiseLevel = ref(80)
 const agcEnabled = ref(true)
 const agcLevel = ref(50)
+const vadEnabled = ref(true)
+const vadThreshold = ref(30)
 const testing = ref(false)
 const testError = ref('')
 
@@ -80,6 +82,8 @@ async function persistConfig(): Promise<void> {
     noise_level: noiseLevel.value,
     agc_enabled: agcEnabled.value,
     agc_level: agcLevel.value,
+    vad_enabled: vadEnabled.value,
+    vad_threshold: vadThreshold.value,
   })
 }
 
@@ -106,6 +110,8 @@ onMounted(async () => {
   noiseLevel.value = cfg.noise_level
   agcEnabled.value = cfg.agc_enabled
   agcLevel.value = cfg.agc_level
+  vadEnabled.value = cfg.vad_enabled
+  vadThreshold.value = cfg.vad_threshold
 
   // Theme: config is source of truth; keep localStorage in sync for fast startup
   const validTheme = THEMES.some(t => t.name === cfg.theme)
@@ -154,6 +160,16 @@ async function handleAGCToggle(): Promise<void> {
 
 async function handleAGCLevelChange(): Promise<void> {
   await SetAGCLevel(agcLevel.value)
+  await persistConfig()
+}
+
+async function handleVADToggle(): Promise<void> {
+  await SetVAD(vadEnabled.value)
+  await persistConfig()
+}
+
+async function handleVADThresholdChange(): Promise<void> {
+  await SetVADThreshold(vadThreshold.value)
   await persistConfig()
 }
 
@@ -349,6 +365,41 @@ async function toggleTest(): Promise<void> {
                 :aria-label="`AGC target level: ${agcLevel}%`"
                 :disabled="!agcEnabled"
                 @input="handleAGCLevelChange"
+              />
+            </div>
+          </div>
+
+          <div class="divider my-0 opacity-30"></div>
+
+          <!-- Voice Activity Detection -->
+          <div>
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium leading-none">Voice Activity Detection</p>
+                <p class="text-xs opacity-50 mt-0.5">Skip silent frames to save bandwidth</p>
+              </div>
+              <input
+                type="checkbox"
+                v-model="vadEnabled"
+                class="toggle toggle-primary toggle-sm"
+                aria-label="Toggle voice activity detection"
+                @change="handleVADToggle"
+              />
+            </div>
+            <div class="mt-3 transition-opacity" :class="{ 'opacity-30 pointer-events-none': !vadEnabled }">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs opacity-70">Sensitivity</span>
+                <span class="text-xs font-mono font-medium tabular-nums">{{ vadThreshold }}%</span>
+              </div>
+              <input
+                type="range"
+                v-model.number="vadThreshold"
+                min="0"
+                max="100"
+                class="range range-xs range-primary w-full"
+                :aria-label="`VAD sensitivity: ${vadThreshold}%`"
+                :disabled="!vadEnabled"
+                @input="handleVADThresholdChange"
               />
             </div>
           </div>

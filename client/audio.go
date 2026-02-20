@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"client/internal/agc"
+	"client/internal/vad"
 
 	"github.com/gordonklaus/portaudio"
 	"gopkg.in/hraban/opus.v2"
@@ -76,6 +77,8 @@ type AudioEngine struct {
 	agcProc    *agc.AGC
 	agcEnabled atomic.Bool
 
+	vadProc *vad.VAD
+
 	running        atomic.Bool
 	testMode       atomic.Bool
 	muted          atomic.Bool
@@ -98,6 +101,7 @@ func NewAudioEngine() *AudioEngine {
 		outputDeviceID: -1,
 		volume:         1.0,
 		agcProc:        agc.New(),
+		vadProc:        vad.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
 		PlaybackIn:     make(chan []byte, playbackChannelBuf),
 		notifCh:        make(chan []float32, notifChannelBuf),
@@ -182,6 +186,18 @@ func (ae *AudioEngine) SetAGC(enabled bool) {
 // an RMS target of [0.01, 0.50] (see agc.SetTarget).
 func (ae *AudioEngine) SetAGCLevel(level int) {
 	ae.agcProc.SetTarget(level)
+}
+
+// SetVAD enables or disables voice activity detection on the capture path.
+// When enabled, silent frames are not encoded or sent to the network.
+func (ae *AudioEngine) SetVAD(enabled bool) {
+	ae.vadProc.SetEnabled(enabled)
+}
+
+// SetVADThreshold sets the sensitivity of the VAD. level is in [0, 100] where
+// higher values suppress more (require louder speech to be considered active).
+func (ae *AudioEngine) SetVADThreshold(level int) {
+	ae.vadProc.SetThreshold(level)
 }
 
 // SetBitrate changes the Opus encoder target bitrate (kbps) on the fly.
@@ -400,7 +416,10 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			return
 		}
 
-		if ae.OnSpeaking != nil && computeRMS(buf) > 0.01 && time.Since(lastSpeakEmit) > 80*time.Millisecond {
+		// Compute RMS once; reuse for both speaking detection and VAD.
+		rms := vad.RMS(buf)
+
+		if ae.OnSpeaking != nil && rms > 0.01 && time.Since(lastSpeakEmit) > 80*time.Millisecond {
 			lastSpeakEmit = time.Now()
 			ae.OnSpeaking()
 		}
@@ -416,6 +435,14 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 		// Apply AGC if enabled.
 		if ae.agcEnabled.Load() {
 			ae.agcProc.Process(buf)
+		}
+
+		// Voice activity detection: skip silent frames entirely to save
+		// CPU and bandwidth. Hangover keeps trailing frames so word endings
+		// are not clipped. Re-measure RMS after processing so AGC/noise
+		// changes are reflected in the VAD decision.
+		if !ae.vadProc.ShouldSend(vad.RMS(buf)) {
+			continue
 		}
 
 		// Convert float32 to int16 for Opus encoder.

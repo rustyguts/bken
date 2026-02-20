@@ -34,6 +34,12 @@ func TestDefault(t *testing.T) {
 	if cfg.AGCLevel <= 0 {
 		t.Errorf("expected positive default AGC level, got %d", cfg.AGCLevel)
 	}
+	if !cfg.VADEnabled {
+		t.Error("expected VAD enabled by default")
+	}
+	if cfg.VADThreshold <= 0 {
+		t.Errorf("expected positive default VAD threshold, got %d", cfg.VADThreshold)
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -50,6 +56,8 @@ func TestSaveAndLoad(t *testing.T) {
 		NoiseLevel:     60,
 		AGCEnabled:     true,
 		AGCLevel:       75,
+		VADEnabled:     true,
+		VADThreshold:   40,
 		Servers: []config.ServerEntry{
 			{Name: "Home", Addr: "192.168.1.10:4433"},
 		},
@@ -80,6 +88,12 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.AGCLevel != cfg.AGCLevel {
 		t.Errorf("agc level: want %d got %d", cfg.AGCLevel, loaded.AGCLevel)
+	}
+	if loaded.VADEnabled != cfg.VADEnabled {
+		t.Errorf("vad enabled: want %v got %v", cfg.VADEnabled, loaded.VADEnabled)
+	}
+	if loaded.VADThreshold != cfg.VADThreshold {
+		t.Errorf("vad threshold: want %d got %d", cfg.VADThreshold, loaded.VADThreshold)
 	}
 	if len(loaded.Servers) != 1 || loaded.Servers[0].Addr != "192.168.1.10:4433" {
 		t.Errorf("servers: unexpected value %+v", loaded.Servers)

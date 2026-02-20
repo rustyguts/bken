@@ -17,6 +17,8 @@ export interface Config {
   noise_level: number
   agc_enabled: boolean
   agc_level: number
+  vad_enabled: boolean
+  vad_threshold: number
   servers: ServerEntry[]
 }
 
@@ -39,6 +41,16 @@ export function SetAGC(enabled: boolean): Promise<void> {
 
 export function SetAGCLevel(level: number): Promise<void> {
   return bridge()['SetAGCLevel'](level)
+}
+
+// --- VAD bindings ---
+
+export function SetVAD(enabled: boolean): Promise<void> {
+  return bridge()['SetVAD'](enabled)
+}
+
+export function SetVADThreshold(level: number): Promise<void> {
+  return bridge()['SetVADThreshold'](level)
 }
 
 // --- Per-user local mute bindings ---

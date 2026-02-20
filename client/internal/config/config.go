@@ -19,6 +19,8 @@ type Config struct {
 	NoiseLevel     int           `json:"noise_level"`
 	AGCEnabled     bool          `json:"agc_enabled"`
 	AGCLevel       int           `json:"agc_level"`
+	VADEnabled     bool          `json:"vad_enabled"`
+	VADThreshold   int           `json:"vad_threshold"`
 	Servers        []ServerEntry `json:"servers"`
 }
 
@@ -37,6 +39,8 @@ func Default() Config {
 		NoiseLevel:     80,
 		AGCEnabled:     true,
 		AGCLevel:       50,
+		VADEnabled:     true,
+		VADThreshold:   30,
 		InputDeviceID:  -1,
 		OutputDeviceID: -1,
 		Servers: []ServerEntry{
