@@ -8,34 +8,34 @@ services:
       - ./server:/app
     network_mode: host
 
-  client:
-    build:
-      context: ./client
-      target: dev
-      args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
-    ipc: host
-    network_mode: host
-    environment:
-      - DISPLAY=${DISPLAY}
-      - XAUTHORITY=/tmp/.Xauthority
-      - WEBKIT_DISABLE_COMPOSITING_MODE=1
-      - WEBKIT_DISABLE_DMABUF_RENDERER=1
-      - WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-      - LIBGL_ALWAYS_SOFTWARE=1
-      - GDK_BACKEND=x11
-      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
-      - BKEN_ADDR=localhost:4433
-    volumes:
-      - ./client:/app
-      - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro
-      - /tmp/.X11-unix:/tmp/.X11-unix:ro
-      - ${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0:${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0
-      - client-go-cache:/go
-      - client-node-modules:/app/frontend/node_modules
-    depends_on:
-      - server
+  # client:
+  #   build:
+  #     context: ./client
+  #     target: dev
+  #     args:
+  #       UID: ${UID:-1000}
+  #       GID: ${GID:-1000}
+  #   ipc: host
+  #   network_mode: host
+  #   environment:
+  #     - DISPLAY=${DISPLAY}
+  #     - XAUTHORITY=/tmp/.Xauthority
+  #     - WEBKIT_DISABLE_COMPOSITING_MODE=1
+  #     - WEBKIT_DISABLE_DMABUF_RENDERER=1
+  #     - WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+  #     - LIBGL_ALWAYS_SOFTWARE=1
+  #     - GDK_BACKEND=x11
+  #     - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
+  #     - BKEN_ADDR=localhost:4433
+  #   volumes:
+  #     - ./client:/app
+  #     - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro
+  #     - /tmp/.X11-unix:/tmp/.X11-unix:ro
+  #     - ${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0:${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0
+  #     - client-go-cache:/go
+  #     - client-node-modules:/app/frontend/node_modules
+  #   depends_on:
+  #     - server
 
 volumes:
   client-go-cache:
