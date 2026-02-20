@@ -20,6 +20,8 @@ export interface Config {
   agc_level: number
   vad_enabled: boolean
   vad_threshold: number
+  ptt_enabled: boolean
+  ptt_key: string
   servers: ServerEntry[]
 }
 
@@ -62,6 +64,20 @@ export function SetVAD(enabled: boolean): Promise<void> {
 
 export function SetVADThreshold(level: number): Promise<void> {
   return bridge()['SetVADThreshold'](level)
+}
+
+// --- PTT bindings ---
+
+export function SetPTTMode(enabled: boolean): Promise<void> {
+  return bridge()['SetPTTMode'](enabled)
+}
+
+export function PTTKeyDown(): Promise<void> {
+  return bridge()['PTTKeyDown']()
+}
+
+export function PTTKeyUp(): Promise<void> {
+  return bridge()['PTTKeyUp']()
 }
 
 // --- Per-user local mute bindings ---

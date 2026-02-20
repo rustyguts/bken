@@ -91,6 +91,8 @@ type AudioEngine struct {
 	testMode       atomic.Bool
 	muted          atomic.Bool
 	deafened       atomic.Bool
+	pttMode        atomic.Bool // true = push-to-talk controls transmit
+	pttActive      atomic.Bool // true = PTT key is held, mic is hot
 	currentBitrate atomic.Int32 // kbps; set in Start() and updated by SetBitrate()
 	jitterDepth    atomic.Int32 // target jitter buffer depth; 0 means use default
 
@@ -485,11 +487,19 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			ae.agcProc.Process(buf)
 		}
 
+		// Push-to-talk gate: when PTT mode is enabled, only encode and
+		// send while the PTT key is held. This check runs after AEC and
+		// speaking detection so those subsystems stay primed.
+		if ae.pttMode.Load() && !ae.pttActive.Load() {
+			continue
+		}
+
 		// Voice activity detection: skip silent frames entirely to save
 		// CPU and bandwidth. Hangover keeps trailing frames so word endings
 		// are not clipped. Re-measure RMS after processing so AGC/noise
-		// changes are reflected in the VAD decision.
-		if !ae.vadProc.ShouldSend(vad.RMS(buf)) {
+		// changes are reflected in the VAD decision. Bypassed in PTT mode
+		// since the user explicitly controls transmission.
+		if !ae.pttMode.Load() && !ae.vadProc.ShouldSend(vad.RMS(buf)) {
 			continue
 		}
 
@@ -681,6 +691,33 @@ func (ae *AudioEngine) SetMuted(muted bool) {
 // SetDeafened enables or disables audio playback.
 func (ae *AudioEngine) SetDeafened(deafened bool) {
 	ae.deafened.Store(deafened)
+}
+
+// SetPTTMode enables or disables push-to-talk mode. When enabled, the
+// microphone only transmits while the PTT key is held (pttActive=true).
+// PTT mode is an alternative to VAD — both can be configured, but PTT
+// takes precedence when enabled.
+func (ae *AudioEngine) SetPTTMode(enabled bool) {
+	ae.pttMode.Store(enabled)
+	if !enabled {
+		ae.pttActive.Store(false)
+	}
+}
+
+// SetPTTActive sets whether the push-to-talk key is currently held.
+// Only meaningful when PTT mode is enabled.
+func (ae *AudioEngine) SetPTTActive(active bool) {
+	ae.pttActive.Store(active)
+}
+
+// IsPTTMode reports whether push-to-talk mode is enabled.
+func (ae *AudioEngine) IsPTTMode() bool {
+	return ae.pttMode.Load()
+}
+
+// IsPTTActive reports whether the PTT key is currently held.
+func (ae *AudioEngine) IsPTTActive() bool {
+	return ae.pttActive.Load()
 }
 
 // DroppedFrames returns and resets the capture and playback drop counters.

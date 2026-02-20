@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import Room from './Room.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -33,6 +33,33 @@ const startupAddrHint = ref('')
 const currentRoute = ref<AppRoute>('room')
 const globalUsername = ref('')
 const joiningVoice = ref(false)
+
+// Push-to-Talk state
+const pttEnabled = ref(false)
+const pttKeyCode = ref('Backquote')
+let pttKeyHeld = false // raw flag to ignore key-repeat events
+
+function isTextInput(el: EventTarget | null): boolean {
+  if (!el || !(el instanceof HTMLElement)) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable
+}
+
+function handlePTTKeyDown(e: KeyboardEvent): void {
+  if (!pttEnabled.value || e.code !== pttKeyCode.value) return
+  if (pttKeyHeld) return // ignore key-repeat
+  if (isTextInput(e.target)) return
+  pttKeyHeld = true
+  e.preventDefault()
+  PTTKeyDown()
+}
+
+function handlePTTKeyUp(e: KeyboardEvent): void {
+  if (!pttEnabled.value || e.code !== pttKeyCode.value) return
+  if (!pttKeyHeld) return
+  pttKeyHeld = false
+  PTTKeyUp()
+}
 
 const { reconnecting, reconnectAttempt, reconnectSecondsLeft, startReconnect, cancelReconnect, clearTimers, setLastCredentials } = useReconnect()
 const { speakingUsers, setSpeaking, clearSpeaking, cleanup: cleanupSpeaking } = useSpeakingUsers()
@@ -396,12 +423,23 @@ onMounted(async () => {
     }
   })
 
+  // Register PTT key listeners.
+  window.addEventListener('keydown', handlePTTKeyDown)
+  window.addEventListener('keyup', handlePTTKeyUp)
+  window.addEventListener('ptt-config-changed', ((e: CustomEvent) => {
+    pttEnabled.value = e.detail.enabled
+    pttKeyCode.value = e.detail.key
+    pttKeyHeld = false
+  }) as EventListener)
+
   // Apply saved audio settings before doing anything else so noise suppression,
   // AGC, and volume are active even if the user never opens the settings panel.
   await ApplyConfig()
 
   const cfg = await GetConfig()
   globalUsername.value = cfg.username?.trim() ?? ''
+  pttEnabled.value = cfg.ptt_enabled ?? false
+  pttKeyCode.value = cfg.ptt_key || 'Backquote'
 
   // Generate a default username if none is configured.
   if (!globalUsername.value) {
@@ -439,6 +477,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', syncRouteFromHash)
+  window.removeEventListener('keydown', handlePTTKeyDown)
+  window.removeEventListener('keyup', handlePTTKeyUp)
   EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'chat:message', 'chat:link_preview', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
   clearTimers()
   cleanupSpeaking()

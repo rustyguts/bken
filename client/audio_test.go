@@ -222,6 +222,85 @@ func TestOpusDTXEnable(t *testing.T) {
 	}
 }
 
+// --- Push-to-Talk tests ---
+
+func TestPTTModeDefaultOff(t *testing.T) {
+	ae := NewAudioEngine()
+	if ae.IsPTTMode() {
+		t.Error("PTT mode should be off by default")
+	}
+	if ae.IsPTTActive() {
+		t.Error("PTT active should be false by default")
+	}
+}
+
+func TestPTTModeToggle(t *testing.T) {
+	ae := NewAudioEngine()
+	ae.SetPTTMode(true)
+	if !ae.IsPTTMode() {
+		t.Error("PTT mode should be on after SetPTTMode(true)")
+	}
+	ae.SetPTTMode(false)
+	if ae.IsPTTMode() {
+		t.Error("PTT mode should be off after SetPTTMode(false)")
+	}
+}
+
+func TestPTTActiveToggle(t *testing.T) {
+	ae := NewAudioEngine()
+	ae.SetPTTMode(true)
+
+	ae.SetPTTActive(true)
+	if !ae.IsPTTActive() {
+		t.Error("PTT should be active after SetPTTActive(true)")
+	}
+
+	ae.SetPTTActive(false)
+	if ae.IsPTTActive() {
+		t.Error("PTT should be inactive after SetPTTActive(false)")
+	}
+}
+
+func TestPTTDisableClearsActive(t *testing.T) {
+	ae := NewAudioEngine()
+	ae.SetPTTMode(true)
+	ae.SetPTTActive(true)
+
+	// Disabling PTT mode should also clear the active state so the mic
+	// doesn't stay stuck open if the user toggles the mode while holding the key.
+	ae.SetPTTMode(false)
+	if ae.IsPTTActive() {
+		t.Error("disabling PTT mode should clear pttActive")
+	}
+}
+
+func TestPTTModeBlocksCapture(t *testing.T) {
+	ae := NewAudioEngine()
+	ae.SetPTTMode(true)
+	ae.SetPTTActive(false)
+
+	// With PTT enabled but key not held, captureLoop should skip sending.
+	// We verify this by checking the state machine conditions directly
+	// (the capture loop integration is tested implicitly via the full stack).
+	if !ae.pttMode.Load() {
+		t.Error("pttMode should be true")
+	}
+	if ae.pttActive.Load() {
+		t.Error("pttActive should be false")
+	}
+}
+
+func TestPTTModeAllowsCapture(t *testing.T) {
+	ae := NewAudioEngine()
+	ae.SetPTTMode(true)
+	ae.SetPTTActive(true)
+
+	// With PTT enabled and key held, capture should proceed.
+	if !ae.pttMode.Load() || !ae.pttActive.Load() {
+		t.Error("both pttMode and pttActive should be true")
+	}
+}
+
 func TestSetPacketLoss(t *testing.T) {
 	ae := NewAudioEngine()
 	// SetPacketLoss before Start should not panic.

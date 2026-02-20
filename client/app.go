@@ -207,6 +207,24 @@ func (a *App) SetDeafened(deafened bool) {
 	}
 }
 
+// SetPTTMode enables or disables push-to-talk mode. When enabled, the
+// microphone only transmits while the PTT key is held (via PTTKeyDown/Up).
+func (a *App) SetPTTMode(enabled bool) {
+	a.audio.SetPTTMode(enabled)
+}
+
+// PTTKeyDown signals that the push-to-talk key was pressed. Audio capture
+// begins transmitting immediately. No-op when PTT mode is disabled.
+func (a *App) PTTKeyDown() {
+	a.audio.SetPTTActive(true)
+}
+
+// PTTKeyUp signals that the push-to-talk key was released. Audio capture
+// stops transmitting. No-op when PTT mode is disabled.
+func (a *App) PTTKeyUp() {
+	a.audio.SetPTTActive(false)
+}
+
 // Connect establishes a voice session with the server.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) Connect(addr, username string) string {
@@ -519,6 +537,7 @@ func (a *App) ApplyConfig() {
 	a.audio.SetAGCLevel(cfg.AGCLevel)
 	a.audio.SetVAD(cfg.VADEnabled)
 	a.audio.SetVADThreshold(cfg.VADThreshold)
+	a.audio.SetPTTMode(cfg.PTTEnabled)
 	a.SetNoiseSuppression(cfg.NoiseEnabled)
 	a.SetNoiseSuppressionLevel(cfg.NoiseLevel)
 	if cfg.InputDeviceID >= 0 {

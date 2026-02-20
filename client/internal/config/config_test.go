@@ -43,6 +43,12 @@ func TestDefault(t *testing.T) {
 	if cfg.VADThreshold <= 0 {
 		t.Errorf("expected positive default VAD threshold, got %d", cfg.VADThreshold)
 	}
+	if cfg.PTTEnabled {
+		t.Error("expected PTT disabled by default")
+	}
+	if cfg.PTTKey != "Backquote" {
+		t.Errorf("expected default PTT key 'Backquote', got %q", cfg.PTTKey)
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -62,6 +68,8 @@ func TestSaveAndLoad(t *testing.T) {
 		AGCLevel:       75,
 		VADEnabled:     true,
 		VADThreshold:   40,
+		PTTEnabled:     true,
+		PTTKey:         "Space",
 		Servers: []config.ServerEntry{
 			{Name: "Home", Addr: "192.168.1.10:4433"},
 		},
@@ -101,6 +109,12 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.VADThreshold != cfg.VADThreshold {
 		t.Errorf("vad threshold: want %d got %d", cfg.VADThreshold, loaded.VADThreshold)
+	}
+	if loaded.PTTEnabled != cfg.PTTEnabled {
+		t.Errorf("ptt enabled: want %v got %v", cfg.PTTEnabled, loaded.PTTEnabled)
+	}
+	if loaded.PTTKey != cfg.PTTKey {
+		t.Errorf("ptt key: want %q got %q", cfg.PTTKey, loaded.PTTKey)
 	}
 	if len(loaded.Servers) != 1 || loaded.Servers[0].Addr != "192.168.1.10:4433" {
 		t.Errorf("servers: unexpected value %+v", loaded.Servers)
