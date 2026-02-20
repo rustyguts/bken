@@ -16,6 +16,7 @@ type App struct {
 	transport *Transport
 	nc        *NoiseCanceller
 	connected bool
+	testUser  *TestUser // non-nil when BKEN_TEST_USER is configured
 }
 
 // NewApp creates a new App application struct.
@@ -184,6 +185,22 @@ func (a *App) Connect(addr, username string) string {
 	// Start sending capture → datagrams.
 	go a.sendLoop()
 
+	// Start test user if BKEN_TEST_USER is set.
+	// Value "1" or "true" uses the default name "TestUser"; any other non-empty
+	// value is used as the bot's username directly.
+	if name := os.Getenv("BKEN_TEST_USER"); name != "" {
+		if name == "1" || name == "true" {
+			name = "TestUser"
+		}
+		tu := newTestUser()
+		if err := tu.start(addr, name); err != nil {
+			log.Printf("[app] test user: %v", err)
+		} else {
+			a.testUser = tu
+			log.Printf("[app] test user %q connected to %s", name, addr)
+		}
+	}
+
 	a.connected = true
 	log.Printf("[app] connected to %s as %s", addr, username)
 	return ""
@@ -196,6 +213,10 @@ func (a *App) Disconnect() {
 	}
 	a.audio.Stop()
 	a.transport.Disconnect()
+	if a.testUser != nil {
+		a.testUser.stop()
+		a.testUser = nil
+	}
 	a.connected = false
 	log.Println("[app] disconnected")
 }

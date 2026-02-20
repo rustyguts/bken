@@ -8,7 +8,7 @@ services:
       - ./server:/app
     network_mode: host
 
-  client1:
+  client:
     build:
       context: ./client
       target: dev
@@ -25,6 +25,7 @@ services:
       - WEBKIT_DISABLE_DMABUF_RENDERER=1
       - LIBGL_ALWAYS_SOFTWARE=1
       - BKEN_USERNAME=Brendan
+      - BKEN_TEST_USER=1
       - GOPATH=/go
       - HOME=/tmp
     volumes:
@@ -42,97 +43,3 @@ services:
       - seccomp:unconfined
     depends_on:
       - server
-
-  client2:
-    build:
-      context: ./client
-      target: dev
-      args:
-        UID: ${UID}
-        GID: ${GID}
-    user: "${UID}:${GID}"
-    network_mode: host
-    environment:
-      - DISPLAY=${DISPLAY}
-      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
-      - XAUTHORITY=/tmp/.Xauthority
-      - WEBKIT_DISABLE_COMPOSITING_MODE=1
-      - WEBKIT_DISABLE_DMABUF_RENDERER=1
-      - LIBGL_ALWAYS_SOFTWARE=1
-      - BKEN_USERNAME=Rosie
-      - GOPATH=/go
-      - HOME=/tmp
-    volumes:
-      - ./client:/app
-      - ./client/wails-34116.json:/app/wails.json  # override devServer port for this instance
-      - /app/frontend/dist                  # anonymous: owned by UID at build time
-      - /app/frontend/node_modules          # anonymous: avoids cross-platform issues
-      - /app/frontend/wailsjs/runtime       # anonymous: wails writes runtime files here
-      - /app/build                          # anonymous: compiled binary output
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTHORITY}:/tmp/.Xauthority:ro
-      - ${XDG_RUNTIME_DIR}/pipewire-0:${XDG_RUNTIME_DIR}/pipewire-0
-    devices:
-      - /dev/snd:/dev/snd
-    security_opt:
-      - seccomp:unconfined
-    depends_on:
-      - server
-
-  # ── prod services (opt-in via --profile prod) ────────────────────────────────
-  server-prod:
-    profiles: [prod]
-    build:
-      context: ./server
-      target: prod
-    network_mode: host
-
-  client-prod:
-    profiles: [prod]
-    build:
-      context: ./client
-      target: prod
-    network_mode: host
-    environment:
-      - DISPLAY=${DISPLAY}
-      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
-      - XAUTHORITY=/tmp/.Xauthority
-      - WEBKIT_DISABLE_COMPOSITING_MODE=1
-      - WEBKIT_DISABLE_DMABUF_RENDERER=1
-      - LIBGL_ALWAYS_SOFTWARE=1
-      - BKEN_USERNAME=Brendan
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTHORITY}:/tmp/.Xauthority:ro
-      - ${XDG_RUNTIME_DIR}/pipewire-0:${XDG_RUNTIME_DIR}/pipewire-0
-    devices:
-      - /dev/snd:/dev/snd
-    security_opt:
-      - seccomp:unconfined
-    depends_on:
-      - server-prod
-
-  client2-prod:
-    profiles: [prod]
-    build:
-      context: ./client
-      target: prod
-    network_mode: host
-    environment:
-      - DISPLAY=${DISPLAY}
-      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
-      - XAUTHORITY=/tmp/.Xauthority
-      - WEBKIT_DISABLE_COMPOSITING_MODE=1
-      - WEBKIT_DISABLE_DMABUF_RENDERER=1
-      - LIBGL_ALWAYS_SOFTWARE=1
-      - BKEN_USERNAME=Rosie
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ${XAUTHORITY}:/tmp/.Xauthority:ro
-      - ${XDG_RUNTIME_DIR}/pipewire-0:${XDG_RUNTIME_DIR}/pipewire-0
-    devices:
-      - /dev/snd:/dev/snd
-    security_opt:
-      - seccomp:unconfined
-    depends_on:
-      - server-prod
