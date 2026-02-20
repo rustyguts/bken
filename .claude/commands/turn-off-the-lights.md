@@ -30,7 +30,6 @@ This is a client/server voice over ip application. Clients running the bken desk
   - Database should have safe and reliable migrations that can grow over time
 - Client should follow daisy ui for all UI styling
 - Users should be able to move between channels
-- Users should be able to mute other users
 - Users should be able to connect to multiple servers and switch between them
 - Users should hear sound indicating actions occuring in the app (like mute, defen, join, leave, etc)
 - UI: The inteface should always remain simple, clean, modern
@@ -59,3 +58,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Client should also have state (JSON config file at ~/.config/bken/config.json)
 - Reliable connection and disconnection between client and server
 - Optimized Opus audio transmission rate based on connection speed to server
+- Users can mute other users locally (client-side, no server involvement)
