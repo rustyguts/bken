@@ -136,11 +136,21 @@ func (a *App) StopTest() {
 // SetMuted mutes or unmutes the microphone.
 func (a *App) SetMuted(muted bool) {
 	a.audio.SetMuted(muted)
+	if muted {
+		a.audio.PlayNotification(SoundMute)
+	} else {
+		a.audio.PlayNotification(SoundUnmute)
+	}
 }
 
 // SetDeafened enables or disables audio playback.
 func (a *App) SetDeafened(deafened bool) {
 	a.audio.SetDeafened(deafened)
+	if deafened {
+		a.audio.PlayNotification(SoundMute)
+	} else {
+		a.audio.PlayNotification(SoundUnmute)
+	}
 }
 
 // Connect establishes a voice session with the server.
@@ -165,6 +175,8 @@ func (a *App) Connect(addr, username string) string {
 	go a.sendLoop()
 	go a.adaptBitrateLoop(a.audio.Done())
 
+	a.audio.PlayNotification(SoundConnect)
+
 	if err := a.startTestUser(addr); err != nil {
 		log.Printf("[app] test user: %v", err)
 	}
@@ -182,9 +194,11 @@ func (a *App) wireCallbacks() {
 	})
 	a.transport.SetOnUserJoined(func(id uint16, name string) {
 		runtime.EventsEmit(a.ctx, "user:joined", map[string]interface{}{"id": id, "username": name})
+		a.audio.PlayNotification(SoundUserJoined)
 	})
 	a.transport.SetOnUserLeft(func(id uint16) {
 		runtime.EventsEmit(a.ctx, "user:left", map[string]interface{}{"id": id})
+		a.audio.PlayNotification(SoundUserLeft)
 	})
 	a.transport.SetOnAudioReceived(func(userID uint16) {
 		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(userID)})

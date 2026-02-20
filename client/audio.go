@@ -67,6 +67,9 @@ type AudioEngine struct {
 	CaptureOut chan []byte
 	// PlaybackIn carries encoded Opus frames received from the network.
 	PlaybackIn chan []byte
+	// notifCh carries pre-chunked raw PCM float32 frames (frameSize each)
+	// synthesised by PlayNotification. Mixed into the output after voice decoding.
+	notifCh chan []float32
 
 	running        atomic.Bool
 	testMode       atomic.Bool
@@ -79,6 +82,10 @@ type AudioEngine struct {
 	OnSpeaking func()         // called (throttled) when mic audio exceeds speaking threshold
 }
 
+// notifChannelBuf is the number of 20 ms PCM frames the notification channel
+// can buffer — enough for ~4 s of queued notification audio.
+const notifChannelBuf = 200
+
 // NewAudioEngine returns an AudioEngine with default settings.
 func NewAudioEngine() *AudioEngine {
 	return &AudioEngine{
@@ -87,6 +94,7 @@ func NewAudioEngine() *AudioEngine {
 		volume:         1.0,
 		CaptureOut:     make(chan []byte, captureChannelBuf),
 		PlaybackIn:     make(chan []byte, playbackChannelBuf),
+		notifCh:        make(chan []float32, notifChannelBuf),
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -265,6 +273,7 @@ func (ae *AudioEngine) Start() error {
 	ae.captureStream = captureStream
 	ae.playbackStream = playbackStream
 	ae.stopCh = make(chan struct{})
+	ae.notifCh = make(chan []float32, notifChannelBuf)
 	ae.running.Store(true)
 
 	ae.wg.Add(2)
@@ -453,6 +462,16 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 		default:
 			// No packet ready — output silence to keep the stream fed.
 			zeroFloat32(buf)
+		}
+
+		// Mix in one notification frame if available. Notifications bypass the
+		// deafen check so UI sounds (mute, join/leave) are always audible.
+		select {
+		case notifFrame := <-ae.notifCh:
+			for i, s := range notifFrame {
+				buf[i] = clampFloat32(buf[i] + s)
+			}
+		default:
 		}
 
 		if err := ae.playbackStream.Write(); err != nil {
