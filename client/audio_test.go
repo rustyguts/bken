@@ -205,6 +205,23 @@ func TestOpusFECRecoveryAfterLoss(t *testing.T) {
 	}
 }
 
+func TestOpusDTXEnable(t *testing.T) {
+	enc, err := opus.NewEncoder(sampleRate, channels, opus.AppVoIP)
+	if err != nil {
+		t.Fatalf("new encoder: %v", err)
+	}
+	if err := enc.SetDTX(true); err != nil {
+		t.Fatalf("SetDTX(true): %v", err)
+	}
+	dtx, err := enc.DTX()
+	if err != nil {
+		t.Fatalf("DTX(): %v", err)
+	}
+	if !dtx {
+		t.Error("DTX should be true after SetDTX(true)")
+	}
+}
+
 func TestSetPacketLoss(t *testing.T) {
 	ae := NewAudioEngine()
 	// SetPacketLoss before Start should not panic.

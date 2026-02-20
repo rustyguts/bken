@@ -78,6 +78,7 @@ type ChannelInfo struct {
 type Metrics struct {
 	RTTMs          float64 `json:"rtt_ms"`
 	PacketLoss     float64 `json:"packet_loss"`      // 0.0–1.0
+	JitterMs       float64 `json:"jitter_ms"`        // inter-arrival jitter (smoothed)
 	BitrateKbps    float64 `json:"bitrate_kbps"`     // measured outgoing audio
 	OpusTargetKbps int     `json:"opus_target_kbps"` // current encoder target
 }
@@ -114,6 +115,10 @@ type Transport struct {
 	// Packet loss accounting via incoming sequence-gap detection.
 	lostPackets     atomic.Uint64
 	expectedPackets atomic.Uint64
+
+	// Inter-arrival jitter: EWMA of |actual_gap - 20ms| across all senders,
+	// stored as float64 bits for atomic access. Units: milliseconds.
+	smoothedJitter atomic.Uint64
 
 	// muted holds the set of remote user IDs whose audio is suppressed locally.
 	muted mutedSet
@@ -432,6 +437,7 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 
 	// Reset per-session metrics.
 	t.smoothedRTT.Store(0)
+	t.smoothedJitter.Store(0)
 	t.bytesSent.Store(0)
 	t.lostPackets.Store(0)
 	t.expectedPackets.Store(0)
@@ -534,9 +540,13 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- Tagged
 	go func() {
 		defer cancel()
 		speakTimers := make(map[uint16]time.Time)
-		lastSeq := make(map[uint16]uint16) // senderID → last received seq
-		lastSeen := make(map[uint16]time.Time) // senderID → last packet time
+		lastSeq := make(map[uint16]uint16)      // senderID → last received seq
+		lastSeen := make(map[uint16]time.Time)   // senderID → last packet time
+		lastArrival := make(map[uint16]time.Time) // senderID → arrival time of previous packet
 		var pruneCounter int
+
+		const expectedGapMs = 20.0 // one Opus frame = 20 ms
+		const jitterAlpha = 1.0 / 16.0 // RFC 3550 jitter gain
 
 		for {
 			data, err := sess.ReceiveDatagram(rctx)
@@ -572,6 +582,24 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- Tagged
 			lastSeq[userID] = seq
 			lastSeen[userID] = now
 
+			// Inter-arrival jitter: measure |actual_gap - expected_gap| and
+			// smooth with EWMA (gain 1/16, per RFC 3550). Only count samples
+			// where the gap is < 100 ms to avoid VAD silence gaps inflating
+			// the jitter estimate.
+			if prev, ok := lastArrival[userID]; ok {
+				gapMs := float64(now.Sub(prev).Microseconds()) / 1000.0
+				if gapMs < 100.0 {
+					d := gapMs - expectedGapMs
+					if d < 0 {
+						d = -d
+					}
+					old := math.Float64frombits(t.smoothedJitter.Load())
+					next := old + jitterAlpha*(d-old)
+					t.smoothedJitter.Store(math.Float64bits(next))
+				}
+			}
+			lastArrival[userID] = now
+
 			// Speaking notification, throttled per user to ~80 ms.
 			t.cbMu.RLock()
 			onAudio := t.onAudioReceived
@@ -593,6 +621,7 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- Tagged
 						delete(lastSeen, id)
 						delete(lastSeq, id)
 						delete(speakTimers, id)
+						delete(lastArrival, id)
 					}
 				}
 			}
@@ -631,10 +660,12 @@ func (t *Transport) GetMetrics() Metrics {
 	}
 
 	rtt := math.Float64frombits(t.smoothedRTT.Load())
+	jitterMs := math.Float64frombits(t.smoothedJitter.Load())
 
 	return Metrics{
 		RTTMs:       rtt,
 		PacketLoss:  loss,
+		JitterMs:    jitterMs,
 		BitrateKbps: bitrate,
 	}
 }

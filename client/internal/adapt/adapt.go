@@ -1,6 +1,8 @@
-// Package adapt provides adaptive Opus bitrate selection based on connection
-// quality metrics (packet loss rate and round-trip time).
+// Package adapt provides adaptive Opus bitrate selection and jitter buffer
+// depth tuning based on connection quality metrics.
 package adapt
+
+import "math"
 
 // Ladder is the ordered list of Opus target bitrate steps in kbps.
 // The range covers from barely-intelligible emergency quality (8 kbps)
@@ -49,4 +51,44 @@ func iabs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// DefaultJitterDepth is the jitter buffer depth used when no jitter data is
+// available (e.g. before any packets are received). 3 frames = 60 ms.
+const DefaultJitterDepth = 3
+
+const (
+	frameDurationMs = 20.0 // one Opus frame = 20 ms
+	minDepth        = 1
+	maxDepth        = 8
+)
+
+// TargetJitterDepth computes the optimal jitter buffer depth (in 20 ms frames)
+// from the measured inter-arrival jitter (ms) and loss rate (0.0–1.0).
+//
+// Depth = ceil(jitterMs / 20) + 1, with a +1 bonus when loss > 5%.
+// Returns DefaultJitterDepth when jitterMs is 0 (no measurement).
+// Result is clamped to [1, 8].
+func TargetJitterDepth(jitterMs float64, lossRate float64) int {
+	if jitterMs <= 0 {
+		return DefaultJitterDepth
+	}
+	depth := int(math.Ceil(jitterMs/frameDurationMs)) + 1
+	if lossRate > 0.05 {
+		depth++
+	}
+	if depth < minDepth {
+		depth = minDepth
+	}
+	if depth > maxDepth {
+		depth = maxDepth
+	}
+	return depth
+}
+
+// SmoothLoss applies exponentially weighted moving average smoothing to a
+// raw packet loss measurement. alpha controls the weight of the new sample
+// (0.0 = ignore new, 1.0 = ignore old). Typical alpha: 0.3.
+func SmoothLoss(smoothed, raw, alpha float64) float64 {
+	return alpha*raw + (1-alpha)*smoothed
 }

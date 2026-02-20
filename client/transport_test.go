@@ -300,6 +300,39 @@ func TestConnectTimeoutConstant(t *testing.T) {
 	}
 }
 
+func TestMetricsIncludesJitter(t *testing.T) {
+	tr := NewTransport()
+	// Initially jitter should be 0.
+	m := tr.GetMetrics()
+	if m.JitterMs != 0 {
+		t.Errorf("initial JitterMs = %f, want 0", m.JitterMs)
+	}
+}
+
+func TestJitterFieldInMetricsJSON(t *testing.T) {
+	m := Metrics{
+		RTTMs:       10.5,
+		PacketLoss:  0.02,
+		JitterMs:    3.5,
+		BitrateKbps: 32.0,
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	jitter, ok := out["jitter_ms"]
+	if !ok {
+		t.Fatal("jitter_ms field missing from Metrics JSON")
+	}
+	if jitter.(float64) != 3.5 {
+		t.Errorf("jitter_ms = %v, want 3.5", jitter)
+	}
+}
+
 func TestPongTimeoutConstant(t *testing.T) {
 	// Ensure the pong timeout is reasonable (between 3s and 15s).
 	if pongTimeout < 3*time.Second || pongTimeout > 15*time.Second {

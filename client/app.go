@@ -397,27 +397,40 @@ func (a *App) GetMetrics() Metrics {
 }
 
 // adaptBitrateLoop polls transport metrics every 5 s, adapts the Opus encoder
-// bitrate based on observed packet loss and RTT, then caches the metrics for
-// the frontend. It exits when done is closed (i.e. when audio stops).
+// bitrate and jitter buffer depth based on observed network conditions, then
+// caches the metrics for the frontend. It exits when done is closed (i.e. when
+// audio stops).
 func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+
+	const lossAlpha = 0.3 // EWMA weight for new loss sample
+	var smoothedLoss float64
+
 	for {
 		select {
 		case <-done:
 			return
 		case <-ticker.C:
 			m := a.transport.GetMetrics()
+
+			// Smooth the raw loss with EWMA to prevent FEC oscillation.
+			smoothedLoss = adapt.SmoothLoss(smoothedLoss, m.PacketLoss, lossAlpha)
+
 			currentKbps := a.audio.CurrentBitrate()
-			nextKbps := adapt.NextBitrate(currentKbps, m.PacketLoss, m.RTTMs)
+			nextKbps := adapt.NextBitrate(currentKbps, smoothedLoss, m.RTTMs)
 			if nextKbps != currentKbps {
-				log.Printf("[app] adapting bitrate %d→%d kbps (loss=%.1f%% rtt=%.0fms)",
-					currentKbps, nextKbps, m.PacketLoss*100, m.RTTMs)
+				log.Printf("[app] adapting bitrate %d→%d kbps (loss=%.1f%% smoothed=%.1f%% rtt=%.0fms)",
+					currentKbps, nextKbps, m.PacketLoss*100, smoothedLoss*100, m.RTTMs)
 				a.audio.SetBitrate(nextKbps)
 			}
-			// Feed measured packet loss into the Opus encoder so it tunes
-			// how much FEC redundancy to embed in each frame.
-			a.audio.SetPacketLoss(int(m.PacketLoss * 100))
+			// Feed smoothed loss into the Opus encoder for FEC tuning.
+			a.audio.SetPacketLoss(int(smoothedLoss * 100))
+
+			// Adapt jitter buffer depth based on measured jitter and loss.
+			targetDepth := adapt.TargetJitterDepth(m.JitterMs, smoothedLoss)
+			a.audio.SetJitterDepth(targetDepth)
+
 			m.OpusTargetKbps = nextKbps
 			a.metricsMu.Lock()
 			a.cachedMetrics = m

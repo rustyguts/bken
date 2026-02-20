@@ -352,6 +352,59 @@ func TestActiveSenders(t *testing.T) {
 	}
 }
 
+func TestSetDepthClamps(t *testing.T) {
+	b := New(3)
+
+	b.SetDepth(0)
+	if b.Depth() != 1 {
+		t.Errorf("SetDepth(0) should clamp to 1, got %d", b.Depth())
+	}
+
+	b.SetDepth(100)
+	if b.Depth() != ringSize/2 {
+		t.Errorf("SetDepth(100) should clamp to %d, got %d", ringSize/2, b.Depth())
+	}
+
+	b.SetDepth(5)
+	if b.Depth() != 5 {
+		t.Errorf("SetDepth(5) should set to 5, got %d", b.Depth())
+	}
+}
+
+func TestSetDepthAffectsNewStreams(t *testing.T) {
+	b := New(2)
+
+	// Prime sender 1 with depth=2.
+	b.Push(1, 10, []byte{10})
+	b.Push(1, 11, []byte{11})
+	if b.ActiveSenders() != 1 {
+		t.Fatal("sender 1 should be primed")
+	}
+
+	// Change depth to 4. Sender 1 is already primed; new senders should use depth=4.
+	b.SetDepth(4)
+
+	// New sender 2 needs 4 frames to prime.
+	b.Push(2, 0, []byte{0})
+	b.Push(2, 1, []byte{1})
+	b.Push(2, 2, []byte{2})
+	if b.ActiveSenders() != 1 {
+		t.Error("sender 2 should NOT be primed after 3 frames with depth=4")
+	}
+
+	b.Push(2, 3, []byte{3})
+	if b.ActiveSenders() != 2 {
+		t.Error("sender 2 should be primed after 4 frames")
+	}
+}
+
+func TestDepthGetter(t *testing.T) {
+	b := New(5)
+	if b.Depth() != 5 {
+		t.Errorf("Depth() = %d, want 5", b.Depth())
+	}
+}
+
 func TestPrimingDoesNotConsume(t *testing.T) {
 	b := New(3)
 

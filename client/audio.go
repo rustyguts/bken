@@ -45,6 +45,7 @@ type paStream interface {
 type opusEncoder interface {
 	Encode(pcm []int16, data []byte) (int, error)
 	SetBitrate(bitrate int) error
+	SetDTX(dtx bool) error
 	SetInBandFEC(fec bool) error
 	SetPacketLossPerc(lossPerc int) error
 }
@@ -91,6 +92,7 @@ type AudioEngine struct {
 	muted          atomic.Bool
 	deafened       atomic.Bool
 	currentBitrate atomic.Int32 // kbps; set in Start() and updated by SetBitrate()
+	jitterDepth    atomic.Int32 // target jitter buffer depth; 0 means use default
 
 	stopCh     chan struct{}
 	wg         sync.WaitGroup // tracks captureLoop + playbackLoop goroutines
@@ -240,6 +242,13 @@ func (ae *AudioEngine) CurrentBitrate() int {
 	return int(ae.currentBitrate.Load())
 }
 
+// SetJitterDepth updates the target jitter buffer depth (in 20 ms frames).
+// The playback loop reads this value and applies it on the next cycle.
+// Safe to call concurrently from adaptBitrateLoop.
+func (ae *AudioEngine) SetJitterDepth(frames int) {
+	ae.jitterDepth.Store(int32(frames))
+}
+
 // SetPacketLoss tells the Opus encoder the expected packet loss percentage
 // so it can tune how much FEC redundancy to embed. lossPercent is clamped
 // to [0, 100]. Called by adaptBitrateLoop every 5 s with measured loss.
@@ -273,6 +282,7 @@ func (ae *AudioEngine) Start() error {
 		return err
 	}
 	enc.SetBitrate(opusBitrate)
+	enc.SetDTX(true)
 	enc.SetInBandFEC(true)
 	enc.SetPacketLossPerc(5) // initial estimate; updated by adaptBitrateLoop
 	ae.encoder = enc
@@ -522,6 +532,7 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 	decoders := make(map[uint16]opusDecoder)
 	jb := jitter.New(jitterDepth)
 	var pruneCounter int
+	currentDepth := jitterDepth
 
 	for {
 		// Check for stop before every write cycle.
@@ -529,6 +540,12 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 		case <-ae.stopCh:
 			return
 		default:
+		}
+
+		// Apply dynamic jitter depth if adaptBitrateLoop updated it.
+		if d := int(ae.jitterDepth.Load()); d > 0 && d != currentDepth {
+			jb.SetDepth(d)
+			currentDepth = d
 		}
 
 		// Drain all available tagged frames into the jitter buffer.

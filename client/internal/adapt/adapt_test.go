@@ -1,6 +1,9 @@
 package adapt
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestNextBitrateStepsDown(t *testing.T) {
 	// High packet loss should lower the bitrate.
@@ -75,5 +78,90 @@ func TestStepIndex(t *testing.T) {
 		if got := stepIndex(step); got != i {
 			t.Errorf("stepIndex(%d) = %d, want %d", step, got, i)
 		}
+	}
+}
+
+// --- TargetJitterDepth tests ---
+
+func TestTargetJitterDepthNoData(t *testing.T) {
+	got := TargetJitterDepth(0, 0)
+	if got != DefaultJitterDepth {
+		t.Errorf("no jitter data: got %d, want %d", got, DefaultJitterDepth)
+	}
+}
+
+func TestTargetJitterDepthLowJitter(t *testing.T) {
+	// 0.5 ms jitter → ceil(0.5/20) + 1 = 1 + 1 = 2
+	got := TargetJitterDepth(0.5, 0)
+	if got != 2 {
+		t.Errorf("low jitter: got %d, want 2", got)
+	}
+}
+
+func TestTargetJitterDepthModerateJitter(t *testing.T) {
+	// 30 ms jitter → ceil(30/20) + 1 = 2 + 1 = 3
+	got := TargetJitterDepth(30, 0)
+	if got != 3 {
+		t.Errorf("moderate jitter: got %d, want 3", got)
+	}
+}
+
+func TestTargetJitterDepthHighJitter(t *testing.T) {
+	// 80 ms jitter → ceil(80/20) + 1 = 4 + 1 = 5
+	got := TargetJitterDepth(80, 0)
+	if got != 5 {
+		t.Errorf("high jitter: got %d, want 5", got)
+	}
+}
+
+func TestTargetJitterDepthLossBonus(t *testing.T) {
+	// 30 ms jitter + 10% loss → ceil(30/20) + 1 + 1 = 4
+	got := TargetJitterDepth(30, 0.10)
+	if got != 4 {
+		t.Errorf("jitter + loss: got %d, want 4", got)
+	}
+}
+
+func TestTargetJitterDepthMaxClamp(t *testing.T) {
+	// 200 ms jitter → ceil(200/20) + 1 = 11 → clamped to 8
+	got := TargetJitterDepth(200, 0)
+	if got != 8 {
+		t.Errorf("max clamp: got %d, want 8", got)
+	}
+}
+
+func TestTargetJitterDepthNegativeJitter(t *testing.T) {
+	got := TargetJitterDepth(-5, 0)
+	if got != DefaultJitterDepth {
+		t.Errorf("negative jitter: got %d, want %d", got, DefaultJitterDepth)
+	}
+}
+
+// --- SmoothLoss tests ---
+
+func TestSmoothLossFromZero(t *testing.T) {
+	got := SmoothLoss(0, 0.10, 0.3)
+	want := 0.03
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("from zero: got %f, want %f", got, want)
+	}
+}
+
+func TestSmoothLossConverges(t *testing.T) {
+	// Starting from 0, feeding constant 10% loss, should converge towards 0.10.
+	smoothed := 0.0
+	for i := 0; i < 50; i++ {
+		smoothed = SmoothLoss(smoothed, 0.10, 0.3)
+	}
+	if math.Abs(smoothed-0.10) > 0.001 {
+		t.Errorf("after 50 iterations: got %f, want ~0.10", smoothed)
+	}
+}
+
+func TestSmoothLossSpikeDampened(t *testing.T) {
+	// Stable at 0, one 50% spike should not immediately jump.
+	smoothed := SmoothLoss(0, 0.50, 0.3)
+	if smoothed > 0.20 {
+		t.Errorf("spike should be dampened: got %f, want < 0.20", smoothed)
 	}
 }

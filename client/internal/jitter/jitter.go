@@ -149,6 +149,25 @@ func (b *Buffer) Pop() []Frame {
 	return frames
 }
 
+// SetDepth updates the buffering depth (in 20 ms frames) for future streams.
+// Existing primed streams continue with their current state; new or reset
+// streams will use the updated depth. Not safe for concurrent use with
+// Push/Pop — call from the same goroutine (playbackLoop).
+func (b *Buffer) SetDepth(d int) {
+	if d < 1 {
+		d = 1
+	}
+	if d > ringSize/2 {
+		d = ringSize / 2
+	}
+	b.depth = d
+}
+
+// Depth returns the current buffering depth (in 20 ms frames).
+func (b *Buffer) Depth() int {
+	return b.depth
+}
+
 // Reset clears all buffered state (e.g. on disconnect).
 func (b *Buffer) Reset() {
 	b.streams = make(map[uint16]*stream)
