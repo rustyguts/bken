@@ -74,8 +74,16 @@ jobs:
       - name: Install macOS dependencies
         if: matrix.build.name == 'macos'
         run: |
-          brew install portaudio opus opusfile rnnoise
-          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+          brew install portaudio opus opusfile autoconf automake libtool pkg-config
+
+          git clone --depth 1 https://github.com/xiph/rnnoise.git /tmp/rnnoise
+          cd /tmp/rnnoise
+          ./autogen.sh
+          ./configure --prefix="$HOME/.local" --disable-shared --enable-static
+          make -j"$(sysctl -n hw.ncpu)"
+          make install
+
+          echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Install Windows dependencies
         if: matrix.build.name == 'windows'
@@ -99,6 +107,10 @@ jobs:
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: client/frontend
 
       - name: Build
         run: wails build ${{ matrix.build.wails-flags }}
