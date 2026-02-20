@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+env:
+  NODE_OPTIONS: "--max-old-space-size=4096"
+
 jobs:
   server-binary:
     name: "Server: standalone binary"
@@ -29,20 +32,38 @@ jobs:
       - name: Build Docker image
         run: docker build -t bken-server ./server
 
-  client-linux:
-    name: "Client: Linux"
-    runs-on: ubuntu-latest
+  client:
+    name: "Client: ${{ matrix.build.name }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - name: linux
+            os: ubuntu-latest
+            wails-flags: -tags webkit2_41
+          - name: macos
+            os: macos-latest
+            wails-flags: ""
+          - name: windows
+            os: windows-latest
+            wails-flags: ""
+
+    runs-on: ${{ matrix.build.os }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: client/go.mod
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: client/frontend/package-lock.json
-      - name: Install system dependencies
+
+      - name: Install Linux dependencies
+        if: matrix.build.name == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -56,55 +77,16 @@ jobs:
             libtool
           git clone https://github.com/xiph/rnnoise.git
           cd rnnoise && ./autogen.sh && ./configure --prefix=/usr && make && sudo make install
-      - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-      - name: Build
-        run: wails build -tags webkit2_41
-        working-directory: client
-      - uses: actions/upload-artifact@v4
-        with:
-          name: client-linux-amd64
-          path: client/build/bin/client
 
-  client-macos:
-    name: "Client: macOS"
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: client/go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: client/frontend/package-lock.json
-      - name: Install system dependencies
-        run: brew install portaudio opus opusfile rnnoise
-      - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-      - name: Build
-        run: wails build
-        working-directory: client
-      - uses: actions/upload-artifact@v4
-        with:
-          name: client-macos-arm64
-          path: client/build/bin/*
+      - name: Install macOS dependencies
+        if: matrix.build.name == 'macos'
+        run: |
+          brew install portaudio opus opusfile rnnoise
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
 
-  client-windows:
-    name: "Client: Windows"
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: client/go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: client/frontend/package-lock.json
-      - uses: msys2/setup-msys2@v2
+      - name: Install Windows dependencies
+        if: matrix.build.name == 'windows'
+        uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: false
@@ -114,17 +96,22 @@ jobs:
             mingw-w64-x86_64-portaudio
             mingw-w64-x86_64-opus
             mingw-w64-x86_64-rnnoise
-      - name: Configure CGO environment
+
+      - name: Configure Windows CGO environment
+        if: matrix.build.name == 'windows'
         shell: bash
         run: |
           echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
           echo "PKG_CONFIG_PATH=C:/msys64/mingw64/lib/pkgconfig" >> "$GITHUB_ENV"
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
       - name: Build
+        run: wails build ${{ matrix.build.wails-flags }}
         working-directory: client
-        run: wails build
+
       - uses: actions/upload-artifact@v4
         with:
-          name: client-windows-amd64
-          path: client/build/bin/client.exe
+          name: client-${{ matrix.build.name }}
+          path: client/build/bin/*

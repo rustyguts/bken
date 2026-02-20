@@ -351,48 +351,55 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 	pcm := make([]int16, frameSize)
 
 	for {
+		// Check for stop before every write.
 		select {
 		case <-ae.stopCh:
 			return
+		default:
+		}
+
+		// Non-blocking receive: decode a packet if one is ready, otherwise
+		// write silence. playbackStream.Write() blocks until the hardware
+		// buffer needs more samples, so it naturally paces this loop at the
+		// correct rate without an external ticker. Blocking here on the
+		// channel would starve the stream during silence gaps and underflow.
+		select {
 		case data := <-ae.PlaybackIn:
 			if ae.deafened.Load() {
-				// Write silence to keep the stream alive.
 				for i := range buf {
 					buf[i] = 0
 				}
-				if err := ae.playbackStream.Write(); err != nil {
-					if ae.running.Load() {
-						log.Printf("[audio] playback write: %v", err)
+			} else {
+				n, err := ae.decoder.Decode(data, pcm)
+				if err != nil {
+					log.Printf("[audio] decode: %v", err)
+					for i := range buf {
+						buf[i] = 0
 					}
-					return
+				} else {
+					ae.mu.Lock()
+					vol := ae.volume
+					ae.mu.Unlock()
+					for i := 0; i < n; i++ {
+						buf[i] = float32(pcm[i]) / 32768.0 * float32(vol)
+					}
+					for i := n; i < frameSize; i++ {
+						buf[i] = 0
+					}
 				}
-				continue
 			}
-			n, err := ae.decoder.Decode(data, pcm)
-			if err != nil {
-				log.Printf("[audio] decode: %v", err)
-				continue
-			}
-
-			ae.mu.Lock()
-			vol := ae.volume
-			ae.mu.Unlock()
-
-			// Convert int16 to float32 with volume.
-			for i := 0; i < n; i++ {
-				buf[i] = float32(pcm[i]) / 32768.0 * float32(vol)
-			}
-			// Zero out remaining samples.
-			for i := n; i < frameSize; i++ {
+		default:
+			// No packet ready — output silence to keep the stream fed.
+			for i := range buf {
 				buf[i] = 0
 			}
+		}
 
-			if err := ae.playbackStream.Write(); err != nil {
-				if ae.running.Load() {
-					log.Printf("[audio] playback write: %v", err)
-				}
-				return
+		if err := ae.playbackStream.Write(); err != nil {
+			if ae.running.Load() {
+				log.Printf("[audio] playback write: %v", err)
 			}
+			return
 		}
 	}
 }
