@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,6 +165,18 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		if target.closer != nil {
 			target.closer.Close()
 		}
+	case "rename":
+		// Only the room owner may rename the server.
+		if room.OwnerID() != client.ID {
+			return
+		}
+		name := strings.TrimSpace(msg.ServerName)
+		if name == "" || len(name) > 50 {
+			return
+		}
+		room.Rename(name)
+		room.BroadcastControl(ControlMsg{Type: "server_info", ServerName: name}, 0)
+		log.Printf("[client %d] %s renamed server to %q", client.ID, client.Username, name)
 	}
 }
 

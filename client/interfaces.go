@@ -35,4 +35,7 @@ type Transporter interface {
 
 	// Moderation.
 	KickUser(id uint16) error
+
+	// Server management (owner-only; server enforces).
+	RenameServer(name string) error
 }

@@ -210,7 +210,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="flex flex-col h-full">
-    <TitleBar :server-name="serverName" />
+    <TitleBar :server-name="serverName" :is-owner="ownerID !== 0 && ownerID === myID" />
     <Transition name="slide-down">
       <ReconnectBanner
         v-if="reconnecting"

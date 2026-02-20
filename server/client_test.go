@@ -268,6 +268,91 @@ func TestProcessControlKickUnknownTarget(t *testing.T) {
 	}
 }
 
+// --- processControl: rename ---
+
+func TestProcessControlRenameByOwner(t *testing.T) {
+	room := NewRoom()
+	var persisted string
+	room.SetOnRename(func(name string) { persisted = name })
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "rename", ServerName: "  Cool Server  "}, owner, room)
+
+	if room.ServerName() != "Cool Server" {
+		t.Errorf("ServerName: got %q, want %q", room.ServerName(), "Cool Server")
+	}
+	if persisted != "Cool Server" {
+		t.Errorf("onRename callback: got %q, want %q", persisted, "Cool Server")
+	}
+}
+
+func TestProcessControlRenameByNonOwner(t *testing.T) {
+	room := NewRoom()
+	owner, _ := newCtrlClient("alice")
+	attacker, _ := newCtrlClient("eve")
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.ClaimOwnership(owner.ID)
+	room.Rename("Original")
+
+	var renameCalled bool
+	room.SetOnRename(func(_ string) { renameCalled = true })
+
+	processControl(ControlMsg{Type: "rename", ServerName: "Hacked"}, attacker, room)
+
+	if room.ServerName() != "Original" {
+		t.Errorf("non-owner rename should be ignored, got %q", room.ServerName())
+	}
+	if renameCalled {
+		t.Error("onRename callback should not fire for non-owner")
+	}
+}
+
+func TestProcessControlRenameEmpty(t *testing.T) {
+	room := NewRoom()
+	room.Rename("Original")
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "rename", ServerName: "   "}, owner, room)
+
+	if room.ServerName() != "Original" {
+		t.Errorf("empty rename should be ignored, got %q", room.ServerName())
+	}
+}
+
+func TestProcessControlRenameTooLong(t *testing.T) {
+	room := NewRoom()
+	room.Rename("Original")
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "rename", ServerName: string(make([]byte, 51))}, owner, room)
+
+	if room.ServerName() != "Original" {
+		t.Errorf("51-char rename should be ignored, got %q", room.ServerName())
+	}
+}
+
+func TestProcessControlRenameExactly50Chars(t *testing.T) {
+	room := NewRoom()
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	name50 := "12345678901234567890123456789012345678901234567890" // 50 chars
+	processControl(ControlMsg{Type: "rename", ServerName: name50}, owner, room)
+
+	if room.ServerName() != name50 {
+		t.Errorf("50-char rename should succeed, got %q", room.ServerName())
+	}
+}
+
 // --- processControl: unknown type ---
 
 func TestProcessControlUnknownTypeIsIgnored(t *testing.T) {

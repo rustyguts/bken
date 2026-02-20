@@ -397,6 +397,16 @@ func (a *App) GetMutedUsers() []int {
 	return out
 }
 
+// RenameServer updates the server name. Only succeeds if the caller is the
+// room owner; the server enforces the check and broadcasts the update.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RenameServer(name string) string {
+	if err := a.transport.RenameServer(name); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // KickUser removes the given user from the server. Only succeeds if the
 // caller is the room owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).

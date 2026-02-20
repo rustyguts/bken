@@ -89,3 +89,7 @@ export function SendChat(message: string): Promise<string> {
 export function KickUser(id: number): Promise<string> {
   return bridge()['KickUser'](id)
 }
+
+export function RenameServer(name: string): Promise<string> {
+  return bridge()['RenameServer'](name)
+}

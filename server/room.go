@@ -16,8 +16,9 @@ type DatagramSender interface {
 type Room struct {
 	mu         sync.RWMutex
 	clients    map[uint16]*Client
-	serverName string // protected by mu
-	ownerID    uint16 // ID of the current room owner; 0 = no owner; protected by mu
+	serverName string     // protected by mu
+	ownerID    uint16     // ID of the current room owner; 0 = no owner; protected by mu
+	onRename   func(string) // optional persistence callback, fired after Rename; protected by mu
 	nextID     atomic.Uint32
 
 	// Metrics (reset on each Stats call).
@@ -43,6 +44,25 @@ func (r *Room) ServerName() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.serverName
+}
+
+// SetOnRename registers a callback invoked after a successful Rename.
+// Intended for persisting the name to a store; called outside the mutex.
+func (r *Room) SetOnRename(fn func(string)) {
+	r.mu.Lock()
+	r.onRename = fn
+	r.mu.Unlock()
+}
+
+// Rename updates the server name and fires the onRename callback if set.
+func (r *Room) Rename(name string) {
+	r.mu.Lock()
+	r.serverName = name
+	cb := r.onRename
+	r.mu.Unlock()
+	if cb != nil {
+		cb(name)
+	}
 }
 
 // ClaimOwnership sets id as the room owner if no owner is currently set.

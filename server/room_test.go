@@ -263,6 +263,31 @@ func TestRoomTransferOwnershipEmptyRoom(t *testing.T) {
 	}
 }
 
+func TestRoomRenameFiresCallback(t *testing.T) {
+	room := NewRoom()
+	var called []string
+	room.SetOnRename(func(name string) { called = append(called, name) })
+
+	room.Rename("First Name")
+	room.Rename("Second Name")
+
+	if room.ServerName() != "Second Name" {
+		t.Errorf("ServerName: got %q, want %q", room.ServerName(), "Second Name")
+	}
+	if len(called) != 2 || called[0] != "First Name" || called[1] != "Second Name" {
+		t.Errorf("callback sequence: got %v", called)
+	}
+}
+
+func TestRoomRenameNoCallback(t *testing.T) {
+	room := NewRoom()
+	// Should not panic when no callback is registered.
+	room.Rename("Unnamed")
+	if room.ServerName() != "Unnamed" {
+		t.Errorf("ServerName: got %q, want %q", room.ServerName(), "Unnamed")
+	}
+}
+
 func TestRoomBroadcastCountsMetrics(t *testing.T) {
 	room := NewRoom()
 

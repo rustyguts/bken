@@ -199,6 +199,13 @@ func (t *Transport) KickUser(id uint16) error {
 	return nil
 }
 
+// RenameServer sends a rename request to the server. Only succeeds if the
+// caller is the room owner; the server enforces the authorisation check.
+func (t *Transport) RenameServer(name string) error {
+	t.writeCtrl(ControlMsg{Type: "rename", ServerName: name})
+	return nil
+}
+
 // SendChat sends a chat message to the server for fan-out to all participants.
 func (t *Transport) SendChat(message string) error {
 	if message == "" || len(message) > 500 {

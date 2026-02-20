@@ -35,6 +35,13 @@ func main() {
 		room.SetServerName(name)
 	}
 
+	// Persist server name to SQLite whenever a connected owner renames the room.
+	room.SetOnRename(func(name string) {
+		if err := st.SetSetting("server_name", name); err != nil {
+			log.Printf("[store] persist server_name: %v", err)
+		}
+	})
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
