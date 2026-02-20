@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import type { ConnectPayload } from './types'
-
-interface ServerEntry {
-  name: string
-  addr: string
-}
+import { GetConfig, SaveConfig } from './config'
 
 const emit = defineEmits<{
   connect: [payload: ConnectPayload]
@@ -15,12 +11,15 @@ const username = ref('')
 const error = ref('')
 const connecting = ref(false)
 const connectingAddr = ref('')
+const servers = ref([{ name: 'Local Dev', addr: 'localhost:4433' }])
 
-const servers = ref<ServerEntry[]>([
-  { name: 'Local Dev', addr: 'localhost:4433' },
-])
+onMounted(async () => {
+  const cfg = await GetConfig()
+  if (cfg.username) username.value = cfg.username
+  if (cfg.servers?.length) servers.value = cfg.servers
+})
 
-function handleConnect(addr: string): void {
+async function handleConnect(addr: string): Promise<void> {
   if (!username.value.trim()) {
     error.value = 'Please enter a username'
     return
@@ -28,6 +27,11 @@ function handleConnect(addr: string): void {
   connecting.value = true
   connectingAddr.value = addr
   error.value = ''
+
+  // Persist the username so it's pre-filled next time
+  const cfg = await GetConfig()
+  await SaveConfig({ ...cfg, username: username.value.trim() })
+
   emit('connect', { username: username.value.trim(), addr })
 }
 

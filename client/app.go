@@ -233,6 +233,18 @@ func (a *App) GetMetrics() Metrics {
 	return a.transport.GetMetrics()
 }
 
+// GetConfig loads and returns the persisted user config.
+func (a *App) GetConfig() Config {
+	return LoadConfig()
+}
+
+// SaveConfig persists the given user config to disk.
+func (a *App) SaveConfig(cfg Config) {
+	if err := SaveConfig(cfg); err != nil {
+		log.Printf("[app] save config: %v", err)
+	}
+}
+
 // IsConnected reports whether a voice session is currently active.
 func (a *App) IsConnected() bool {
 	return a.connected

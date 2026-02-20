@@ -12,6 +12,7 @@ import {
   StopTest,
 } from '../wailsjs/go/main/App'
 import { main } from '../wailsjs/go/models'
+import { GetConfig, SaveConfig } from './config'
 
 const inputDevices = ref<main.AudioDevice[]>([])
 const outputDevices = ref<main.AudioDevice[]>([])
@@ -65,39 +66,80 @@ const THEMES = [
 
 const currentTheme = ref('dark')
 
-function applyTheme(theme: string): void {
+async function persistConfig(): Promise<void> {
+  const cfg = await GetConfig()
+  await SaveConfig({
+    ...cfg,
+    theme: currentTheme.value,
+    input_device_id: selectedInput.value,
+    output_device_id: selectedOutput.value,
+    volume: volume.value / 100,
+    noise_enabled: noiseEnabled.value,
+    noise_level: noiseLevel.value,
+  })
+}
+
+async function applyTheme(theme: string): Promise<void> {
   currentTheme.value = theme
   document.documentElement.setAttribute('data-theme', theme)
   localStorage.setItem('bken-theme', theme)
+  await persistConfig()
 }
 
 onMounted(async () => {
-  inputDevices.value = (await GetInputDevices()) || []
+  const [devices, cfg] = await Promise.all([
+    GetInputDevices(),
+    GetConfig(),
+  ])
+  inputDevices.value = devices || []
   outputDevices.value = (await GetOutputDevices()) || []
-  const saved = localStorage.getItem('bken-theme')
-  if (saved && THEMES.some(t => t.name === saved)) {
-    currentTheme.value = saved
+
+  // Restore settings from config
+  if (cfg.input_device_id !== -1) selectedInput.value = cfg.input_device_id
+  if (cfg.output_device_id !== -1) selectedOutput.value = cfg.output_device_id
+  volume.value = Math.round(cfg.volume * 100)
+  noiseEnabled.value = cfg.noise_enabled
+  noiseLevel.value = cfg.noise_level
+
+  // Theme: config is source of truth; keep localStorage in sync for fast startup
+  const validTheme = THEMES.some(t => t.name === cfg.theme)
+  if (validTheme) {
+    currentTheme.value = cfg.theme
+    document.documentElement.setAttribute('data-theme', cfg.theme)
+    localStorage.setItem('bken-theme', cfg.theme)
   }
+
+  // Apply saved audio settings
+  if (cfg.input_device_id !== -1) await SetInputDevice(cfg.input_device_id)
+  if (cfg.output_device_id !== -1) await SetOutputDevice(cfg.output_device_id)
+  await SetVolume(cfg.volume)
+  await SetNoiseSuppression(cfg.noise_enabled)
+  await SetNoiseSuppressionLevel(cfg.noise_level)
 })
 
 async function handleInputChange(): Promise<void> {
   await SetInputDevice(selectedInput.value)
+  await persistConfig()
 }
 
 async function handleOutputChange(): Promise<void> {
   await SetOutputDevice(selectedOutput.value)
+  await persistConfig()
 }
 
 async function handleVolumeChange(): Promise<void> {
   await SetVolume(volume.value / 100)
+  await persistConfig()
 }
 
 async function handleNoiseToggle(): Promise<void> {
   await SetNoiseSuppression(noiseEnabled.value)
+  await persistConfig()
 }
 
 async function handleNoiseLevelChange(): Promise<void> {
   await SetNoiseSuppressionLevel(noiseLevel.value)
+  await persistConfig()
 }
 
 async function toggleTest(): Promise<void> {
