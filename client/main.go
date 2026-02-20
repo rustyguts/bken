@@ -18,6 +18,8 @@ func main() {
 		Title:     "bken",
 		Width:     800,
 		Height:    600,
+		MinWidth:  400,
+		MinHeight: 300,
 		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,

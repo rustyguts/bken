@@ -26,6 +26,10 @@ export interface Config {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const bridge = () => (window as any)['go']['main']['App']
 
+export function ApplyConfig(): Promise<void> {
+  return bridge()['ApplyConfig']()
+}
+
 export function GetConfig(): Promise<Config> {
   return bridge()['GetConfig']()
 }

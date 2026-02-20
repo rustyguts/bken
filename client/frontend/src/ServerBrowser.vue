@@ -45,14 +45,14 @@ defineExpose({ setError })
 </script>
 
 <template>
-  <div class="flex flex-col items-center justify-center h-full p-8 gap-8">
+  <div class="flex flex-col items-center justify-center h-full px-4 py-8 sm:p-8 gap-6 sm:gap-8">
     <div class="text-center">
       <h1 class="text-4xl font-bold tracking-widest">bken</h1>
       <p class="opacity-60 mt-1 text-sm">Voice Communication</p>
     </div>
 
     <!-- Username -->
-    <div class="w-80">
+    <div class="w-full max-w-xs">
       <label class="form-control w-full">
         <div class="label"><span class="label-text">Username</span></div>
         <input
@@ -68,7 +68,7 @@ defineExpose({ setError })
     </div>
 
     <!-- Server list -->
-    <div class="w-80 flex flex-col gap-2">
+    <div class="w-full max-w-xs flex flex-col gap-2">
       <div class="text-xs font-semibold uppercase tracking-wider opacity-40 mb-1">Servers</div>
 
       <div v-if="error" role="alert" class="alert alert-error text-sm py-2">

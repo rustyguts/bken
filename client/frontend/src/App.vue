@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Connect, Disconnect, GetAutoLogin, ApplyConfig } from '../wailsjs/go/main/App'
+import { Connect, Disconnect, GetAutoLogin } from '../wailsjs/go/main/App'
+import { ApplyConfig } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ServerBrowser from './ServerBrowser.vue'
 import Room from './Room.vue'

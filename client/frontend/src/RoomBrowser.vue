@@ -33,7 +33,7 @@ async function handleToggleMute(id: number): Promise<void> {
     <div v-if="users.length === 0" class="flex-1 flex items-center justify-center">
       <p class="text-sm opacity-25 italic">No one else is here</p>
     </div>
-    <div v-else class="flex-1 flex flex-wrap content-start gap-8 p-8 overflow-y-auto" role="list" aria-label="Connected users">
+    <div v-else class="flex-1 flex flex-wrap justify-center content-start gap-4 p-4 sm:gap-8 sm:p-8 overflow-y-auto" role="list" aria-label="Connected users">
       <UserCard
         v-for="user in users"
         :key="user.id"

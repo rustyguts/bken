@@ -202,11 +202,11 @@ async function toggleTest(): Promise<void> {
   <div class="flex flex-col h-full overflow-y-auto">
 
     <!-- Page header -->
-    <div class="px-5 py-3 border-b border-base-content/10 shrink-0">
+    <div class="px-3 sm:px-5 py-3 border-b border-base-content/10 shrink-0">
       <h2 class="text-sm font-semibold">Settings</h2>
     </div>
 
-    <div class="p-5 flex flex-col gap-5 max-w-sm">
+    <div class="p-3 sm:p-5 flex flex-col gap-4 sm:gap-5 max-w-sm w-full">
 
       <!-- ── Input ─────────────────────────────────────── -->
       <section>

@@ -49,8 +49,9 @@ async function handleDisconnect(): Promise<void> {
       @disconnect="handleDisconnect"
     />
 
-    <!-- Left panel: event log + metrics -->
-    <div class="flex flex-col border-r border-base-content/10 min-h-0 w-[220px] min-w-[220px]">
+    <!-- Left panel: event log + metrics.
+         Hidden below md (768 px) so narrow windows give the main panel full width. -->
+    <div class="hidden md:flex flex-col border-r border-base-content/10 min-h-0 w-[220px] min-w-[220px]">
       <EventLog :events="logEvents" class="flex-1 min-h-0" />
       <MetricsBar />
     </div>
