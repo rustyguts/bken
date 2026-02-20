@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+#  Client
+client/client
+client/build
+client/frontend/dist/
+
+# Server
+server/server
+
+# OS
+.DS_Store
+Thumbs.db
