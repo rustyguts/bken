@@ -31,6 +31,15 @@ var migrations = []string{
 		position   INTEGER NOT NULL DEFAULT 0,
 		created_at INTEGER NOT NULL DEFAULT (unixepoch())
 	)`,
+	// v3 — uploaded files
+	`CREATE TABLE IF NOT EXISTS files (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		name         TEXT NOT NULL,
+		size         INTEGER NOT NULL,
+		content_type TEXT NOT NULL,
+		disk_path    TEXT NOT NULL,
+		created_at   INTEGER NOT NULL DEFAULT (unixepoch())
+	)`,
 }
 
 // Store wraps a SQLite database and exposes server-state operations.
@@ -205,4 +214,35 @@ func (s *Store) ChannelCount() (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM channels`).Scan(&n)
 	return n, err
+}
+
+// File represents an uploaded file stored on disk.
+type File struct {
+	ID          int64
+	Name        string
+	Size        int64
+	ContentType string
+	DiskPath    string
+}
+
+// CreateFile inserts a file record and returns its id.
+func (s *Store) CreateFile(name, contentType, diskPath string, size int64) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO files(name, size, content_type, disk_path) VALUES(?, ?, ?, ?)`,
+		name, size, contentType, diskPath,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetFile returns the file record with the given id.
+// Returns sql.ErrNoRows if no such file exists.
+func (s *Store) GetFile(id int64) (File, error) {
+	var f File
+	err := s.db.QueryRow(
+		`SELECT id, name, size, content_type, disk_path FROM files WHERE id = ?`, id,
+	).Scan(&f.ID, &f.Name, &f.Size, &f.ContentType, &f.DiskPath)
+	return f, err
 }

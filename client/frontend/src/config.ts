@@ -131,3 +131,13 @@ export function DeleteChannel(id: number): Promise<string> {
 export function MoveUserToChannel(userID: number, channelID: number): Promise<string> {
   return bridge()['MoveUserToChannel'](userID, channelID)
 }
+
+// --- File upload bindings ---
+
+export function UploadFile(channelID: number): Promise<string> {
+  return bridge()['UploadFile'](channelID)
+}
+
+export function UploadFileFromPath(channelID: number, path: string): Promise<string> {
+  return bridge()['UploadFileFromPath'](channelID, path)
+}

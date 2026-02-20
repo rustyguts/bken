@@ -7,9 +7,10 @@ import (
 
 // Wire-protocol limits.
 const (
-	MaxNameLength  = 50  // max UTF-8 bytes for server names, channel names, and usernames
-	MaxChatLength  = 500 // max bytes for a single chat message body
-	DatagramHeader = 4   // senderID(2) + seq(2) bytes prepended to every voice datagram
+	MaxNameLength  = 50             // max UTF-8 bytes for server names, channel names, and usernames
+	MaxChatLength  = 500            // max bytes for a single chat message body
+	MaxFileSize    = 10 * 1024 * 1024 // max upload size (10 MB)
+	DatagramHeader = 4              // senderID(2) + seq(2) bytes prepended to every voice datagram
 )
 
 // validateName trims whitespace from s and returns the trimmed string, or an
@@ -37,6 +38,10 @@ type ControlMsg struct {
 	OwnerID    uint16        `json:"owner_id,omitempty"`     // user_list/owner_changed: current room owner
 	ChannelID  int64         `json:"channel_id,omitempty"`   // join_channel/user_channel: target channel
 	Channels   []ChannelInfo `json:"channels,omitempty"`     // channel_list: full list of channels
+	APIPort    int           `json:"api_port,omitempty"`     // user_list: HTTP API port for file uploads
+	FileID     int64         `json:"file_id,omitempty"`      // chat: uploaded file DB id
+	FileName   string        `json:"file_name,omitempty"`    // chat: original filename
+	FileSize   int64         `json:"file_size,omitempty"`    // chat: file size in bytes
 }
 
 // UserInfo is a brief snapshot of a connected user, used in user_list messages.

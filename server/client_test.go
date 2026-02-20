@@ -823,3 +823,90 @@ func TestProcessControlUnknownTypeIsIgnored(t *testing.T) {
 		t.Errorf("expected no output for unknown message type, got %d bytes", buf.Len())
 	}
 }
+
+// --- processControl: chat with file attachment ---
+
+func TestProcessControlChatWithFileRelaysFileFields(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	processControl(ControlMsg{
+		Type:     "chat",
+		FileID:   42,
+		FileName: "photo.jpg",
+		FileSize: 123456,
+	}, sender, room)
+
+	got := decodeControl(t, senderBuf)
+	if got.Type != "chat" {
+		t.Errorf("type: got %q, want %q", got.Type, "chat")
+	}
+	if got.FileID != 42 {
+		t.Errorf("file_id: got %d, want 42", got.FileID)
+	}
+	if got.FileName != "photo.jpg" {
+		t.Errorf("file_name: got %q, want %q", got.FileName, "photo.jpg")
+	}
+	if got.FileSize != 123456 {
+		t.Errorf("file_size: got %d, want 123456", got.FileSize)
+	}
+}
+
+func TestProcessControlChatEmptyMessageWithFileAllowed(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	// Empty message body but with a file attachment — should be allowed.
+	processControl(ControlMsg{
+		Type:     "chat",
+		Message:  "",
+		FileID:   1,
+		FileName: "doc.pdf",
+		FileSize: 5000,
+	}, sender, room)
+
+	if senderBuf.Len() == 0 {
+		t.Error("expected broadcast for file-only chat, got nothing")
+	}
+	got := decodeControl(t, senderBuf)
+	if got.FileID != 1 {
+		t.Errorf("file_id: got %d, want 1", got.FileID)
+	}
+}
+
+func TestProcessControlChatEmptyMessageWithoutFileDropped(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	// Empty message without file — should be dropped (existing behavior).
+	processControl(ControlMsg{Type: "chat", Message: ""}, sender, room)
+
+	if senderBuf.Len() != 0 {
+		t.Errorf("expected no broadcast for empty message without file, got %d bytes", senderBuf.Len())
+	}
+}
+
+func TestProcessControlChatWithFileAndMessage(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	room.AddClient(sender)
+
+	processControl(ControlMsg{
+		Type:     "chat",
+		Message:  "check this out",
+		FileID:   7,
+		FileName: "screenshot.png",
+		FileSize: 99999,
+	}, sender, room)
+
+	got := decodeControl(t, senderBuf)
+	if got.Message != "check this out" {
+		t.Errorf("message: got %q, want %q", got.Message, "check this out")
+	}
+	if got.FileID != 7 {
+		t.Errorf("file_id: got %d, want 7", got.FileID)
+	}
+}

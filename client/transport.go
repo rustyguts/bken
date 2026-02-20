@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,10 @@ type ControlMsg struct {
 	OwnerID    uint16        `json:"owner_id,omitempty"`    // user_list/owner_changed: current room owner
 	ChannelID  int64         `json:"channel_id,omitempty"`  // join_channel/user_channel: target channel
 	Channels   []ChannelInfo `json:"channels,omitempty"`    // channel_list: full list of channels
+	APIPort    int           `json:"api_port,omitempty"`    // user_list: HTTP API port for file uploads
+	FileID     int64         `json:"file_id,omitempty"`     // chat: uploaded file DB id
+	FileName   string        `json:"file_name,omitempty"`   // chat: original filename
+	FileSize   int64         `json:"file_size,omitempty"`   // chat: file size in bytes
 }
 
 // UserInfo describes a connected peer.
@@ -120,6 +125,14 @@ type Transport struct {
 	metricsMu       sync.Mutex
 	lastMetricsTime time.Time
 
+	// serverAddr is the WebTransport address passed to Connect (e.g. "192.168.1.5:4433").
+	// Used to derive the HTTP API base URL from the api_port in user_list.
+	serverAddr string // protected by mu
+
+	// apiBaseURL is the HTTP base URL for the server's REST API (e.g. "http://host:8080").
+	// Set from the api_port field in the user_list welcome message.
+	apiBaseURL string // protected by mu
+
 	// Callbacks — set via setters before calling Connect.
 	cbMu                 sync.RWMutex
 	onUserList           func([]UserInfo)
@@ -127,8 +140,8 @@ type Transport struct {
 	onUserLeft           func(uint16)
 	onAudioReceived      func(uint16)
 	onDisconnected       func(reason string)
-	onChatMessage        func(username, message string, ts int64)
-	onChannelChatMessage func(channelID int64, username, message string, ts int64)
+	onChatMessage        func(username, message string, ts int64, fileID int64, fileName string, fileSize int64)
+	onChannelChatMessage func(channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
 	onServerInfo         func(name string)
 	onKicked             func()
 	onOwnerChanged       func(ownerID uint16)
@@ -176,13 +189,13 @@ func (t *Transport) SetOnDisconnected(fn func(reason string)) {
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChatMessage(fn func(username, message string, ts int64)) {
+func (t *Transport) SetOnChatMessage(fn func(username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
 	t.cbMu.Lock()
 	t.onChatMessage = fn
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChannelChatMessage(fn func(channelID int64, username, message string, ts int64)) {
+func (t *Transport) SetOnChannelChatMessage(fn func(channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
 	t.cbMu.Lock()
 	t.onChannelChatMessage = fn
 	t.cbMu.Unlock()
@@ -274,6 +287,29 @@ func (t *Transport) MoveUser(userID uint16, channelID int64) error {
 	return t.writeCtrl(ControlMsg{Type: "move_user", ID: userID, ChannelID: channelID})
 }
 
+// APIBaseURL returns the HTTP base URL for the server's REST API, or "" if not yet known.
+func (t *Transport) APIBaseURL() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.apiBaseURL
+}
+
+// SendFileChat sends a chat message with a file attachment.
+// The file metadata must come from a prior upload to the server's API.
+func (t *Transport) SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error {
+	if len(message) > 500 {
+		return fmt.Errorf("message must not exceed 500 characters")
+	}
+	return t.writeCtrl(ControlMsg{
+		Type:      "chat",
+		Message:   message,
+		ChannelID: channelID,
+		FileID:    fileID,
+		FileName:  fileName,
+		FileSize:  fileSize,
+	})
+}
+
 // SendChannelChat sends a channel-scoped chat message. The server routes it
 // only to users currently in the sender's channel. If the caller is not in a
 // channel, the server falls back to global broadcast.
@@ -338,6 +374,8 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	t.muted.Clear()
 	t.mu.Lock()
 	t.disconnectReason = ""
+	t.serverAddr = addr
+	t.apiBaseURL = ""
 	t.mu.Unlock()
 
 	// Apply a dial timeout so the caller isn't blocked indefinitely when the
@@ -635,6 +673,16 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 				t.myID = msg.Users[len(msg.Users)-1].ID
 				t.mu.Unlock()
 			}
+			// Build the API base URL from the server address host + the advertised API port.
+			if msg.APIPort != 0 {
+				t.mu.Lock()
+				host, _, err := net.SplitHostPort(t.serverAddr)
+				if err != nil {
+					host = t.serverAddr
+				}
+				t.apiBaseURL = fmt.Sprintf("http://%s:%d", host, msg.APIPort)
+				t.mu.Unlock()
+			}
 			if onUserList != nil {
 				onUserList(msg.Users)
 			}
@@ -669,11 +717,11 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		case "chat":
 			if msg.ChannelID != 0 {
 				if onChannelChat != nil {
-					onChannelChat(msg.ChannelID, msg.Username, msg.Message, msg.Ts)
+					onChannelChat(msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
 				}
 			} else {
 				if onChat != nil {
-					onChat(msg.Username, msg.Message, msg.Ts)
+					onChat(msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
 				}
 			}
 		case "server_info":

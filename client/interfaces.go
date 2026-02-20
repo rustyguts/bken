@@ -25,8 +25,8 @@ type Transporter interface {
 	SetOnUserLeft(fn func(uint16))
 	SetOnAudioReceived(fn func(uint16))
 	SetOnDisconnected(fn func(reason string))
-	SetOnChatMessage(fn func(username, message string, ts int64))
-	SetOnChannelChatMessage(fn func(channelID int64, username, message string, ts int64))
+	SetOnChatMessage(fn func(username, message string, ts int64, fileID int64, fileName string, fileSize int64))
+	SetOnChannelChatMessage(fn func(channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64))
 	SetOnServerInfo(fn func(name string))
 	SetOnKicked(fn func())
 	SetOnOwnerChanged(fn func(ownerID uint16))
@@ -35,6 +35,10 @@ type Transporter interface {
 
 	// Chat.
 	SendChat(message string) error
+	SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error
+
+	// File API.
+	APIBaseURL() string
 
 	// Moderation.
 	KickUser(id uint16) error

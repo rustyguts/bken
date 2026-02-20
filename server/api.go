@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
@@ -18,13 +22,15 @@ import (
 // APIServer provides HTTP REST endpoints for health checking and room state.
 // It runs on a separate TCP port from the WebTransport/QUIC server.
 type APIServer struct {
-	room  *Room
-	store *store.Store
-	echo  *echo.Echo
+	room       *Room
+	store      *store.Store
+	echo       *echo.Echo
+	uploadsDir string // directory where uploaded files are stored
 }
 
 // NewAPIServer constructs an APIServer and registers all routes.
-func NewAPIServer(room *Room, st *store.Store) *APIServer {
+// uploadsDir is the directory where uploaded files are stored on disk.
+func NewAPIServer(room *Room, st *store.Store, uploadsDir string) *APIServer {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -41,7 +47,7 @@ func NewAPIServer(room *Room, st *store.Store) *APIServer {
 	e.Use(middleware.Recover())
 	e.HTTPErrorHandler = jsonErrorHandler
 
-	s := &APIServer{room: room, store: st, echo: e}
+	s := &APIServer{room: room, store: st, echo: e, uploadsDir: uploadsDir}
 	s.registerRoutes()
 	return s
 }
@@ -56,6 +62,8 @@ func (s *APIServer) registerRoutes() {
 	s.echo.PUT("/api/channels/:id", s.handleRenameChannel)
 	s.echo.DELETE("/api/channels/:id", s.handleDeleteChannel)
 	s.echo.GET("/invite", s.handleInvite)
+	s.echo.POST("/api/upload", s.handleUpload)
+	s.echo.GET("/api/files/:id", s.handleGetFile)
 }
 
 // Run starts the Echo HTTP server on addr and blocks until ctx is cancelled.
@@ -275,6 +283,85 @@ func (s *APIServer) handleInvite(c echo.Context) error {
 </html>`, name, name, linkHTML)
 
 	return c.HTML(http.StatusOK, html)
+}
+
+// UploadResponse is the JSON payload returned by POST /api/upload.
+type UploadResponse struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+}
+
+func (s *APIServer) handleUpload(c echo.Context) error {
+	// Limit request body to MaxFileSize + 1 KB (for form overhead).
+	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, MaxFileSize+1024)
+
+	file, header, err := c.Request().FormFile("file")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "missing or invalid file field")
+	}
+	defer file.Close()
+
+	if header.Size > MaxFileSize {
+		return echo.NewHTTPError(http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("file exceeds %d MB limit", MaxFileSize/(1024*1024)))
+	}
+
+	// Determine content type from the file header.
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	// Generate a unique filename to avoid collisions.
+	ext := filepath.Ext(header.Filename)
+	diskName := uuid.New().String() + ext
+	diskPath := filepath.Join(s.uploadsDir, diskName)
+
+	dst, err := os.Create(diskPath)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create file")
+	}
+	defer dst.Close()
+
+	written, err := io.Copy(dst, file)
+	if err != nil {
+		os.Remove(diskPath)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to write file")
+	}
+
+	id, err := s.store.CreateFile(header.Filename, contentType, diskPath, written)
+	if err != nil {
+		os.Remove(diskPath)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to record file")
+	}
+
+	return c.JSON(http.StatusCreated, UploadResponse{
+		ID:          id,
+		Name:        header.Filename,
+		Size:        written,
+		ContentType: contentType,
+	})
+}
+
+func (s *APIServer) handleGetFile(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid file id")
+	}
+
+	f, err := s.store.GetFile(id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return echo.NewHTTPError(http.StatusNotFound, "file not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	c.Response().Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"`, f.Name))
+	return c.File(f.DiskPath)
 }
 
 // convertChannels maps store channel records to the wire-protocol ChannelInfo slice.

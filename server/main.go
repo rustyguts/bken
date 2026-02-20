@@ -4,8 +4,10 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"bken/server/store"
@@ -88,7 +90,21 @@ func main() {
 
 	// Start REST API server if an address is configured.
 	if *apiAddr != "" {
-		api := NewAPIServer(room, st)
+		// Create uploads directory next to the database file.
+		uploadsDir := filepath.Join(filepath.Dir(*dbPath), "uploads")
+		if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+			log.Fatalf("[api] create uploads dir: %v", err)
+		}
+
+		// Tell the room which port the API lives on so it's included in the
+		// user_list welcome message. Clients use this to construct file URLs.
+		if _, port, err := net.SplitHostPort(*apiAddr); err == nil {
+			if p, err := net.LookupPort("tcp", port); err == nil {
+				room.SetAPIPort(p)
+			}
+		}
+
+		api := NewAPIServer(room, st, uploadsDir)
 		go api.Run(ctx, *apiAddr)
 		log.Printf("[api] listening on %s", *apiAddr)
 	}

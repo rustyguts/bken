@@ -128,7 +128,7 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	}
 
 	// Send the current user list (and server name) to the new client.
-	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName(), OwnerID: room.OwnerID()})
+	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName(), OwnerID: room.OwnerID(), APIPort: room.APIPort()})
 
 	// Always send the channel list so the frontend receives the event even if empty.
 	client.SendControl(ControlMsg{Type: "channel_list", Channels: room.GetChannelList()})
@@ -174,7 +174,11 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		// All chat messages (server-wide and channel-scoped) are broadcast to every
 		// client; the frontend filters by channel_id on the receiving end so users
 		// can read and send messages in any channel without being voice-connected.
-		if msg.Message == "" || len(msg.Message) > MaxChatLength {
+		hasFile := msg.FileID != 0
+		if msg.Message == "" && !hasFile {
+			return
+		}
+		if len(msg.Message) > MaxChatLength {
 			return
 		}
 		out := ControlMsg{
@@ -184,6 +188,9 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			Message:   msg.Message,
 			Timestamp: time.Now().UnixMilli(),
 			ChannelID: msg.ChannelID, // 0 = server-wide, non-zero = channel-scoped
+			FileID:    msg.FileID,
+			FileName:  msg.FileName,
+			FileSize:  msg.FileSize,
 		}
 		room.BroadcastControl(out, 0)
 	case "kick":

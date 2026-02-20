@@ -50,4 +50,8 @@ export interface ChatMessage {
   message: string
   ts: number         // Unix ms timestamp (server-stamped)
   channelId: number  // 0 = server-wide, non-zero = channel-scoped
+  fileId?: number    // uploaded file DB id
+  fileName?: string  // original filename
+  fileSize?: number  // file size in bytes
+  fileUrl?: string   // download URL (constructed by Go layer)
 }

@@ -23,6 +23,7 @@ type Room struct {
 	ownerID    uint16              // ID of the current room owner; 0 = no owner; protected by mu
 	onRename   func(string) error // optional persistence callback, fired after Rename; protected by mu
 	channels   []ChannelInfo // cached channel list sent to newly-connecting clients; protected by mu
+	apiPort    int           // HTTP API port communicated to clients in user_list; protected by mu
 	nextID     atomic.Uint32
 
 	// Channel CRUD persistence callbacks — set via setters; called outside the mutex.
@@ -54,6 +55,20 @@ func (r *Room) ServerName() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.serverName
+}
+
+// SetAPIPort sets the HTTP API port communicated to clients in the welcome message.
+func (r *Room) SetAPIPort(port int) {
+	r.mu.Lock()
+	r.apiPort = port
+	r.mu.Unlock()
+}
+
+// APIPort returns the configured HTTP API port.
+func (r *Room) APIPort() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.apiPort
 }
 
 // SetOnRename registers a callback invoked after a successful Rename.

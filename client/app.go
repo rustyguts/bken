@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
+	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,7 +18,7 @@ import (
 	"client/internal/adapt"
 
 	"github.com/gordonklaus/portaudio"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsrt "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App bridges the Go backend with the Wails/Vue frontend.
@@ -44,6 +51,17 @@ func (a *App) startup(ctx context.Context) {
 	if err := portaudio.Initialize(); err != nil {
 		log.Printf("[app] portaudio init: %v", err)
 	}
+
+	// Handle files dropped onto elements with --wails-drop-target: drop.
+	wailsrt.OnFileDrop(ctx, func(x, y int, paths []string) {
+		if len(paths) == 0 {
+			return
+		}
+		// Emit a frontend event so the Vue layer can pick the channel and upload.
+		wailsrt.EventsEmit(ctx, "file:dropped", map[string]any{
+			"paths": paths,
+		})
+	})
 }
 
 // shutdown is called when the Wails app is closing.
@@ -226,19 +244,19 @@ func (a *App) Connect(addr, username string) string {
 // to the frontend via Wails events. Must be called before transport.Connect.
 func (a *App) wireCallbacks() {
 	a.transport.SetOnUserList(func(users []UserInfo) {
-		runtime.EventsEmit(a.ctx, "user:list", users)
-		runtime.EventsEmit(a.ctx, "user:me", map[string]any{"id": int(a.transport.MyID())})
+		wailsrt.EventsEmit(a.ctx, "user:list", users)
+		wailsrt.EventsEmit(a.ctx, "user:me", map[string]any{"id": int(a.transport.MyID())})
 	})
 	a.transport.SetOnUserJoined(func(id uint16, name string) {
-		runtime.EventsEmit(a.ctx, "user:joined", map[string]interface{}{"id": id, "username": name})
+		wailsrt.EventsEmit(a.ctx, "user:joined", map[string]interface{}{"id": id, "username": name})
 		a.audio.PlayNotification(SoundUserJoined)
 	})
 	a.transport.SetOnUserLeft(func(id uint16) {
-		runtime.EventsEmit(a.ctx, "user:left", map[string]interface{}{"id": id})
+		wailsrt.EventsEmit(a.ctx, "user:left", map[string]interface{}{"id": id})
 		a.audio.PlayNotification(SoundUserLeft)
 	})
 	a.transport.SetOnAudioReceived(func(userID uint16) {
-		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(userID)})
+		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(userID)})
 	})
 	a.transport.SetOnDisconnected(func(reason string) {
 		if !a.connected.Load() {
@@ -247,48 +265,62 @@ func (a *App) wireCallbacks() {
 		a.connected.Store(false)
 		a.audio.Stop()
 		a.transport.Disconnect() // ensure full transport cleanup (cancel ctx, close session)
-		runtime.EventsEmit(a.ctx, "connection:lost", map[string]any{"reason": reason})
+		wailsrt.EventsEmit(a.ctx, "connection:lost", map[string]any{"reason": reason})
 		log.Printf("[app] connection lost: %s", reason)
 	})
-	a.transport.SetOnChatMessage(func(username, message string, ts int64) {
-		runtime.EventsEmit(a.ctx, "chat:message", map[string]any{
+	a.transport.SetOnChatMessage(func(username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+		payload := map[string]any{
 			"username":   username,
 			"message":    message,
 			"ts":         ts,
 			"channel_id": 0,
-		})
+		}
+		if fileID != 0 {
+			payload["file_id"] = fileID
+			payload["file_name"] = fileName
+			payload["file_size"] = fileSize
+			payload["file_url"] = a.fileURL(fileID)
+		}
+		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
-	a.transport.SetOnChannelChatMessage(func(channelID int64, username, message string, ts int64) {
-		runtime.EventsEmit(a.ctx, "chat:message", map[string]any{
+	a.transport.SetOnChannelChatMessage(func(channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+		payload := map[string]any{
 			"username":   username,
 			"message":    message,
 			"ts":         ts,
 			"channel_id": channelID,
-		})
+		}
+		if fileID != 0 {
+			payload["file_id"] = fileID
+			payload["file_name"] = fileName
+			payload["file_size"] = fileSize
+			payload["file_url"] = a.fileURL(fileID)
+		}
+		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
 	a.transport.SetOnServerInfo(func(name string) {
-		runtime.EventsEmit(a.ctx, "server:info", map[string]any{"name": name})
+		wailsrt.EventsEmit(a.ctx, "server:info", map[string]any{"name": name})
 	})
 	a.transport.SetOnOwnerChanged(func(ownerID uint16) {
-		runtime.EventsEmit(a.ctx, "room:owner", map[string]any{"owner_id": int(ownerID)})
+		wailsrt.EventsEmit(a.ctx, "room:owner", map[string]any{"owner_id": int(ownerID)})
 	})
 	a.transport.SetOnKicked(func() {
 		a.connected.Store(false)
 		a.audio.Stop()
-		runtime.EventsEmit(a.ctx, "connection:kicked", nil)
+		wailsrt.EventsEmit(a.ctx, "connection:kicked", nil)
 		log.Println("[app] kicked from server")
 	})
 	a.transport.SetOnChannelList(func(channels []ChannelInfo) {
-		runtime.EventsEmit(a.ctx, "channel:list", channels)
+		wailsrt.EventsEmit(a.ctx, "channel:list", channels)
 	})
 	a.transport.SetOnUserChannel(func(userID uint16, channelID int64) {
-		runtime.EventsEmit(a.ctx, "channel:user_moved", map[string]any{
+		wailsrt.EventsEmit(a.ctx, "channel:user_moved", map[string]any{
 			"user_id":    int(userID),
 			"channel_id": channelID,
 		})
 	})
 	a.audio.OnSpeaking = func() {
-		runtime.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
+		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
 	}
 }
 
@@ -480,6 +512,108 @@ func (a *App) SendChannelChat(channelID int, message string) string {
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendChat(message string) string {
 	if err := a.transport.SendChat(message); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// fileURL constructs a download URL for the given file ID using the API base URL.
+func (a *App) fileURL(fileID int64) string {
+	base := a.transport.APIBaseURL()
+	if base == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/api/files/%d", base, fileID)
+}
+
+// UploadFile opens a native file dialog and uploads the selected file to the
+// current server, then sends a chat message with the file attachment.
+// channelID determines which channel the file message is scoped to.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) UploadFile(channelID int) string {
+	path, err := wailsrt.OpenFileDialog(a.ctx, wailsrt.OpenDialogOptions{
+		Title: "Upload File",
+	})
+	if err != nil {
+		return err.Error()
+	}
+	if path == "" {
+		return "" // user cancelled
+	}
+	return a.uploadFilePath(int64(channelID), path)
+}
+
+// UploadFileFromPath uploads a file at the given path and sends a chat message.
+// Used for drag-and-drop where the frontend provides the file path.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) UploadFileFromPath(channelID int, path string) string {
+	if path == "" {
+		return "no file path"
+	}
+	return a.uploadFilePath(int64(channelID), path)
+}
+
+// uploadResponse mirrors the server's UploadResponse JSON.
+type uploadResponse struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+}
+
+const maxFileSize = 10 * 1024 * 1024 // 10 MB
+
+func (a *App) uploadFilePath(channelID int64, path string) string {
+	base := a.transport.APIBaseURL()
+	if base == "" {
+		return "server API not available"
+	}
+
+	// Validate file size before uploading.
+	info, err := os.Stat(path)
+	if err != nil {
+		return err.Error()
+	}
+	if info.Size() > maxFileSize {
+		return fmt.Sprintf("file exceeds %d MB limit", maxFileSize/(1024*1024))
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return err.Error()
+	}
+	defer f.Close()
+
+	// Build multipart form.
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("file", filepath.Base(path))
+	if err != nil {
+		return err.Error()
+	}
+	if _, err := io.Copy(fw, f); err != nil {
+		return err.Error()
+	}
+	w.Close()
+
+	resp, err := http.Post(base+"/api/upload", w.FormDataContentType(), &buf) //nolint:gosec — LAN server, not arbitrary URL
+	if err != nil {
+		return err.Error()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Sprintf("upload failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var ur uploadResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ur); err != nil {
+		return "failed to parse upload response"
+	}
+
+	// Send a chat message with the file metadata.
+	if err := a.transport.SendFileChat(channelID, ur.ID, ur.Size, ur.Name, ""); err != nil {
 		return err.Error()
 	}
 	return ""

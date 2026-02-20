@@ -246,3 +246,43 @@ func TestChannelCount(t *testing.T) {
 		t.Fatalf("expected 2, got %d err=%v", n, err)
 	}
 }
+
+// --- File storage tests ---
+
+func TestCreateAndGetFile(t *testing.T) {
+	s := newMemStore(t)
+
+	id, err := s.CreateFile("photo.jpg", "image/jpeg", "/uploads/abc.jpg", 12345)
+	if err != nil {
+		t.Fatalf("CreateFile: %v", err)
+	}
+	if id <= 0 {
+		t.Fatalf("expected positive id, got %d", id)
+	}
+
+	f, err := s.GetFile(id)
+	if err != nil {
+		t.Fatalf("GetFile: %v", err)
+	}
+	if f.Name != "photo.jpg" {
+		t.Errorf("name: got %q, want %q", f.Name, "photo.jpg")
+	}
+	if f.Size != 12345 {
+		t.Errorf("size: got %d, want 12345", f.Size)
+	}
+	if f.ContentType != "image/jpeg" {
+		t.Errorf("content_type: got %q, want %q", f.ContentType, "image/jpeg")
+	}
+	if f.DiskPath != "/uploads/abc.jpg" {
+		t.Errorf("disk_path: got %q, want %q", f.DiskPath, "/uploads/abc.jpg")
+	}
+}
+
+func TestGetFileNotFound(t *testing.T) {
+	s := newMemStore(t)
+
+	_, err := s.GetFile(9999)
+	if err != sql.ErrNoRows {
+		t.Errorf("expected sql.ErrNoRows, got %v", err)
+	}
+}

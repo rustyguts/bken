@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import Room from './Room.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -25,6 +25,7 @@ const channels = ref<Channel[]>([])
 const userChannels = ref<Record<number, number>>({})
 let chatIdCounter = 0
 
+const activeChannelId = ref(0) // tracks the currently-viewed chatroom channel (for file drops)
 const connectError = ref('')
 const startupAddrHint = ref('')
 const currentRoute = ref<AppRoute>('room')
@@ -189,10 +190,12 @@ async function handleRenameGlobalUsername(name: string): Promise<void> {
 }
 
 async function handleSendChat(message: string): Promise<void> {
+  activeChannelId.value = 0
   await SendChat(message)
 }
 
 async function handleSendChannelChat(channelID: number, message: string): Promise<void> {
+  activeChannelId.value = channelID
   await SendChannelChat(channelID, message)
 }
 
@@ -210,6 +213,22 @@ async function handleDeleteChannel(channelID: number): Promise<void> {
 
 async function handleMoveUser(userID: number, channelID: number): Promise<void> {
   await MoveUserToChannel(userID, channelID)
+}
+
+async function handleUploadFile(channelID: number): Promise<void> {
+  activeChannelId.value = channelID
+  const err = await UploadFile(channelID)
+  if (err) {
+    connectError.value = err
+  }
+}
+
+async function handleUploadFileFromPath(channelID: number, path: string): Promise<void> {
+  activeChannelId.value = channelID
+  const err = await UploadFileFromPath(channelID, path)
+  if (err) {
+    connectError.value = err
+  }
 }
 
 async function handleDisconnectVoice(): Promise<void> {
@@ -281,10 +300,20 @@ onMounted(async () => {
     userChannels.value = { ...userChannels.value, [data.user_id]: data.channel_id }
   })
 
-  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number }) => {
+  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string }) => {
     chatMessages.value = [
       ...chatMessages.value,
-      { id: ++chatIdCounter, username: data.username, message: data.message, ts: data.ts, channelId: data.channel_id ?? 0 },
+      {
+        id: ++chatIdCounter,
+        username: data.username,
+        message: data.message,
+        ts: data.ts,
+        channelId: data.channel_id ?? 0,
+        fileId: data.file_id,
+        fileName: data.file_name,
+        fileSize: data.file_size,
+        fileUrl: data.file_url,
+      },
     ]
   })
 
@@ -309,6 +338,17 @@ onMounted(async () => {
     cancelReconnect()
     closeSettingsPage()
     resetState()
+  })
+
+  EventsOn('file:dropped', async (data: { paths: string[] }) => {
+    if (!connected.value || !data.paths?.length) return
+    for (const path of data.paths) {
+      const err = await UploadFileFromPath(activeChannelId.value, path)
+      if (err) {
+        connectError.value = err
+        break
+      }
+    }
   })
 
   // Apply saved audio settings before doing anything else so noise suppression,
@@ -354,7 +394,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', syncRouteFromHash)
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'chat:message', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
   clearTimers()
   cleanupSpeaking()
 })
@@ -416,6 +456,8 @@ onBeforeUnmount(() => {
           @rename-channel="handleRenameChannel"
           @delete-channel="handleDeleteChannel"
           @move-user="handleMoveUser"
+          @upload-file="handleUploadFile"
+          @upload-file-from-path="handleUploadFileFromPath"
         />
       </Transition>
     </div>

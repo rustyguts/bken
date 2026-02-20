@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -23,7 +25,8 @@ func newTestRoom(users ...UserInfo) *Room {
 	return r
 }
 
-// newTestAPI creates an APIServer backed by an in-memory SQLite store.
+// newTestAPI creates an APIServer backed by an in-memory SQLite store
+// and a temporary uploads directory.
 func newTestAPI(t *testing.T, room *Room) *APIServer {
 	t.Helper()
 	st, err := store.New(":memory:")
@@ -31,7 +34,8 @@ func newTestAPI(t *testing.T, room *Room) *APIServer {
 		t.Fatalf("store.New: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return NewAPIServer(room, st)
+	uploadsDir := t.TempDir()
+	return NewAPIServer(room, st, uploadsDir)
 }
 
 func TestHealthEndpointEmptyRoom(t *testing.T) {
@@ -753,6 +757,124 @@ func TestInviteEndpointDefaultServerName(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "bken server") {
 		t.Errorf("should fall back to 'bken server' when name is empty")
+	}
+}
+
+// --- File upload/download tests ---
+
+func TestUploadAndDownloadFile(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	// Upload a file via multipart form.
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("file", "test.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	fw.Write([]byte("hello world"))
+	w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleUpload(c); err != nil {
+		t.Fatalf("upload handler: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload status: got %d, want 201", rec.Code)
+	}
+
+	var ur UploadResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &ur); err != nil {
+		t.Fatalf("unmarshal upload response: %v", err)
+	}
+	if ur.Name != "test.txt" {
+		t.Errorf("name: got %q, want %q", ur.Name, "test.txt")
+	}
+	if ur.Size != 11 {
+		t.Errorf("size: got %d, want 11", ur.Size)
+	}
+	if ur.ID <= 0 {
+		t.Errorf("expected positive id, got %d", ur.ID)
+	}
+
+	// Download the file.
+	req2 := httptest.NewRequest(http.MethodGet, "/api/files/"+strconv.FormatInt(ur.ID, 10), nil)
+	rec2 := httptest.NewRecorder()
+	c2 := api.echo.NewContext(req2, rec2)
+	c2.SetParamNames("id")
+	c2.SetParamValues(strconv.FormatInt(ur.ID, 10))
+
+	if err := api.handleGetFile(c2); err != nil {
+		t.Fatalf("download handler: %v", err)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Errorf("download status: got %d, want 200", rec2.Code)
+	}
+	if got := rec2.Body.String(); got != "hello world" {
+		t.Errorf("file content: got %q, want %q", got, "hello world")
+	}
+	if disp := rec2.Header().Get("Content-Disposition"); !strings.Contains(disp, "test.txt") {
+		t.Errorf("Content-Disposition should contain filename, got %q", disp)
+	}
+}
+
+func TestUploadMissingFile(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", strings.NewReader(""))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	err := api.handleUpload(c)
+	if err == nil {
+		t.Fatal("expected error for missing file, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %v", err)
+	}
+}
+
+func TestDownloadFileNotFound(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files/9999", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9999")
+
+	err := api.handleGetFile(c)
+	if err == nil {
+		t.Fatal("expected error for nonexistent file, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %v", err)
+	}
+}
+
+func TestDownloadInvalidID(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files/abc", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("abc")
+
+	err := api.handleGetFile(c)
+	if err == nil {
+		t.Fatal("expected error for invalid id, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %v", err)
 	}
 }
 
