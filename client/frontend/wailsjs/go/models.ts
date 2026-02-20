@@ -104,19 +104,23 @@ export namespace main {
 	export class Metrics {
 	    rtt_ms: number;
 	    packet_loss: number;
+	    jitter_ms: number;
 	    bitrate_kbps: number;
 	    opus_target_kbps: number;
-	
+	    quality_level: string;
+
 	    static createFrom(source: any = {}) {
 	        return new Metrics(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.rtt_ms = source["rtt_ms"];
 	        this.packet_loss = source["packet_loss"];
+	        this.jitter_ms = source["jitter_ms"];
 	        this.bitrate_kbps = source["bitrate_kbps"];
 	        this.opus_target_kbps = source["opus_target_kbps"];
+	        this.quality_level = source["quality_level"];
 	    }
 	}
 

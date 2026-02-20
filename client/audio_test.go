@@ -232,6 +232,36 @@ func TestSetPacketLoss(t *testing.T) {
 	ae.SetPacketLoss(200)
 }
 
+func TestDroppedFrameCounters(t *testing.T) {
+	ae := NewAudioEngine()
+
+	// Initially zero.
+	c, p := ae.DroppedFrames()
+	if c != 0 || p != 0 {
+		t.Fatalf("initial drops: capture=%d playback=%d, want 0,0", c, p)
+	}
+
+	// Increment capture drops.
+	ae.captureDropped.Add(5)
+	ae.AddPlaybackDrop()
+	ae.AddPlaybackDrop()
+	ae.AddPlaybackDrop()
+
+	c, p = ae.DroppedFrames()
+	if c != 5 {
+		t.Errorf("capture drops: got %d, want 5", c)
+	}
+	if p != 3 {
+		t.Errorf("playback drops: got %d, want 3", p)
+	}
+
+	// DroppedFrames resets counters.
+	c, p = ae.DroppedFrames()
+	if c != 0 || p != 0 {
+		t.Errorf("after reset: capture=%d playback=%d, want 0,0", c, p)
+	}
+}
+
 func TestOpusMultipleFrames(t *testing.T) {
 	enc, err := opus.NewEncoder(sampleRate, channels, opus.AppVoIP)
 	if err != nil {

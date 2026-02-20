@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
+import MetricsBar from './MetricsBar.vue'
 
 const props = defineProps<{
   username: string
@@ -51,7 +52,7 @@ function confirmRename(): void {
 </script>
 
 <template>
-  <div class="border-t border-base-content/10 bg-base-200 p-2">
+  <div class="border-t border-base-content/10 bg-base-200 p-2 flex flex-col gap-1">
     <div class="flex items-center gap-1">
       <!-- Avatar (right-click to rename) -->
       <button
@@ -122,6 +123,8 @@ function confirmRename(): void {
         </svg>
       </button>
     </div>
+
+    <MetricsBar v-if="voiceConnected" />
 
     <!-- DaisyUI modal for username rename -->
     <dialog class="modal" :class="{ 'modal-open': modalOpen }">

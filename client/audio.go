@@ -94,6 +94,11 @@ type AudioEngine struct {
 	currentBitrate atomic.Int32 // kbps; set in Start() and updated by SetBitrate()
 	jitterDepth    atomic.Int32 // target jitter buffer depth; 0 means use default
 
+	// Dropped frame counters: incremented when CaptureOut / PlaybackIn channels
+	// are full and a frame is silently discarded. Read and reset by DroppedFrames().
+	captureDropped  atomic.Uint64
+	playbackDropped atomic.Uint64
+
 	stopCh     chan struct{}
 	wg         sync.WaitGroup // tracks captureLoop + playbackLoop goroutines
 	OnSpeaking func()         // called (throttled) when mic audio exceeds speaking threshold
@@ -513,6 +518,7 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			select {
 			case ae.CaptureOut <- encoded:
 			default:
+				ae.captureDropped.Add(1)
 			}
 		}
 	}
@@ -674,6 +680,18 @@ func (ae *AudioEngine) SetMuted(muted bool) {
 // SetDeafened enables or disables audio playback.
 func (ae *AudioEngine) SetDeafened(deafened bool) {
 	ae.deafened.Store(deafened)
+}
+
+// DroppedFrames returns and resets the capture and playback drop counters.
+// Call periodically (e.g. from adaptBitrateLoop) to include in metrics.
+func (ae *AudioEngine) DroppedFrames() (capture, playback uint64) {
+	return ae.captureDropped.Swap(0), ae.playbackDropped.Swap(0)
+}
+
+// AddPlaybackDrop increments the playback dropped-frame counter.
+// Called from the transport receive goroutine when PlaybackIn is full.
+func (ae *AudioEngine) AddPlaybackDrop() {
+	ae.playbackDropped.Add(1)
 }
 
 // EncodeFrame encodes a PCM int16 frame to Opus. Exported for testing.

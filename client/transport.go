@@ -81,6 +81,20 @@ type Metrics struct {
 	JitterMs       float64 `json:"jitter_ms"`        // inter-arrival jitter (smoothed)
 	BitrateKbps    float64 `json:"bitrate_kbps"`     // measured outgoing audio
 	OpusTargetKbps int     `json:"opus_target_kbps"` // current encoder target
+	QualityLevel   string  `json:"quality_level"`    // "good", "moderate", or "poor"
+}
+
+// qualityLevel classifies connection quality from metrics.
+// Thresholds: good (loss<2%, RTT<100ms, jitter<20ms),
+// moderate (loss<10%, RTT<300ms, jitter<50ms), poor (everything else).
+func qualityLevel(loss, rttMs, jitterMs float64) string {
+	if loss >= 0.10 || rttMs >= 300 || jitterMs >= 50 {
+		return "poor"
+	}
+	if loss >= 0.02 || rttMs >= 100 || jitterMs >= 20 {
+		return "moderate"
+	}
+	return "good"
 }
 
 // Transport manages the WebTransport connection to the server.
@@ -119,6 +133,10 @@ type Transport struct {
 	// Inter-arrival jitter: EWMA of |actual_gap - 20ms| across all senders,
 	// stored as float64 bits for atomic access. Units: milliseconds.
 	smoothedJitter atomic.Uint64
+
+	// Dropped frame counters: incremented when the playback channel is full
+	// and a received frame cannot be delivered.
+	playbackDropped atomic.Uint64
 
 	// muted holds the set of remote user IDs whose audio is suppressed locally.
 	muted mutedSet
@@ -629,6 +647,7 @@ func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- Tagged
 			select {
 			case playbackCh <- TaggedAudio{SenderID: userID, Seq: seq, OpusData: opusData}:
 			default:
+				t.playbackDropped.Add(1)
 			}
 		}
 	}()
@@ -663,10 +682,11 @@ func (t *Transport) GetMetrics() Metrics {
 	jitterMs := math.Float64frombits(t.smoothedJitter.Load())
 
 	return Metrics{
-		RTTMs:       rtt,
-		PacketLoss:  loss,
-		JitterMs:    jitterMs,
-		BitrateKbps: bitrate,
+		RTTMs:        rtt,
+		PacketLoss:   loss,
+		JitterMs:     jitterMs,
+		BitrateKbps:  bitrate,
+		QualityLevel: qualityLevel(loss, rtt, jitterMs),
 	}
 }
 

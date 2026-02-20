@@ -340,6 +340,101 @@ func TestPongTimeoutConstant(t *testing.T) {
 	}
 }
 
+func TestQualityLevelGood(t *testing.T) {
+	if q := qualityLevel(0.01, 50, 10); q != "good" {
+		t.Errorf("expected good, got %q", q)
+	}
+}
+
+func TestQualityLevelModerate(t *testing.T) {
+	// High loss but below poor threshold.
+	if q := qualityLevel(0.05, 50, 10); q != "moderate" {
+		t.Errorf("expected moderate for loss=5%%, got %q", q)
+	}
+	// High RTT.
+	if q := qualityLevel(0.01, 200, 10); q != "moderate" {
+		t.Errorf("expected moderate for rtt=200ms, got %q", q)
+	}
+	// High jitter.
+	if q := qualityLevel(0.01, 50, 30); q != "moderate" {
+		t.Errorf("expected moderate for jitter=30ms, got %q", q)
+	}
+}
+
+func TestQualityLevelPoor(t *testing.T) {
+	if q := qualityLevel(0.15, 50, 10); q != "poor" {
+		t.Errorf("expected poor for loss=15%%, got %q", q)
+	}
+	if q := qualityLevel(0.01, 400, 10); q != "poor" {
+		t.Errorf("expected poor for rtt=400ms, got %q", q)
+	}
+	if q := qualityLevel(0.01, 50, 60); q != "poor" {
+		t.Errorf("expected poor for jitter=60ms, got %q", q)
+	}
+}
+
+func TestQualityLevelBoundaries(t *testing.T) {
+	// Exactly at moderate boundaries.
+	if q := qualityLevel(0.02, 0, 0); q != "moderate" {
+		t.Errorf("loss=2%% boundary: expected moderate, got %q", q)
+	}
+	if q := qualityLevel(0, 100, 0); q != "moderate" {
+		t.Errorf("rtt=100ms boundary: expected moderate, got %q", q)
+	}
+	if q := qualityLevel(0, 0, 20); q != "moderate" {
+		t.Errorf("jitter=20ms boundary: expected moderate, got %q", q)
+	}
+	// Exactly at poor boundaries.
+	if q := qualityLevel(0.10, 0, 0); q != "poor" {
+		t.Errorf("loss=10%% boundary: expected poor, got %q", q)
+	}
+	if q := qualityLevel(0, 300, 0); q != "poor" {
+		t.Errorf("rtt=300ms boundary: expected poor, got %q", q)
+	}
+	if q := qualityLevel(0, 0, 50); q != "poor" {
+		t.Errorf("jitter=50ms boundary: expected poor, got %q", q)
+	}
+}
+
+func TestMetricsQualityLevelField(t *testing.T) {
+	m := Metrics{
+		RTTMs:       10.5,
+		PacketLoss:  0.01,
+		JitterMs:    3.5,
+		BitrateKbps: 32.0,
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := out["quality_level"]; !ok {
+		t.Fatal("quality_level field missing from Metrics JSON")
+	}
+}
+
+func TestSendFailureThreshold(t *testing.T) {
+	// Ensure the threshold is reasonable (between 10 and 200).
+	if sendFailureThreshold < 10 || sendFailureThreshold > 200 {
+		t.Errorf("sendFailureThreshold = %d, expected between 10 and 200", sendFailureThreshold)
+	}
+}
+
+func TestPlaybackDroppedCounter(t *testing.T) {
+	tr := NewTransport()
+	// Initially zero.
+	if d := tr.playbackDropped.Load(); d != 0 {
+		t.Fatalf("initial playbackDropped = %d, want 0", d)
+	}
+	tr.playbackDropped.Add(7)
+	if d := tr.playbackDropped.Load(); d != 7 {
+		t.Errorf("playbackDropped = %d, want 7", d)
+	}
+}
+
 func TestOnDisconnectedCallbackSignature(t *testing.T) {
 	// Verify that the callback receives a reason string.
 	tr := NewTransport()

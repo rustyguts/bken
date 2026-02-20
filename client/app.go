@@ -435,6 +435,10 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 			a.metricsMu.Lock()
 			a.cachedMetrics = m
 			a.metricsMu.Unlock()
+
+			// Push quality event to the frontend so the UI can show
+			// a real-time indicator without polling.
+			wailsrt.EventsEmit(a.ctx, "voice:quality", m)
 		}
 	}
 }
@@ -685,22 +689,40 @@ func (a *App) MoveUserToChannel(userID int, channelID int) string {
 	return ""
 }
 
+// sendFailureThreshold is the number of consecutive SendAudio errors before
+// the send loop gives up and disconnects. 50 errors ≈ 1 s of voice at 50 fps.
+// Mirrors the server-side circuit breaker threshold for symmetry.
+const sendFailureThreshold = 50
+
 // sendLoop reads encoded audio from the capture channel and forwards it via
-// transport. Exits when the audio engine stops or on send error.
-// On send error, it closes the transport session so that readControl detects
-// the disconnect and fires onDisconnected → frontend reconnect banner.
+// transport. Exits when the audio engine stops or after sustained send failures.
+//
+// Transient errors (e.g. QUIC buffer full) are tolerated: the failure counter
+// resets on every successful send. Only after sendFailureThreshold consecutive
+// errors does the loop give up and trigger a disconnect.
 func (a *App) sendLoop() {
 	done := a.audio.Done()
+	var consecutiveErrors int
 	for {
 		select {
 		case <-done:
 			return
 		case data := <-a.audio.CaptureOut:
 			if err := a.transport.SendAudio(data); err != nil {
-				log.Printf("[app] send audio error, closing session: %v", err)
-				a.transport.Disconnect()
-				return
+				consecutiveErrors++
+				if consecutiveErrors == 1 {
+					log.Printf("[app] send audio error: %v", err)
+				} else if consecutiveErrors%10 == 0 {
+					log.Printf("[app] send audio: %d consecutive errors", consecutiveErrors)
+				}
+				if consecutiveErrors >= sendFailureThreshold {
+					log.Printf("[app] send audio: %d consecutive errors, disconnecting", consecutiveErrors)
+					a.transport.Disconnect()
+					return
+				}
+				continue
 			}
+			consecutiveErrors = 0
 		}
 	}
 }
