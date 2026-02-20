@@ -54,8 +54,12 @@ install_macos() {
   log "Installing macOS dependencies with Homebrew..."
   brew install portaudio opus opusfile autoconf automake libtool pkg-config git wget
 
+  local brew_prefix
+  brew_prefix="$(brew --prefix)"
+  ensure_pkg_config_prefix "${brew_prefix}"
+
   if ! pkg-config --exists rnnoise; then
-    build_and_install_rnnoise "$(brew --prefix)"
+    build_and_install_rnnoise "${brew_prefix}"
   fi
 }
 
@@ -115,6 +119,8 @@ install_linux_pacman() {
 }
 
 install_linux() {
+  ensure_pkg_config_prefix "/usr/local"
+
   if command -v apt-get >/dev/null 2>&1; then
     install_linux_apt
   elif command -v dnf >/dev/null 2>&1; then

@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/wailsapp/wails/v2"
@@ -10,6 +11,28 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 )
+
+func setDefaultEnv(key, value string) {
+	if os.Getenv(key) == "" {
+		_ = os.Setenv(key, value)
+	}
+}
+
+func configureLinuxDesktopEnv() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if os.Getenv("WAYLAND_DISPLAY") == "" {
+		return
+	}
+
+	// WebKitGTK can hit compositor/protocol errors on some Wayland stacks.
+	setDefaultEnv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+	setDefaultEnv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+	if os.Getenv("DISPLAY") != "" {
+		setDefaultEnv("GDK_BACKEND", "x11")
+	}
+}
 
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -29,6 +52,8 @@ func parseStartupAddr(args []string) string {
 }
 
 func main() {
+	configureLinuxDesktopEnv()
+
 	app := NewApp()
 	app.startupAddr = parseStartupAddr(os.Args[1:])
 

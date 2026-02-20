@@ -1,7 +1,10 @@
 package main
 
 /*
-#cgo pkg-config: rnnoise
+#cgo darwin pkg-config: rnnoise
+#cgo windows pkg-config: rnnoise
+#cgo linux CFLAGS: -I/usr/local/include
+#cgo linux LDFLAGS: -L/usr/local/lib -lrnnoise
 #include <rnnoise.h>
 #include <stdlib.h>
 */
