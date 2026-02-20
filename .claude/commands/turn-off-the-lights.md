@@ -26,17 +26,10 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Don't use cards for channel ui. Increase the size slightly of the user avatars.
 - Allow admins to delete channels
 - Allow admins to set a channel emoji
-- Bug: When the user updates their global name it is not changes in the chatroom. It does not need to change for previous messages but it must change for messages sent after the name has been changed
-- Only show the users first character in Avatars on the client
 - Allow users to edit and delete their own messages, not other peoples messages. Show icons on hover only
 - Allow owners to delete any message. Show the trash icon on hover
-- Remove the text "Chatroom" in the top right of the chatroom
-- Bug: The disconnect button should only be enabled if the user is in a voice channel. The disconnect button should never disconnect a user from a server. That is only done by switching between servers.The disconnect button can be renamed in code to "Leave Voice Channel"
 - Admin: Owners can edit channel names.
 - Owners can see a server settings page which control settings on the server side. Move server name edit to this new server settings panel. Put the settings icon next to the create channel icon
-- DaisyUI: Use daisyui soft buttons globall across all parts of the client. Those look nice.
-- Condsense the chat room UI. Show more messages in the space you have.
-- Every server should start with a default channel if none exist. The default channel cannot be deleted.
 - The client should generate a private/public key pair. The server uses the public key to know who the user is. Plumb this up with role based authentication. There is "OWNER" and "USER"
 
 - Voice transmit speed and reliability are the single most important aspects of the application. It must be robust, handle errors, and be extremely fast.
@@ -69,3 +62,10 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Zero-alloc voice datagrams and auto-rejoin channel on reconnect (SendAudio uses sync.Pool with *[]byte to recycle datagram buffers — 0 B/op and ~2x throughput vs old 96 B/op per-frame allocation; frontend remembers voice channel before disconnect and auto-rejoins after successful reconnect instead of landing in lobby; 4 new pool tests + 2 benchmarks)
 - Fix Broadcast data race + RNNoise ML-based VAD (server Broadcast had a data race on shared snapshotBuf backing array under concurrent RLock — replaced with sync.Pool giving each goroutine its own buffer; client now uses RNNoise's neural-network voice probability instead of energy-threshold VAD when noise cancellation is active — far better at rejecting non-speech noise like keyboard clicks, fans, HVAC; VAD.ShouldSendProb accepts ML probability with same hangover logic; VAD.Enabled accessor; NoiseCanceller.VADProbability captures rnnoise_process_frame return value averaged over two half-frames; 8 new VAD tests + 2 noise tests + 1 concurrent broadcast test)
 - NACK-based voice packet retransmission for LAN loss recovery (server caches last 128 datagrams per sender in a ring buffer indexed by seq % 128; client detects sequence gaps in receive goroutine and sends `nack` control message with missing seq numbers for small gaps ≤5; server looks up cached datagrams and retransmits directly to the requesting client via SendDatagram; on LAN with <1ms RTT retransmissions arrive well within the jitter buffer window giving 100% recovery vs ~80% FEC/PLC quality; channel-check prevents cross-channel NACK abuse; client-side loss accounting now ignores retransmitted/reordered packets to avoid corrupting metrics; 4 cache tests + 8 NACK handler tests + 2 client JSON tests)
+- Remove "Chatroom" header text from chatroom panel (condensed header with reduced padding)
+- Only show first character in user avatars (UserCard, ServerChannels, UserControls, Sidebar all updated to single-char initials)
+- Bug fix: Disconnect button renamed to "Leave Voice Channel" — only disconnects voice, never the server connection (event renamed from disconnect to leave-voice)
+- Bug fix: Global username changes now sync to chatroom via rename_user control message (server broadcasts user_renamed to all clients; frontend updates user list on event; 4 server tests for rename validation)
+- Condense chat room UI (compact inline message layout with username/time/message on same line; reduced padding and spacing throughout)
+- DaisyUI soft buttons globally (btn-soft btn-primary applied across all components: UserControls, ServerBrowser, Sidebar, ServerChannels, ChannelChatroom)
+- Default channel protection — last remaining channel cannot be deleted (Room.ChannelCount() guard in delete_channel handler; 2 new server tests for last-channel rejection + multi-channel deletion)
