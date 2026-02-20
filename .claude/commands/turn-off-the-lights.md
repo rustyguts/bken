@@ -59,3 +59,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice: Noise suppression enabled by default; all audio settings applied on startup (not just when settings panel opens)
 - Voice: Ability to set volume (volume slider in settings panel)
 - UI: Beautiful settings page (grouped cards with icons for Input, Output, Voice Processing, Appearance)
+- Voice: Voice Activity Detection — silent frames skipped to save CPU and bandwidth (enabled by default, configurable sensitivity)
