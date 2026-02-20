@@ -26,8 +26,8 @@ This is a client/server voice over ip application. Clients running the bken desk
   - Owners can kick members from the server
   - Owners can create channels in the server and CRUD the channels
   - Owners can set the name of the server
-- Server should have state. Recommend embedded sqlite database.
-  - Database should have safe and reliable migrations that can grow over time
+- Server should have more state. Recommend embedded sqlite database.
+  - ✅ Foundation is done — see Done section
 - Client should follow daisy ui for all UI styling
 - Users should be able to move between channels
 - Users should be able to connect to multiple servers and switch between them
@@ -61,3 +61,4 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Voice: Echo cancellation — NLMS adaptive filter (40 ms bulk delay, 10 ms taps), enabled by default, toggle in Voice Processing settings
 - UI: Responsive layout — MinWidth=400/MinHeight=300; left info panel hides below 768 px; ServerBrowser/AudioSettings/RoomBrowser use responsive padding; user cards centred
 - Performance: AEC hot path — pre-allocated refBuf eliminates 285 KB/s GC pressure; FeedFarEnd/Process reference extraction use bulk copy (0 allocs/op on both benchmarks)
+- Server state: embedded SQLite (modernc.org/sqlite, no CGO) with versioned migration runner; settings table with GET/PUT /api/settings; server_name defaults to "bken server"; -db flag for DB path
