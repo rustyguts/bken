@@ -496,11 +496,21 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 
 		// Voice activity detection: skip silent frames entirely to save
 		// CPU and bandwidth. Hangover keeps trailing frames so word endings
-		// are not clipped. Re-measure RMS after processing so AGC/noise
-		// changes are reflected in the VAD decision. Bypassed in PTT mode
-		// since the user explicitly controls transmission.
-		if !ae.pttMode.Load() && !ae.vadProc.ShouldSend(vad.RMS(buf)) {
-			continue
+		// are not clipped. Bypassed in PTT mode since the user explicitly
+		// controls transmission.
+		//
+		// When RNNoise noise cancellation is active, use its ML-based voice
+		// probability instead of energy-threshold VAD — it is far better at
+		// rejecting non-speech noise (keyboard clicks, fans, HVAC) that
+		// happens to have similar energy levels to speech.
+		if !ae.pttMode.Load() {
+			if nc != nil {
+				if !ae.vadProc.ShouldSendProb(nc.VADProbability()) {
+					continue
+				}
+			} else if !ae.vadProc.ShouldSend(vad.RMS(buf)) {
+				continue
+			}
 		}
 
 		// Convert float32 to int16 for Opus encoder.

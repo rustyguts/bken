@@ -115,6 +115,75 @@ func TestReset(t *testing.T) {
 	}
 }
 
+func TestShouldSendProbDisabled(t *testing.T) {
+	v := New()
+	v.SetEnabled(false)
+	if !v.ShouldSendProb(0) {
+		t.Error("disabled VAD should always return true for ShouldSendProb")
+	}
+}
+
+func TestShouldSendProbSpeech(t *testing.T) {
+	v := New()
+	if !v.ShouldSendProb(0.8) {
+		t.Error("high probability should return true")
+	}
+}
+
+func TestShouldSendProbNoise(t *testing.T) {
+	v := New()
+	// Drain hangover.
+	for range DefaultHangover + 1 {
+		v.ShouldSendProb(0.1)
+	}
+	if v.ShouldSendProb(0.1) {
+		t.Error("low probability after hangover should return false")
+	}
+}
+
+func TestShouldSendProbHangover(t *testing.T) {
+	v := New()
+	// Trigger speech to set hangover.
+	v.ShouldSendProb(0.9)
+	// Hangover frames should still send.
+	for i := range DefaultHangover {
+		if !v.ShouldSendProb(0.1) {
+			t.Errorf("hangover frame %d should return true", i)
+		}
+	}
+	// After hangover expires.
+	if v.ShouldSendProb(0.1) {
+		t.Error("frame after hangover should return false")
+	}
+}
+
+func TestShouldSendProbBoundary(t *testing.T) {
+	v := New()
+	// Drain hangover first.
+	for range DefaultHangover + 1 {
+		v.ShouldSendProb(0)
+	}
+	// Exactly 0.5 should not be treated as speech (> 0.5 required).
+	if v.ShouldSendProb(0.5) {
+		t.Error("probability exactly 0.5 should not be treated as speech")
+	}
+	// Just above 0.5 should be speech.
+	if !v.ShouldSendProb(0.51) {
+		t.Error("probability 0.51 should be treated as speech")
+	}
+}
+
+func TestEnabled(t *testing.T) {
+	v := New()
+	if !v.Enabled() {
+		t.Error("expected enabled by default")
+	}
+	v.SetEnabled(false)
+	if v.Enabled() {
+		t.Error("expected disabled after SetEnabled(false)")
+	}
+}
+
 func TestRMSZeroFrame(t *testing.T) {
 	if RMS(nil) != 0 {
 		t.Error("nil frame should return 0")

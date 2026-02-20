@@ -570,6 +570,49 @@ func TestRoomBroadcastConcurrentWithClientChanges(t *testing.T) {
 	// If we got here without deadlock or panic, the test passes.
 }
 
+func TestRoomBroadcastConcurrentSenders(t *testing.T) {
+	// Regression test: multiple goroutines calling Broadcast simultaneously
+	// must each get their own target buffer. The old code shared snapshotBuf
+	// under RLock, causing a data race on the backing array.
+	room := NewRoom()
+	const numClients = 10
+
+	clients := make([]*Client, numClients)
+	for i := range clients {
+		c := &Client{Username: fmt.Sprintf("user-%d", i), session: &mockSender{}}
+		room.AddClient(c)
+		c.channelID.Store(1)
+		clients[i] = c
+	}
+
+	var wg sync.WaitGroup
+	// Every client broadcasts concurrently — exercises concurrent RLock path.
+	for _, c := range clients {
+		wg.Add(1)
+		go func(sender *Client) {
+			defer wg.Done()
+			data := []byte{0, 0, 0, 1, 0xAA}
+			for i := 0; i < 200; i++ {
+				room.Broadcast(sender.ID, data)
+			}
+		}(c)
+	}
+
+	wg.Wait()
+
+	// Every client should have received datagrams from all other senders.
+	for _, c := range clients {
+		ms := c.session.(*mockSender)
+		ms.mu.Lock()
+		count := len(ms.received)
+		ms.mu.Unlock()
+		// Each of the other 9 senders sent 200 datagrams = 1800 expected.
+		if count != (numClients-1)*200 {
+			t.Errorf("client %d: received %d datagrams, want %d", c.ID, count, (numClients-1)*200)
+		}
+	}
+}
+
 func TestRoomNextMsgID(t *testing.T) {
 	room := NewRoom()
 	id1 := room.NextMsgID()

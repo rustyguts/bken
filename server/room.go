@@ -24,7 +24,6 @@ type Room struct {
 	onRename   func(string) error // optional persistence callback, fired after Rename; protected by mu
 	channels   []ChannelInfo // cached channel list sent to newly-connecting clients; protected by mu
 	apiPort    int           // HTTP API port communicated to clients in user_list; protected by mu
-	snapshotBuf []broadcastTarget // reusable buffer for Broadcast fan-out; protected by mu
 	nextID      atomic.Uint32
 	nextMsgID   atomic.Uint64
 
@@ -209,6 +208,17 @@ type broadcastTarget struct {
 	health  *sendHealth
 }
 
+// targetPool provides per-goroutine []broadcastTarget slices for Broadcast.
+// Using a pool instead of a shared field on Room avoids a data race: RLock
+// allows multiple concurrent Broadcast calls, which would otherwise share
+// and concurrently append to the same backing array.
+var targetPool = sync.Pool{
+	New: func() any {
+		s := make([]broadcastTarget, 0, 8)
+		return &s
+	},
+}
+
 // Broadcast sends a datagram to every client in the same channel as the sender,
 // excluding the sender itself. Clients in channel 0 (lobby) never send or
 // receive voice datagrams.
@@ -231,7 +241,8 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 		return // lobby users don't transmit voice
 	}
 
-	targets := r.snapshotBuf[:0]
+	sp := targetPool.Get().(*[]broadcastTarget)
+	targets := (*sp)[:0]
 	for id, c := range r.clients {
 		if id == senderID {
 			continue
@@ -241,7 +252,6 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 		}
 		targets = append(targets, broadcastTarget{id: id, session: c.session, health: &c.health})
 	}
-	r.snapshotBuf = targets // keep backing array for next call
 	r.mu.RUnlock()
 
 	for _, t := range targets {
@@ -260,6 +270,9 @@ func (r *Room) Broadcast(senderID uint16, data []byte) {
 			}
 		}
 	}
+
+	*sp = targets // preserve grown backing array for reuse
+	targetPool.Put(sp)
 }
 
 // BroadcastControl sends a control message to all clients except the one with excludeID.

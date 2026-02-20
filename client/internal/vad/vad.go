@@ -78,6 +78,30 @@ func (v *VAD) ShouldSend(rms float32) bool {
 	return false // pure silence
 }
 
+// ShouldSendProb is like ShouldSend but takes a voice probability (0.0–1.0)
+// instead of RMS energy. Used with ML-based VAD signals such as RNNoise,
+// which provide more accurate speech/noise classification than energy
+// thresholds. A probability above 0.5 is treated as speech.
+func (v *VAD) ShouldSendProb(prob float32) bool {
+	if !v.enabled {
+		return true
+	}
+	if prob > 0.5 {
+		v.remaining = v.hangover // speech — reset hangover
+		return true
+	}
+	if v.remaining > 0 {
+		v.remaining-- // in hangover — still send
+		return true
+	}
+	return false // noise
+}
+
+// Enabled reports whether the VAD is currently enabled.
+func (v *VAD) Enabled() bool {
+	return v.enabled
+}
+
 // Reset clears the hangover counter without changing other settings.
 func (v *VAD) Reset() {
 	v.remaining = 0

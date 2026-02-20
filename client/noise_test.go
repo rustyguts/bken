@@ -53,6 +53,42 @@ func TestNoiseCancellerDisabled(t *testing.T) {
 	}
 }
 
+func TestNoiseCancellerVADProbabilityWhiteNoise(t *testing.T) {
+	nc := NewNoiseCanceller()
+	defer nc.Destroy()
+
+	nc.SetEnabled(true)
+	nc.SetLevel(1.0)
+
+	rng := rand.New(rand.NewSource(42))
+
+	// Warm up RNNoise with several frames.
+	buf := make([]float32, FrameSize)
+	for f := 0; f < 10; f++ {
+		for i := range buf {
+			buf[i] = rng.Float32()*2 - 1
+		}
+		nc.Process(buf)
+	}
+
+	// After processing pure noise, VAD probability should be low.
+	prob := nc.VADProbability()
+	if prob > 0.5 {
+		t.Errorf("white noise VAD probability should be <= 0.5, got %f", prob)
+	}
+	t.Logf("white noise VAD probability: %.4f", prob)
+}
+
+func TestNoiseCancellerVADProbabilityInitialZero(t *testing.T) {
+	nc := NewNoiseCanceller()
+	defer nc.Destroy()
+
+	// Before any processing, VAD probability should be 0.
+	if prob := nc.VADProbability(); prob != 0 {
+		t.Errorf("initial VAD probability should be 0, got %f", prob)
+	}
+}
+
 func TestNoiseCancellerReducesWhiteNoise(t *testing.T) {
 	nc := NewNoiseCanceller()
 	defer nc.Destroy()

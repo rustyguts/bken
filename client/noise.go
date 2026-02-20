@@ -20,6 +20,7 @@ type NoiseCanceller struct {
 	st1     *C.DenoiseState // processes samples [480:960]
 	level   float32         // 0.0 = bypass, 1.0 = full suppression
 	enabled bool
+	vadProb float32         // last voice activity probability from RNNoise (0.0–1.0)
 
 	// C buffers pre-allocated at struct level to avoid per-frame malloc/free.
 	cIn  *C.float
@@ -83,7 +84,7 @@ func (nc *NoiseCanceller) Process(buf []float32) {
 	for i := 0; i < rnnoiseFrameSize; i++ {
 		inSlice[i] = C.float(buf[i] * 32767.0)
 	}
-	C.rnnoise_process_frame(nc.st0, nc.cOut, nc.cIn)
+	vadProb0 := float32(C.rnnoise_process_frame(nc.st0, nc.cOut, nc.cIn))
 	for i := 0; i < rnnoiseFrameSize; i++ {
 		denoised := float32(outSlice[i]) / 32767.0
 		buf[i] = buf[i]*(1-level) + denoised*level
@@ -93,11 +94,25 @@ func (nc *NoiseCanceller) Process(buf []float32) {
 	for i := 0; i < rnnoiseFrameSize; i++ {
 		inSlice[i] = C.float(buf[rnnoiseFrameSize+i] * 32767.0)
 	}
-	C.rnnoise_process_frame(nc.st1, nc.cOut, nc.cIn)
+	vadProb1 := float32(C.rnnoise_process_frame(nc.st1, nc.cOut, nc.cIn))
 	for i := 0; i < rnnoiseFrameSize; i++ {
 		denoised := float32(outSlice[i]) / 32767.0
 		buf[rnnoiseFrameSize+i] = buf[rnnoiseFrameSize+i]*(1-level) + denoised*level
 	}
+
+	// Average the two half-frame probabilities for the full frame's VAD signal.
+	nc.vadProb = (vadProb0 + vadProb1) / 2
+}
+
+// VADProbability returns the voice activity probability from the last call to
+// Process. The value is the average of the two half-frame probabilities
+// returned by rnnoise_process_frame (0.0 = noise, 1.0 = speech). This
+// ML-based signal is far more accurate than energy-threshold VAD at rejecting
+// non-speech noise such as keyboard clicks, fans, and HVAC.
+func (nc *NoiseCanceller) VADProbability() float32 {
+	nc.mu.Lock()
+	defer nc.mu.Unlock()
+	return nc.vadProb
 }
 
 // Destroy frees the underlying C RNNoise state instances and pre-allocated buffers.
