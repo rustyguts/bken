@@ -31,6 +31,7 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Client should follow daisy ui for all UI styling
 - Users should be able to move between channels
 - Users should be able to connect to multiple servers and switch between them
+  - ✅ Server list management done — see Done section
 - UI: The inteface should always remain simple, clean, modern
 - Server owners should be able to generate invite links from the servers public endpoint. When openened in a browser this should open the app and automatically connect you to the server
 - Servers should support chat rooms over WebTransport enabling live chat. Chats exist at the server level and also at the channel level (global chat and channel chat)
@@ -65,4 +66,5 @@ This is a client/server voice over ip application. Clients running the bken desk
 - Server state: embedded SQLite (modernc.org/sqlite, no CGO) with versioned migration runner; settings table with GET/PUT /api/settings; server_name defaults to "bken server"; -db flag for DB path
 - Voice reliability: atomic.Bool for connected flag (fixes data race); sendLoop triggers reconnect on SendAudio error; pongTimeout 10s→6s (faster disconnect detection); StartReceiving captures session once (no per-datagram mutex)
 - Chat: global server-level text chat over existing control stream; "chat" ControlMsg type; server stamps username/ID/timestamp (anti-spoofing); 500-char limit; Voice/Chat tabs in Room panel; ChatPanel.vue with auto-scroll; SendChat Wails bridge; unread badge on Chat tab when on Voice tab
-- Server name in title bar: server sends name (from SQLite settings) in user_list handshake; client shows "bken › <name>" in TitleBar while connected; clears on disconnect
+- Server name in title bar: server sends name (from SQLite settings) in user_list handshake; client shows "bken › <name>" in TitleBar while connected; clears on disconnect; PUT /api/settings live-updates connected clients via server_info broadcast
+- Server browser management: add server (name + host:port form, persisted to config.json) and remove server (trash icon); empty-state guidance; changes survive app restart
