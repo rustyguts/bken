@@ -1,7 +1,7 @@
 /**
  * Frontend integration tests for bken.
  *
- * These tests mount larger component trees (Room, ChannelChatroom, etc.) and
+ * These tests mount larger component trees (ChannelView, ChannelChat, etc.) and
  * simulate multi-step user flows by combining DOM interactions with Wails
  * event emissions.
  */
@@ -11,8 +11,8 @@ import { nextTick } from 'vue'
 import { emitWailsEvent, getGoMock, resetWailsEvents, resetConfig } from './setup'
 
 // Components under test
-import Room from '../Room.vue'
-import ChannelChatroom from '../ChannelChatroom.vue'
+import ChannelView from '../ChannelView.vue'
+import ChannelChat from '../ChannelChat.vue'
 import SettingsPage from '../SettingsPage.vue'
 import KeyboardShortcuts from '../KeyboardShortcuts.vue'
 import UserControls from '../UserControls.vue'
@@ -48,7 +48,7 @@ function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return { id: 1, name: 'General', ...overrides }
 }
 
-const defaultRoomProps = () => ({
+const defaultChannelViewProps = () => ({
   connected: false,
   voiceConnected: false,
   reconnecting: false,
@@ -72,7 +72,7 @@ const defaultRoomProps = () => ({
   showSystemMessages: true,
 })
 
-const defaultChatroomProps = () => ({
+const defaultChannelChatProps = () => ({
   messages: [] as ChatMessage[],
   channels: [] as Channel[],
   selectedChannelId: 0,
@@ -172,9 +172,9 @@ describe('Server Connection Flow', () => {
     expect(alert.text()).toContain('Connection refused')
   })
 
-  it('Room emits disconnect when disconnect is requested', async () => {
-    const wrapper = mount(Room, {
-      props: { ...defaultRoomProps(), connected: true, voiceConnected: true, connectedAddr: 'localhost:8080' },
+  it('ChannelView emits disconnect when disconnect is requested', async () => {
+    const wrapper = mount(ChannelView, {
+      props: { ...defaultChannelViewProps(), connected: true, voiceConnected: true, connectedAddr: 'localhost:8080' },
     })
     await flush()
 
@@ -192,7 +192,7 @@ describe('Server Connection Flow', () => {
 // 2. Channel Navigation
 // ===========================================================================
 describe('Channel Navigation', () => {
-  it('clicking a channel opens that channel chatroom', async () => {
+  it('clicking a channel opens that channel chat', async () => {
     const channels = [makeChannel({ id: 1, name: 'General' }), makeChannel({ id: 2, name: 'Random' })]
     const msgs: ChatMessage[] = [
       makeChatMsg({ id: 1, msgId: 1, channelId: 0, message: 'Lobby msg' }),
@@ -200,9 +200,9 @@ describe('Channel Navigation', () => {
       makeChatMsg({ id: 3, msgId: 3, channelId: 2, message: 'Random msg' }),
     ]
 
-    const wrapper = mount(Room, {
+    const wrapper = mount(ChannelView, {
       props: {
-        ...defaultRoomProps(),
+        ...defaultChannelViewProps(),
         connected: true,
         channels,
         chatMessages: msgs,
@@ -212,7 +212,7 @@ describe('Channel Navigation', () => {
 
     expect(wrapper.text()).toContain('Lobby msg')
 
-    const channelRows = wrapper.findAll('.room-channels ul.menu > li')
+    const channelRows = wrapper.findAll('.channel-channels ul.menu > li')
     const generalRow = channelRows.find(row => row.text().includes('General'))
     expect(generalRow).toBeTruthy()
     await generalRow!.trigger('click')
@@ -235,8 +235,8 @@ describe('Channel Navigation', () => {
   })
 
   it('shows empty state when no messages in channel', async () => {
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [], connected: true },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [], connected: true },
     })
     await flush()
 
@@ -249,8 +249,8 @@ describe('Channel Navigation', () => {
 // ===========================================================================
 describe('Chat Flow', () => {
   it('sends a message on Enter and clears input', async () => {
-    const wrapper = mount(ChannelChatroom, {
-      props: defaultChatroomProps(),
+    const wrapper = mount(ChannelChat, {
+      props: defaultChannelChatProps(),
     })
     await flush()
 
@@ -267,8 +267,8 @@ describe('Chat Flow', () => {
   })
 
   it('does not send empty messages', async () => {
-    const wrapper = mount(ChannelChatroom, {
-      props: defaultChatroomProps(),
+    const wrapper = mount(ChannelChat, {
+      props: defaultChannelChatProps(),
     })
     await flush()
 
@@ -281,8 +281,8 @@ describe('Chat Flow', () => {
 
   it('shows (edited) label after message edit event', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 1, message: 'Original' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -300,8 +300,8 @@ describe('Chat Flow', () => {
 
   it('shows "message deleted" after delete event', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 1, message: 'To be deleted' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -318,8 +318,8 @@ describe('Chat Flow', () => {
 
   it('emits editMessage when user edits own message', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 1, message: 'My message' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], myId: 1 },
     })
     await flush()
 
@@ -342,8 +342,8 @@ describe('Chat Flow', () => {
 
   it('emits deleteMessage when user deletes a message', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 1, message: 'Delete me' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], myId: 1 },
     })
     await flush()
 
@@ -445,12 +445,12 @@ describe('Voice Flow', () => {
     expect(deafenBtn.attributes('disabled')).toBeDefined()
   })
 
-  it('Room emits activateChannel when joining voice on a channel', async () => {
+  it('ChannelView emits activateChannel when joining voice on a channel', async () => {
     const users = [makeUser({ id: 1, username: 'Me' })]
     const channels = [makeChannel({ id: 1, name: 'General' })]
-    const wrapper = mount(Room, {
+    const wrapper = mount(ChannelView, {
       props: {
-        ...defaultRoomProps(),
+        ...defaultChannelViewProps(),
         connected: true,
         voiceConnected: true,
         connectedAddr: 'localhost:8080',
@@ -479,8 +479,8 @@ describe('Voice Flow', () => {
 describe('Reactions Flow', () => {
   it('opens reaction picker on button click and emits addReaction', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 2, username: 'Bob', message: 'React to me' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -511,8 +511,8 @@ describe('Reactions Flow', () => {
       message: 'Has reactions',
       reactions: [{ emoji: '👍', user_ids: [1], count: 1 }],
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], myId: 1 },
     })
     await flush()
 
@@ -538,8 +538,8 @@ describe('Reactions Flow', () => {
       message: 'Has reactions',
       reactions: [{ emoji: '❤️', user_ids: [2], count: 1 }],
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], myId: 1 },
     })
     await flush()
 
@@ -563,8 +563,8 @@ describe('Mention Flow', () => {
       makeUser({ id: 2, username: 'Bob' }),
       makeUser({ id: 3, username: 'Bobby' }),
     ]
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), users, myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), users, myId: 1 },
     })
     await flush()
 
@@ -587,8 +587,8 @@ describe('Mention Flow', () => {
       makeUser({ id: 1, username: 'Me' }),
       makeUser({ id: 2, username: 'Bob' }),
     ]
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), users, myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), users, myId: 1 },
     })
     await flush()
 
@@ -619,8 +619,8 @@ describe('Mention Flow', () => {
       mentions: [1],
     })
     const users = [makeUser({ id: 1, username: 'Me' }), makeUser({ id: 2, username: 'Bob' })]
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], users, myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], users, myId: 1 },
     })
     await flush()
 
@@ -636,8 +636,8 @@ describe('Mention Flow', () => {
 describe('Reply Flow', () => {
   it('shows reply bar when Reply is clicked and sends with reply context', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 2, username: 'Bob', message: 'Reply to me' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -667,8 +667,8 @@ describe('Reply Flow', () => {
 
   it('cancel reply hides the reply bar', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 2, username: 'Bob', message: 'Reply target' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -700,8 +700,8 @@ describe('Reply Flow', () => {
       message: 'My reply',
       replyPreview: { msg_id: 5, username: 'Alice', message: 'Original text' },
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -720,8 +720,8 @@ describe('Search Flow', () => {
       makeChatMsg({ id: 2, msgId: 2, message: 'Goodbye world' }),
       makeChatMsg({ id: 3, msgId: 3, message: 'Something else' }),
     ]
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: msgs },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: msgs },
     })
     await flush()
 
@@ -746,8 +746,8 @@ describe('Search Flow', () => {
   })
 
   it('closes search when Close is clicked', async () => {
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps() },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps() },
     })
     await flush()
 
@@ -772,8 +772,8 @@ describe('Search Flow', () => {
 describe('Pin Flow', () => {
   it('shows pinned badge on pinned messages', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, message: 'Pinned message', pinned: true })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -782,8 +782,8 @@ describe('Pin Flow', () => {
 
   it('shows pinned panel with pin count button', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, message: 'Pinned message', pinned: true })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -802,8 +802,8 @@ describe('Pin Flow', () => {
 
   it('does not show pin button when no pinned messages', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, message: 'Not pinned' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -820,8 +820,8 @@ describe('Typing Indicators', () => {
     const typingUsers = {
       2: { username: 'Bob', channelId: 0, expiresAt: Date.now() + 5000 },
     }
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), typingUsers },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), typingUsers },
     })
     await flush()
 
@@ -833,8 +833,8 @@ describe('Typing Indicators', () => {
       2: { username: 'Bob', channelId: 0, expiresAt: Date.now() + 5000 },
       3: { username: 'Charlie', channelId: 0, expiresAt: Date.now() + 5000 },
     }
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), typingUsers },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), typingUsers },
     })
     await flush()
 
@@ -845,8 +845,8 @@ describe('Typing Indicators', () => {
     const typingUsers = {
       2: { username: 'Bob', channelId: 0, expiresAt: Date.now() - 1000 },
     }
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), typingUsers },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), typingUsers },
     })
     await flush()
 
@@ -857,8 +857,8 @@ describe('Typing Indicators', () => {
     const typingUsers = {
       2: { username: 'Bob', channelId: 1, expiresAt: Date.now() + 5000 },
     }
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), typingUsers, selectedChannelId: 0 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), typingUsers, selectedChannelId: 0 },
     })
     await flush()
 
@@ -898,7 +898,7 @@ describe('Settings Flow', () => {
     const wrapper = mount(SettingsPage)
     await flush()
 
-    const backBtn = wrapper.find('button[aria-label="Back to room"]')
+    const backBtn = wrapper.find('button[aria-label="Back to channel"]')
     expect(backBtn.exists()).toBe(true)
     await backBtn.trigger('click')
 
@@ -952,13 +952,13 @@ describe('Keyboard Shortcuts', () => {
     expect(wrapper.emitted('close')).toBeTruthy()
   })
 
-  it('M key dispatches mute-toggle custom event (Room integration)', async () => {
-    const wrapper = mount(Room, {
-      props: { ...defaultRoomProps(), connected: true, voiceConnected: true },
+  it('M key dispatches mute-toggle custom event (ChannelView integration)', async () => {
+    const wrapper = mount(ChannelView, {
+      props: { ...defaultChannelViewProps(), connected: true, voiceConnected: true },
     })
     await flush()
 
-    // The Room component listens for shortcut:mute-toggle via window event
+    // The ChannelView component listens for shortcut:mute-toggle via window event
     // In App.vue, M key dispatches this. Simulate it directly.
     window.dispatchEvent(new CustomEvent('shortcut:mute-toggle'))
     await flush()
@@ -967,9 +967,9 @@ describe('Keyboard Shortcuts', () => {
     expect(getGoMock().SetMuted).toHaveBeenCalled()
   })
 
-  it('D key dispatches deafen-toggle custom event (Room integration)', async () => {
-    const wrapper = mount(Room, {
-      props: { ...defaultRoomProps(), connected: true, voiceConnected: true },
+  it('D key dispatches deafen-toggle custom event (ChannelView integration)', async () => {
+    const wrapper = mount(ChannelView, {
+      props: { ...defaultChannelViewProps(), connected: true, voiceConnected: true },
     })
     await flush()
 
@@ -1184,8 +1184,8 @@ describe('User Management', () => {
 // ===========================================================================
 describe('Image Paste', () => {
   it('shows preview when an image is pasted', async () => {
-    const wrapper = mount(ChannelChatroom, {
-      props: defaultChatroomProps(),
+    const wrapper = mount(ChannelChat, {
+      props: defaultChannelChatProps(),
     })
     await flush()
 
@@ -1238,8 +1238,8 @@ describe('System Messages', () => {
       message: 'Alice joined the server',
       system: true,
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], showSystemMessages: true },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], showSystemMessages: true },
     })
     await flush()
 
@@ -1255,8 +1255,8 @@ describe('System Messages', () => {
       message: 'Alice joined the server',
       system: true,
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], showSystemMessages: false },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], showSystemMessages: false },
     })
     await flush()
 
@@ -1298,8 +1298,8 @@ describe('Unread Counts', () => {
 describe('Message Density', () => {
   it('renders compact density with inline layout', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, message: 'Compact msg' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], messageDensity: 'compact' },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], messageDensity: 'compact' },
     })
     await flush()
 
@@ -1310,8 +1310,8 @@ describe('Message Density', () => {
 
   it('renders comfortable density with avatars', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, message: 'Comfy msg', username: 'Alice' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], messageDensity: 'comfortable' },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], messageDensity: 'comfortable' },
     })
     await flush()
 
@@ -1370,8 +1370,8 @@ describe('Reconnect Banner', () => {
 describe('Edit Cancel Flow', () => {
   it('cancels editing with Escape key', async () => {
     const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 1, message: 'Edit me' })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg], myId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg], myId: 1 },
     })
     await flush()
 
@@ -1404,8 +1404,8 @@ describe('File Attachment Display', () => {
       fileUrl: 'http://localhost/files/photo.png',
       fileSize: 1024,
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -1423,8 +1423,8 @@ describe('File Attachment Display', () => {
       fileUrl: 'http://localhost/files/document.pdf',
       fileSize: 2048,
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -1449,8 +1449,8 @@ describe('Link Preview', () => {
         siteName: 'Example',
       },
     })
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), messages: [msg] },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), messages: [msg] },
     })
     await flush()
 
@@ -1465,8 +1465,8 @@ describe('Link Preview', () => {
 
 describe('Disconnected State', () => {
   it('shows disconnected message and disables input', async () => {
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), connected: false },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), connected: false },
     })
     await flush()
 
@@ -1481,8 +1481,8 @@ describe('Disconnected State', () => {
 describe('Channel header name', () => {
   it('shows selected channel name in header', async () => {
     const channels = [makeChannel({ id: 1, name: 'General' })]
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), channels, selectedChannelId: 1 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), channels, selectedChannelId: 1 },
     })
     await flush()
 
@@ -1490,8 +1490,8 @@ describe('Channel header name', () => {
   })
 
   it('shows fallback name when selectedChannelId is 0 and no channels', async () => {
-    const wrapper = mount(ChannelChatroom, {
-      props: { ...defaultChatroomProps(), channels: [], selectedChannelId: 0 },
+    const wrapper = mount(ChannelChat, {
+      props: { ...defaultChannelChatProps(), channels: [], selectedChannelId: 0 },
     })
     await flush()
 

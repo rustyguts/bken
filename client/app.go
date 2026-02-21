@@ -572,7 +572,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnOwnerChanged(func(ownerID uint16) {
-		wailsrt.EventsEmit(a.ctx, "room:owner", map[string]any{
+		wailsrt.EventsEmit(a.ctx, "channel:owner", map[string]any{
 			"server_addr": serverAddr,
 			"owner_id":    int(ownerID),
 		})
@@ -1031,7 +1031,7 @@ func (a *App) RenameUser(name string) string {
 }
 
 // RenameServer updates the server name. Only succeeds if the caller is the
-// room owner; the server enforces the check and broadcasts the update.
+// channel owner; the server enforces the check and broadcasts the update.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RenameServer(name string) string {
 	tr, err := a.requireActiveTransport()
@@ -1045,7 +1045,7 @@ func (a *App) RenameServer(name string) string {
 }
 
 // KickUser removes the given user from the server. Only succeeds if the
-// caller is the room owner; the server enforces the check.
+// caller is the channel owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) KickUser(id int) string {
 	tr, err := a.requireActiveTransport()
@@ -1100,7 +1100,7 @@ func (a *App) EditMessage(msgID int, message string) string {
 }
 
 // DeleteMessage asks the server to delete a chat message.
-// The original sender and the room owner are allowed to delete.
+// The original sender and the channel owner are allowed to delete.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DeleteMessage(msgID int) string {
 	tr, err := a.requireActiveTransport()
@@ -1375,7 +1375,7 @@ func (a *App) StopScreenShare() string {
 }
 
 // MoveUserToChannel asks the server to move a user to a different channel.
-// Only succeeds if the caller is the room owner; the server enforces the check.
+// Only succeeds if the caller is the channel owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) MoveUserToChannel(userID int, channelID int) string {
 	tr, err := a.requireActiveTransport()
@@ -1434,7 +1434,7 @@ func (a *App) sendLoop() {
 }
 
 // StartRecording asks the server to start recording voice in a channel.
-// Only the room owner can start recording; the server enforces the check.
+// Only the channel owner can start recording; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartRecording(channelID int) string {
 	tr, err := a.requireActiveTransport()
@@ -1448,7 +1448,7 @@ func (a *App) StartRecording(channelID int) string {
 }
 
 // StopRecording asks the server to stop recording voice in a channel.
-// Only the room owner can stop recording; the server enforces the check.
+// Only the channel owner can stop recording; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StopRecording(channelID int) string {
 	tr, err := a.requireActiveTransport()

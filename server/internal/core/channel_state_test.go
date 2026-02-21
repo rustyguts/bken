@@ -7,8 +7,8 @@ import (
 	"bken/server/internal/protocol"
 )
 
-func TestRoomMultiServerSingleVoiceLifecycle(t *testing.T) {
-	r := NewRoom()
+func TestChannelStateMultiServerSingleVoiceLifecycle(t *testing.T) {
+	r := NewChannelState()
 	s, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add: %v", err)
@@ -68,8 +68,8 @@ func TestRoomMultiServerSingleVoiceLifecycle(t *testing.T) {
 	}
 }
 
-func TestRoomDisconnectServerOnlyClearsMatchingVoice(t *testing.T) {
-	r := NewRoom()
+func TestChannelStateDisconnectServerOnlyClearsMatchingVoice(t *testing.T) {
+	r := NewChannelState()
 	s, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add: %v", err)
@@ -107,8 +107,8 @@ func TestRoomDisconnectServerOnlyClearsMatchingVoice(t *testing.T) {
 	}
 }
 
-func TestRoomBroadcastToServerScopesRecipients(t *testing.T) {
-	r := NewRoom()
+func TestChannelStateBroadcastToServerScopesRecipients(t *testing.T) {
+	r := NewChannelState()
 	alice, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add alice: %v", err)
@@ -142,8 +142,8 @@ func TestRoomBroadcastToServerScopesRecipients(t *testing.T) {
 	assertNoRecv(t, charlie.Send)
 }
 
-func TestRoomRemoveClosesChannel(t *testing.T) {
-	r := NewRoom()
+func TestChannelStateRemoveClosesChannel(t *testing.T) {
+	r := NewChannelState()
 	s, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add: %v", err)

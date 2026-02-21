@@ -4,7 +4,7 @@ import { SetMuted, SetDeafened } from '../wailsjs/go/main/App'
 import Sidebar from './Sidebar.vue'
 import ServerChannels from './ServerChannels.vue'
 import UserControls from './UserControls.vue'
-import ChannelChatroom from './ChannelChatroom.vue'
+import ChannelChat from './ChannelChat.vue'
 import VideoGrid from './VideoGrid.vue'
 import { BKEN_SCHEME } from './constants'
 import type { User, ChatMessage, Channel, ConnectPayload, VideoState } from './types'
@@ -127,8 +127,6 @@ function handleSelectChannel(channelID: number): void {
 }
 
 function handleSelectServer(addr: string): void {
-  selectedServerAddr.value = addr
-  selectedChannelId.value = 0
   emit('selectServer', addr)
 }
 
@@ -172,9 +170,9 @@ function handleSendMessage(message: string): void {
 </script>
 
 <template>
-  <div class="room-grid h-full min-h-0 overflow-hidden">
+  <div class="channel-grid h-full min-h-0 overflow-hidden">
     <Sidebar
-      class="room-sidebar"
+      class="channel-sidebar"
       :active-server-addr="selectedServerAddr"
       :connected-addr="connectedAddr"
       :connected-addrs="connectedAddrs"
@@ -186,7 +184,7 @@ function handleSendMessage(message: string): void {
     />
 
     <ServerChannels
-      class="room-channels border-r border-base-content/10 bg-base-100"
+      class="channel-channels border-r border-base-content/10 bg-base-100"
       :channels="channels"
       :users="users"
       :user-channels="userChannels"
@@ -195,6 +193,9 @@ function handleSendMessage(message: string): void {
       :selected-channel-id="selectedChannelId"
       :server-name="serverName"
       :speaking-users="speakingUsers"
+      :voice-connected="voiceConnected"
+      :video-active="videoActive"
+      :screen-sharing="screenSharing"
       :connect-error="connectError"
       :is-owner="isOwner"
       :owner-id="ownerId"
@@ -207,9 +208,11 @@ function handleSendMessage(message: string): void {
       @delete-channel="emit('deleteChannel', $event)"
       @move-user="(uid, chid) => emit('moveUser', uid, chid)"
       @kick-user="emit('kickUser', $event)"
+      @video-toggle="handleVideoToggle"
+      @screen-share-toggle="handleScreenShareToggle"
     />
 
-    <div class="room-chatroom flex flex-col min-h-0">
+    <div class="channel-chat flex flex-col min-h-0">
       <VideoGrid
         :users="users"
         :video-states="videoStates"
@@ -218,7 +221,7 @@ function handleSendMessage(message: string): void {
         @spotlight="spotlightId = $event"
       />
 
-    <ChannelChatroom
+    <ChannelChat
       class="flex-1 min-h-0"
       :messages="chatMessages"
       :channels="channels"
@@ -244,51 +247,47 @@ function handleSendMessage(message: string): void {
     </div>
 
     <UserControls
-      class="room-controls border-r border-base-content/10"
+      class="channel-controls border-r border-base-content/10"
       :username="globalUsername"
       :muted="muted"
       :deafened="deafened"
       :connected="connected"
       :voice-connected="voiceConnected"
-      :video-active="videoActive"
-      :screen-sharing="screenSharing"
       @rename-username="emit('renameGlobalUsername', $event)"
       @open-settings="emit('openSettings')"
       @mute-toggle="handleMuteToggle"
       @deafen-toggle="handleDeafenToggle"
       @leave-voice="handleDisconnectVoice"
-      @video-toggle="handleVideoToggle"
-      @screen-share-toggle="handleScreenShareToggle"
     />
   </div>
 </template>
 
 <style scoped>
-.room-grid {
+.channel-grid {
   display: grid;
   grid-template-columns: 64px minmax(220px, 280px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
-.room-sidebar {
+.channel-sidebar {
   grid-column: 1;
   grid-row: 1;
   min-height: 0;
 }
 
-.room-channels {
+.channel-channels {
   grid-column: 2;
   grid-row: 1;
   min-height: 0;
 }
 
-.room-chatroom {
+.channel-chat {
   grid-column: 3;
   grid-row: 1 / span 2;
   min-height: 0;
 }
 
-.room-controls {
+.channel-controls {
   grid-column: 1 / span 2;
   grid-row: 2;
   min-width: 0;

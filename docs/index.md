@@ -28,7 +28,7 @@ features:
 
   - icon: 🏠
     title: Run it for $4 a month
-    details: The relay server is a single Go binary. A 1-core, 1 GB droplet can comfortably serve a room of 100 people. Your voice never touches infrastructure you don't control.
+    details: The relay server is a single Go binary. A 1-core, 1 GB droplet can comfortably serve a channel of 100 people. Your voice never touches infrastructure you don't control.
 
   - icon: 🎙️
     title: Noise suppression built in

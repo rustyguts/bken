@@ -29,7 +29,7 @@ const tabs: { id: SettingsTab; label: string; icon: Component; kicker: string }[
         <div class="card-body h-full min-h-0 p-0">
           <header class="flex items-center justify-between gap-3 border-b border-base-content/10 px-4 py-3 sm:px-5">
             <div class="flex items-center gap-2">
-              <button class="btn btn-sm btn-ghost" @click="emit('back')" aria-label="Back to room">
+              <button class="btn btn-sm btn-ghost" @click="emit('back')" aria-label="Back to channel">
                 <ChevronLeft class="size-4" aria-hidden="true" />
                 Back
               </button>

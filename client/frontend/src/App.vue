@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
 import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare, SetActiveServer, DisconnectServer } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
-import Room from './Room.vue'
+import ChannelView from './ChannelView.vue'
 import SettingsPage from './SettingsPage.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
 import TitleBar from './TitleBar.vue'
@@ -12,7 +12,7 @@ import { useSpeakingUsers } from './composables/useSpeakingUsers'
 import { BKEN_SCHEME, LAST_CONNECTED_ADDR_KEY } from './constants'
 import type { User, ConnectPayload, ChatMessage, Channel, VideoState, ReactionInfo } from './types'
 
-type AppRoute = 'room' | 'settings'
+type AppRoute = 'channel' | 'settings'
 
 interface ServerState {
   connected: boolean
@@ -36,7 +36,7 @@ const reconnectAttempt = ref(0)
 const reconnectSecondsLeft = ref(0)
 
 const startupAddrHint = ref('')
-const currentRoute = ref<AppRoute>('room')
+const currentRoute = ref<AppRoute>('channel')
 const globalUsername = ref('')
 const joiningVoice = ref(false)
 const disconnectingVoice = ref(false)
@@ -153,7 +153,7 @@ function setActiveError(message: string): void {
 }
 
 function parseRoute(hash: string): AppRoute {
-  return hash === '#/settings' ? 'settings' : 'room'
+  return hash === '#/settings' ? 'settings' : 'channel'
 }
 
 function syncRouteFromHash(): void {
@@ -174,7 +174,7 @@ function openSettingsPage(): void {
 }
 
 function closeSettingsPage(): void {
-  goToRoute('room')
+  goToRoute('channel')
 }
 
 function isTextInput(el: EventTarget | null): boolean {
@@ -292,9 +292,18 @@ async function handleConnect(payload: ConnectPayload): Promise<void> {
 async function handleSelectServer(addr: string): Promise<void> {
   const targetAddr = normaliseAddr(addr)
   if (!targetAddr) return
-  activeServerAddr.value = targetAddr
+  if (targetAddr === connectedAddr.value) return
   ensureServer(targetAddr)
-  await SetActiveServer(targetAddr)
+  const err = await SetActiveServer(targetAddr)
+  if (err) {
+    if (connectedAddr.value) {
+      setActiveError(err)
+    } else {
+      withServer(targetAddr, state => { state.connectError = err })
+    }
+    return
+  }
+  activeServerAddr.value = targetAddr
 }
 
 async function handleActivateChannel(payload: { addr: string; channelID: number }): Promise<void> {
@@ -763,7 +772,7 @@ onMounted(async () => {
     withServer(addr, state => { state.serverName = data.name })
   })
 
-  EventsOn('room:owner', (data: any) => {
+  EventsOn('channel:owner', (data: any) => {
     const addr = eventServerAddr(data)
     withServer(addr, state => { state.ownerID = data.owner_id })
   })
@@ -909,7 +918,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalShortcuts)
   window.removeEventListener('keydown', handlePTTKeyDown)
   window.removeEventListener('keyup', handlePTTKeyUp)
-  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
+  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'channel:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
   cleanupSpeaking()
   if (typingCleanupInterval) clearInterval(typingCleanupInterval)
 })
@@ -940,9 +949,9 @@ onBeforeUnmount(() => {
           @back="closeSettingsPage"
         />
 
-        <Room
+        <ChannelView
           v-else
-          key="room"
+          key="channel"
           class="h-full min-h-0"
           :connected="connected"
           :voice-connected="voiceConnected"

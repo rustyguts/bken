@@ -17,14 +17,14 @@ const writeTimeout = 5 * time.Second
 
 // Handler owns websocket transport for the backend.
 type Handler struct {
-	room     *core.Room
-	upgrader websocket.Upgrader
+	channelState *core.ChannelState
+	upgrader     websocket.Upgrader
 }
 
-// NewHandler creates a websocket handler bound to room.
-func NewHandler(room *core.Room) *Handler {
+// NewHandler creates a websocket handler bound to channelState.
+func NewHandler(channelState *core.ChannelState) *Handler {
 	return &Handler{
-		room: room,
+		channelState: channelState,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		},
@@ -61,15 +61,15 @@ func (h *Handler) serveConn(conn *websocket.Conn) {
 		return
 	}
 
-	session, snapshot, err := h.room.Add(hello.Username, 64)
+	session, snapshot, err := h.channelState.Add(hello.Username, 64)
 	if err != nil {
 		h.writeDirectError(conn, err.Error())
 		return
 	}
 
 	defer func() {
-		if removed, ok := h.room.Remove(session.UserID); ok {
-			h.room.Broadcast(protocol.Message{Type: protocol.TypeUserLeft, User: &removed}, session.UserID)
+		if removed, ok := h.channelState.Remove(session.UserID); ok {
+			h.channelState.Broadcast(protocol.Message{Type: protocol.TypeUserLeft, User: &removed}, session.UserID)
 		}
 	}()
 
@@ -82,13 +82,13 @@ func (h *Handler) serveConn(conn *websocket.Conn) {
 		}
 	}()
 
-	h.room.SendTo(session.UserID, protocol.Message{
+	h.channelState.SendTo(session.UserID, protocol.Message{
 		Type:   protocol.TypeSnapshot,
 		SelfID: session.UserID,
 		Users:  snapshot,
 	})
-	if joined, ok := h.room.User(session.UserID); ok {
-		h.room.Broadcast(protocol.Message{Type: protocol.TypeUserJoined, User: &joined}, session.UserID)
+	if joined, ok := h.channelState.User(session.UserID); ok {
+		h.channelState.Broadcast(protocol.Message{Type: protocol.TypeUserJoined, User: &joined}, session.UserID)
 	}
 
 	for {
@@ -103,47 +103,47 @@ func (h *Handler) serveConn(conn *websocket.Conn) {
 func (h *Handler) handleInbound(userID string, in protocol.Message) {
 	switch in.Type {
 	case protocol.TypePing:
-		h.room.SendTo(userID, protocol.Message{Type: protocol.TypePong, TS: in.TS})
+		h.channelState.SendTo(userID, protocol.Message{Type: protocol.TypePong, TS: in.TS})
 
 	case protocol.TypeConnectServer:
-		user, changed, err := h.room.ConnectServer(userID, in.ServerID)
+		user, changed, err := h.channelState.ConnectServer(userID, in.ServerID)
 		if err != nil {
 			h.sendError(userID, err.Error())
 			return
 		}
-		h.room.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
+		h.channelState.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
 		if changed {
-			h.room.BroadcastToServer(in.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
+			h.channelState.BroadcastToServer(in.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
 		}
 
 	case protocol.TypeDisconnectServer:
-		user, changed, _, err := h.room.DisconnectServer(userID, in.ServerID)
+		user, changed, _, err := h.channelState.DisconnectServer(userID, in.ServerID)
 		if err != nil {
 			h.sendError(userID, err.Error())
 			return
 		}
-		h.room.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
+		h.channelState.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
 		if changed {
-			h.room.BroadcastToServer(in.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
+			h.channelState.BroadcastToServer(in.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
 		}
 
 	case protocol.TypeJoinVoice:
-		user, oldVoice, err := h.room.JoinVoice(userID, in.ServerID, in.ChannelID)
+		user, oldVoice, err := h.channelState.JoinVoice(userID, in.ServerID, in.ChannelID)
 		if err != nil {
 			h.sendError(userID, err.Error())
 			return
 		}
-		h.room.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
+		h.channelState.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
 		if oldVoice != nil && oldVoice.ServerID != in.ServerID {
-			h.room.BroadcastToServer(oldVoice.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
+			h.channelState.BroadcastToServer(oldVoice.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
 		}
-		h.room.BroadcastToServer(in.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
+		h.channelState.BroadcastToServer(in.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
 
 	case protocol.TypeDisconnectVoice, protocol.TypeDisconnectVoiceLegacy:
-		user, oldVoice, _ := h.room.DisconnectVoice(userID)
-		h.room.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
+		user, oldVoice, _ := h.channelState.DisconnectVoice(userID)
+		h.channelState.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
 		if oldVoice != nil {
-			h.room.BroadcastToServer(oldVoice.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
+			h.channelState.BroadcastToServer(oldVoice.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
 		}
 
 	case protocol.TypeSendText:
@@ -155,16 +155,16 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 			h.sendError(userID, "message is required")
 			return
 		}
-		if !h.room.CanSendText(userID, in.ServerID) {
+		if !h.channelState.CanSendText(userID, in.ServerID) {
 			h.sendError(userID, "user is not connected to server")
 			return
 		}
-		user, ok := h.room.User(userID)
+		user, ok := h.channelState.User(userID)
 		if !ok {
 			h.sendError(userID, "user not found")
 			return
 		}
-		h.room.BroadcastToServer(in.ServerID, protocol.Message{
+		h.channelState.BroadcastToServer(in.ServerID, protocol.Message{
 			Type:      protocol.TypeTextMessage,
 			ServerID:  in.ServerID,
 			ChannelID: in.ChannelID,
@@ -179,7 +179,7 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 }
 
 func (h *Handler) sendError(userID, errMsg string) {
-	h.room.SendTo(userID, protocol.Message{Type: protocol.TypeError, Error: errMsg})
+	h.channelState.SendTo(userID, protocol.Message{Type: protocol.TypeError, Error: errMsg})
 }
 
 func (h *Handler) writeDirectError(conn *websocket.Conn, errMsg string) {

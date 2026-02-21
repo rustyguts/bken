@@ -1,5 +1,19 @@
 $ErrorActionPreference = "Stop"
 
+$requiredPkgConfigModules = @(
+  "portaudio-2.0",
+  "opus",
+  "opusfile"
+)
+
+$msysPackages = @(
+  "mingw-w64-x86_64-gcc",
+  "mingw-w64-x86_64-pkg-config",
+  "mingw-w64-x86_64-portaudio",
+  "mingw-w64-x86_64-opus",
+  "mingw-w64-x86_64-opusfile"
+)
+
 function Write-Info {
   param([string]$Message)
   Write-Host "[deps] $Message"
@@ -39,16 +53,20 @@ if (-not (Test-Path $msysBash)) {
 }
 
 Write-Info "Installing Windows native dependencies with MSYS2..."
-& $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config mingw-w64-x86_64-portaudio mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile"
+$packageList = $msysPackages -join " "
+& $msysBash -lc "pacman -Sy --noconfirm --needed $packageList"
 
 $mingwBin = "C:\msys64\mingw64\bin"
 $pkgConfigPath = "C:\msys64\mingw64\lib\pkgconfig"
 
 Add-UserPathEntry -Entry $mingwBin
 [Environment]::SetEnvironmentVariable("PKG_CONFIG_PATH", $pkgConfigPath, "User")
-[Environment]::SetEnvironmentVariable("CGO_ENABLED", "1", "User")
-[Environment]::SetEnvironmentVariable("CC", "gcc", "User")
-[Environment]::SetEnvironmentVariable("CXX", "g++", "User")
+
+$pkgConfigModules = $requiredPkgConfigModules -join " "
+& $msysBash -lc "export PATH=/mingw64/bin:`$PATH; export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig; pkg-config --exists $pkgConfigModules"
+if ($LASTEXITCODE -ne 0) {
+  throw "pkg-config metadata check failed for one or more required modules: $pkgConfigModules"
+}
 
 Write-Info "Native development dependencies are installed."
 Write-Info "Open a new terminal, then run from client/: wails dev"

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import RoomBrowser from '../RoomBrowser.vue'
+import ChannelBrowser from '../ChannelBrowser.vue'
 import type { User, Channel } from '../types'
 
-describe('RoomBrowser', () => {
+describe('ChannelBrowser', () => {
   const baseProps = {
     users: [
       { id: 1, username: 'Alice' },
@@ -17,18 +17,18 @@ describe('RoomBrowser', () => {
   }
 
   it('mounts without errors', () => {
-    const w = mount(RoomBrowser, { props: baseProps })
+    const w = mount(ChannelBrowser, { props: baseProps })
     expect(w.exists()).toBe(true)
   })
 
   it('renders user cards', () => {
-    const w = mount(RoomBrowser, { props: baseProps })
+    const w = mount(ChannelBrowser, { props: baseProps })
     expect(w.text()).toContain('Alice')
     expect(w.text()).toContain('Bob')
   })
 
   it('renders "No one else is here" when no users and no channels', () => {
-    const w = mount(RoomBrowser, { props: { ...baseProps, users: [], channels: [] } })
+    const w = mount(ChannelBrowser, { props: { ...baseProps, users: [], channels: [] } })
     expect(w.text()).toContain('No one else is here')
   })
 
@@ -37,14 +37,14 @@ describe('RoomBrowser', () => {
       { id: 1, name: 'General' },
       { id: 2, name: 'Music' },
     ]
-    const w = mount(RoomBrowser, { props: { ...baseProps, channels } })
+    const w = mount(ChannelBrowser, { props: { ...baseProps, channels } })
     expect(w.text()).toContain('General')
     expect(w.text()).toContain('Music')
   })
 
   it('shows users in correct channel', () => {
     const channels: Channel[] = [{ id: 1, name: 'General' }]
-    const w = mount(RoomBrowser, {
+    const w = mount(ChannelBrowser, {
       props: { ...baseProps, channels, userChannels: { 1: 1, 2: 0 } },
     })
     expect(w.text()).toContain('Alice')
@@ -53,7 +53,7 @@ describe('RoomBrowser', () => {
 
   it('shows Lobby for users in channel 0', () => {
     const channels: Channel[] = [{ id: 1, name: 'General' }]
-    const w = mount(RoomBrowser, {
+    const w = mount(ChannelBrowser, {
       props: { ...baseProps, channels, userChannels: { 1: 1, 2: 0 } },
     })
     expect(w.text()).toContain('Lobby')
@@ -61,7 +61,7 @@ describe('RoomBrowser', () => {
 
   it('shows empty channel message', () => {
     const channels: Channel[] = [{ id: 1, name: 'Empty' }]
-    const w = mount(RoomBrowser, {
+    const w = mount(ChannelBrowser, {
       props: { ...baseProps, channels, userChannels: { 1: 0, 2: 0 } },
     })
     expect(w.text()).toContain('Empty')
@@ -70,7 +70,7 @@ describe('RoomBrowser', () => {
 
   it('channel button shows current channel indicator', () => {
     const channels: Channel[] = [{ id: 1, name: 'General' }]
-    const w = mount(RoomBrowser, {
+    const w = mount(ChannelBrowser, {
       props: { ...baseProps, channels, userChannels: { 1: 1, 2: 0 } },
     })
     // myId=1 is in channel 1, so General button should have active indicator
@@ -78,7 +78,7 @@ describe('RoomBrowser', () => {
   })
 
   it('shows Server fallback heading when no channels', () => {
-    const w = mount(RoomBrowser, { props: baseProps })
+    const w = mount(ChannelBrowser, { props: baseProps })
     expect(w.text()).toContain('Server')
   })
 })

@@ -10,19 +10,19 @@ import (
 )
 
 func TestHealthAndState(t *testing.T) {
-	room := core.NewRoom()
-	session, _, err := room.Add("alice", 8)
+	channelState := core.NewChannelState()
+	session, _, err := channelState.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add user: %v", err)
 	}
-	if _, _, err := room.ConnectServer(session.UserID, "srv-1"); err != nil {
+	if _, _, err := channelState.ConnectServer(session.UserID, "srv-1"); err != nil {
 		t.Fatalf("connect server: %v", err)
 	}
-	if _, _, err := room.JoinVoice(session.UserID, "srv-1", "chan-a"); err != nil {
+	if _, _, err := channelState.JoinVoice(session.UserID, "srv-1", "chan-a"); err != nil {
 		t.Fatalf("join voice: %v", err)
 	}
 
-	api := New(room)
+	api := New(channelState)
 	ts := httptest.NewServer(api.Echo())
 	defer ts.Close()
 

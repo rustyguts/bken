@@ -48,7 +48,7 @@ onMounted(async () => {
         <div>
           <p class="text-xs font-semibold uppercase tracking-wider text-primary/80">Voice Enhancements</p>
           <h3 class="text-lg font-semibold leading-tight">Help Others Hear You Clearly</h3>
-          <p class="text-sm opacity-70 mt-1">Turn these on for clearer calls in most rooms.</p>
+          <p class="text-sm opacity-70 mt-1">Turn these on for clearer calls in most channels.</p>
         </div>
       </div>
 

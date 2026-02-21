@@ -24,10 +24,10 @@ describe('App', () => {
     expect(w.findComponent({ name: 'TitleBar' }).exists()).toBe(true)
   })
 
-  it('renders Room by default', async () => {
+  it('renders ChannelView by default', async () => {
     const w = mount(App)
     await flushPromises()
-    expect(w.findComponent({ name: 'Room' }).exists()).toBe(true)
+    expect(w.findComponent({ name: 'ChannelView' }).exists()).toBe(true)
   })
 
   it('does not render SettingsPage by default', async () => {
@@ -45,14 +45,14 @@ describe('App', () => {
     expect(w.findComponent({ name: 'SettingsPage' }).exists()).toBe(true)
   })
 
-  it('navigates back to room from settings', async () => {
+  it('navigates back to channel from settings', async () => {
     window.location.hash = '#/settings'
     const w = mount(App)
     await flushPromises()
     window.location.hash = '#/'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     await flushPromises()
-    expect(w.findComponent({ name: 'Room' }).exists()).toBe(true)
+    expect(w.findComponent({ name: 'ChannelView' }).exists()).toBe(true)
   })
 
   it('calls ApplyConfig on mount', async () => {
@@ -82,9 +82,9 @@ describe('App', () => {
     })
     const w = mount(App)
     await flushPromises()
-    // The Room component should receive globalUsername prop
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('globalUsername')).toBe('Alice')
+    // The ChannelView component should receive globalUsername prop
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('globalUsername')).toBe('Alice')
   })
 
   it('generates username when config has no username', async () => {
@@ -107,9 +107,9 @@ describe('App', () => {
     })
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
+    const channel = w.findComponent({ name: 'ChannelView' })
     // Should have generated a User-XXXX style name
-    expect(room.props('globalUsername')).toMatch(/^User-[0-9a-f]{4}$/)
+    expect(channel.props('globalUsername')).toMatch(/^User-[0-9a-f]{4}$/)
     expect(go.SaveConfig).toHaveBeenCalled()
   })
 
@@ -139,9 +139,9 @@ describe('App', () => {
       { id: 2, username: 'Bob', channel_id: 1 },
     ])
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('users')).toHaveLength(2)
-    expect(room.props('userChannels')).toEqual({ 1: 0, 2: 1 })
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('users')).toHaveLength(2)
+    expect(channel.props('userChannels')).toEqual({ 1: 0, 2: 1 })
   })
 
   it('handles user:joined event', async () => {
@@ -150,8 +150,8 @@ describe('App', () => {
     emitWailsEvent('user:list', [{ id: 1, username: 'Alice' }])
     emitWailsEvent('user:joined', { id: 2, username: 'Bob' })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('users')).toHaveLength(2)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('users')).toHaveLength(2)
   })
 
   it('handles user:left event', async () => {
@@ -160,8 +160,8 @@ describe('App', () => {
     emitWailsEvent('user:list', [{ id: 1, username: 'Alice' }, { id: 2, username: 'Bob' }])
     emitWailsEvent('user:left', { id: 2 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('users')).toHaveLength(1)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('users')).toHaveLength(1)
   })
 
   it('handles server:info event', async () => {
@@ -169,17 +169,17 @@ describe('App', () => {
     await flushPromises()
     emitWailsEvent('server:info', { name: 'Test Server' })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('serverName')).toBe('Test Server')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('serverName')).toBe('Test Server')
   })
 
-  it('handles room:owner event', async () => {
+  it('handles channel:owner event', async () => {
     const w = mount(App)
     await flushPromises()
-    emitWailsEvent('room:owner', { owner_id: 42 })
+    emitWailsEvent('channel:owner', { owner_id: 42 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('ownerId')).toBe(42)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('ownerId')).toBe(42)
   })
 
   it('handles user:me event', async () => {
@@ -187,8 +187,8 @@ describe('App', () => {
     await flushPromises()
     emitWailsEvent('user:me', { id: 7 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('myId')).toBe(7)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('myId')).toBe(7)
   })
 
   it('handles chat:message event', async () => {
@@ -203,9 +203,9 @@ describe('App', () => {
       sender_id: 1,
     })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('chatMessages')).toHaveLength(1)
-    expect(room.props('chatMessages')[0].message).toBe('Hello!')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('chatMessages')).toHaveLength(1)
+    expect(channel.props('chatMessages')[0].message).toBe('Hello!')
   })
 
   it('handles channel:list event', async () => {
@@ -213,8 +213,8 @@ describe('App', () => {
     await flushPromises()
     emitWailsEvent('channel:list', [{ id: 1, name: 'General' }, { id: 2, name: 'Music' }])
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('channels')).toHaveLength(2)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('channels')).toHaveLength(2)
   })
 
   it('handles channel:user_moved event', async () => {
@@ -223,8 +223,8 @@ describe('App', () => {
     emitWailsEvent('user:list', [{ id: 1, username: 'Alice', channel_id: 0 }])
     emitWailsEvent('channel:user_moved', { user_id: 1, channel_id: 5 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('userChannels')[1]).toBe(5)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('userChannels')[1]).toBe(5)
   })
 
   it('handles video:state event', async () => {
@@ -232,8 +232,8 @@ describe('App', () => {
     await flushPromises()
     emitWailsEvent('video:state', { id: 1, video_active: true, screen_share: false })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('videoStates')[1]).toEqual({ active: true, screenShare: false })
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('videoStates')[1]).toEqual({ active: true, screenShare: false })
   })
 
   it('removes video state when deactivated', async () => {
@@ -242,8 +242,8 @@ describe('App', () => {
     emitWailsEvent('video:state', { id: 1, video_active: true, screen_share: false })
     emitWailsEvent('video:state', { id: 1, video_active: false, screen_share: false })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('videoStates')[1]).toBeUndefined()
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('videoStates')[1]).toBeUndefined()
   })
 
   it('handles recording:state event', async () => {
@@ -251,8 +251,8 @@ describe('App', () => {
     await flushPromises()
     emitWailsEvent('recording:state', { channel_id: 1, recording: true, started_by: 'Admin' })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('recordingChannels')[1]).toEqual({ recording: true, startedBy: 'Admin' })
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('recordingChannels')[1]).toEqual({ recording: true, startedBy: 'Admin' })
   })
 
   it('handles connection:kicked event', async () => {
@@ -260,9 +260,9 @@ describe('App', () => {
     await flushPromises()
     emitWailsEvent('connection:kicked')
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('connected')).toBe(false)
-    expect(room.props('connectError')).toContain('Disconnected by server owner')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('connected')).toBe(false)
+    expect(channel.props('connectError')).toContain('Disconnected by server owner')
   })
 
   it('handles chat:message_edited event', async () => {
@@ -274,8 +274,8 @@ describe('App', () => {
     })
     emitWailsEvent('chat:message_edited', { msg_id: 100, message: 'Edited text', ts: Date.now() })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const msg = room.props('chatMessages').find((m: any) => m.msgId === 100)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const msg = channel.props('chatMessages').find((m: any) => m.msgId === 100)
     expect(msg.message).toBe('Edited text')
     expect(msg.edited).toBe(true)
   })
@@ -289,8 +289,8 @@ describe('App', () => {
     })
     emitWailsEvent('chat:message_deleted', { msg_id: 200 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const msg = room.props('chatMessages').find((m: any) => m.msgId === 200)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const msg = channel.props('chatMessages').find((m: any) => m.msgId === 200)
     expect(msg.deleted).toBe(true)
     expect(msg.message).toBe('')
   })
@@ -304,8 +304,8 @@ describe('App', () => {
     })
     emitWailsEvent('chat:reaction_added', { msg_id: 300, emoji: '👍', id: 2 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const msg = room.props('chatMessages').find((m: any) => m.msgId === 300)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const msg = channel.props('chatMessages').find((m: any) => m.msgId === 300)
     expect(msg.reactions).toHaveLength(1)
     expect(msg.reactions[0].emoji).toBe('👍')
     expect(msg.reactions[0].count).toBe(1)
@@ -321,8 +321,8 @@ describe('App', () => {
     emitWailsEvent('chat:reaction_added', { msg_id: 400, emoji: '👍', id: 2 })
     emitWailsEvent('chat:reaction_removed', { msg_id: 400, emoji: '👍', id: 2 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const msg = room.props('chatMessages').find((m: any) => m.msgId === 400)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const msg = channel.props('chatMessages').find((m: any) => m.msgId === 400)
     expect(msg.reactions).toHaveLength(0)
   })
 
@@ -332,9 +332,9 @@ describe('App', () => {
     emitWailsEvent('user:me', { id: 1 })
     emitWailsEvent('chat:user_typing', { id: 2, username: 'Bob', channel_id: 0 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('typingUsers')[2]).toBeDefined()
-    expect(room.props('typingUsers')[2].username).toBe('Bob')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('typingUsers')[2]).toBeDefined()
+    expect(channel.props('typingUsers')[2].username).toBe('Bob')
   })
 
   it('ignores typing event from self', async () => {
@@ -343,8 +343,8 @@ describe('App', () => {
     emitWailsEvent('user:me', { id: 1 })
     emitWailsEvent('chat:user_typing', { id: 1, username: 'Me', channel_id: 0 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('typingUsers')[1]).toBeUndefined()
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('typingUsers')[1]).toBeUndefined()
   })
 
   it('handles user:renamed event', async () => {
@@ -353,8 +353,8 @@ describe('App', () => {
     emitWailsEvent('user:list', [{ id: 1, username: 'Alice' }])
     emitWailsEvent('user:renamed', { id: 1, username: 'Alice2' })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('users')[0].username).toBe('Alice2')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('users')[0].username).toBe('Alice2')
   })
 
   it('handles chat:message_pinned event', async () => {
@@ -366,8 +366,8 @@ describe('App', () => {
     })
     emitWailsEvent('chat:message_pinned', { msg_id: 500 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const msg = room.props('chatMessages').find((m: any) => m.msgId === 500)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const msg = channel.props('chatMessages').find((m: any) => m.msgId === 500)
     expect(msg.pinned).toBe(true)
   })
 
@@ -381,8 +381,8 @@ describe('App', () => {
     emitWailsEvent('chat:message_pinned', { msg_id: 600 })
     emitWailsEvent('chat:message_unpinned', { msg_id: 600 })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const msg = room.props('chatMessages').find((m: any) => m.msgId === 600)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const msg = channel.props('chatMessages').find((m: any) => m.msgId === 600)
     expect(msg.pinned).toBe(false)
   })
 
@@ -395,28 +395,49 @@ describe('App', () => {
       channel_id: 5, msg_id: 700, sender_id: 1,
     })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    expect(room.props('unreadCounts')[5]).toBe(1)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    expect(channel.props('unreadCounts')[5]).toBe(1)
   })
 
-  it('calls Connect when Room emits connect', async () => {
+  it('calls Connect when ChannelView emits connect', async () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('connect', { username: 'Alice', addr: 'localhost:4433' })
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('connect', { username: 'Alice', addr: 'localhost:4433' })
     await flushPromises()
     expect(go.Connect).toHaveBeenCalledWith('localhost:4433', 'Alice')
   })
 
-  it('calls DisconnectServer when Room emits disconnect', async () => {
+  it('keeps active server state when selectServer fails', async () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('connect', { username: 'Alice', addr: 'localhost:4433' })
+    const channel = w.findComponent({ name: 'ChannelView' })
+
+    channel.vm.$emit('connect', { username: 'Alice', addr: 'localhost:4433' })
     await flushPromises()
-    room.vm.$emit('disconnect')
+    emitWailsEvent('channel:list', [{ id: 1, name: 'General' }])
+    await flushPromises()
+
+    go.SetActiveServer.mockResolvedValueOnce('server not connected')
+    channel.vm.$emit('selectServer', 'offline.example:4433')
+    await flushPromises()
+
+    const updatedChannelView = w.findComponent({ name: 'ChannelView' })
+    expect(updatedChannelView.props('connectedAddr')).toBe('localhost:4433')
+    expect(updatedChannelView.props('channels')).toEqual([{ id: 1, name: 'General' }])
+    expect(updatedChannelView.props('connectError')).toContain('server not connected')
+  })
+
+  it('calls DisconnectServer when ChannelView emits disconnect', async () => {
+    const go = getGoMock()
+    const w = mount(App)
+    await flushPromises()
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('connect', { username: 'Alice', addr: 'localhost:4433' })
+    await flushPromises()
+    channel.vm.$emit('disconnect')
     await flushPromises()
     expect(go.DisconnectServer).toHaveBeenCalledWith('localhost:4433')
   })
@@ -425,26 +446,26 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
+    const channel = w.findComponent({ name: 'ChannelView' })
 
-    room.vm.$emit('activateChannel', { addr: 'localhost:8080', channelID: 1 })
+    channel.vm.$emit('activateChannel', { addr: 'localhost:8080', channelID: 1 })
     await flushPromises()
-    expect(room.props('voiceConnected')).toBe(true)
+    expect(channel.props('voiceConnected')).toBe(true)
 
     go.DisconnectVoice.mockResolvedValueOnce('control websocket write failed')
-    room.vm.$emit('disconnectVoice')
+    channel.vm.$emit('disconnectVoice')
     await flushPromises()
 
-    expect(room.props('voiceConnected')).toBe(true)
-    expect(room.props('connectError')).toContain('control websocket write failed')
+    expect(channel.props('voiceConnected')).toBe(true)
+    expect(channel.props('connectError')).toContain('control websocket write failed')
   })
 
   it('handles sendChat event', async () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('sendChat', 'Hello!')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('sendChat', 'Hello!')
     await flushPromises()
     expect(go.SendChat).toHaveBeenCalledWith('Hello!')
   })
@@ -453,8 +474,8 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('sendChannelChat', 5, 'Hello channel!')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('sendChannelChat', 5, 'Hello channel!')
     await flushPromises()
     expect(go.SendChannelChat).toHaveBeenCalledWith(5, 'Hello channel!')
   })
@@ -463,8 +484,8 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('createChannel', 'New Ch')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('createChannel', 'New Ch')
     await flushPromises()
     expect(go.CreateChannel).toHaveBeenCalledWith('New Ch')
   })
@@ -473,8 +494,8 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('editMessage', 10, 'updated')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('editMessage', 10, 'updated')
     await flushPromises()
     expect(go.EditMessage).toHaveBeenCalledWith(10, 'updated')
   })
@@ -483,8 +504,8 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('deleteMessage', 10)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('deleteMessage', 10)
     await flushPromises()
     expect(go.DeleteMessage).toHaveBeenCalledWith(10)
   })
@@ -493,8 +514,8 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('kickUser', 99)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('kickUser', 99)
     await flushPromises()
     expect(go.KickUser).toHaveBeenCalledWith(99)
   })
@@ -503,8 +524,8 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('startVideo')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('startVideo')
     await flushPromises()
     expect(go.StartVideo).toHaveBeenCalled()
   })
@@ -513,8 +534,8 @@ describe('App', () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    room.vm.$emit('stopVideo')
+    const channel = w.findComponent({ name: 'ChannelView' })
+    channel.vm.$emit('stopVideo')
     await flushPromises()
     expect(go.StopVideo).toHaveBeenCalled()
   })
@@ -531,8 +552,8 @@ describe('App', () => {
       title: 'Example', description: 'A page', image: '', site_name: 'Ex',
     })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const msg = room.props('chatMessages').find((m: any) => m.msgId === 800)
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const msg = channel.props('chatMessages').find((m: any) => m.msgId === 800)
     expect(msg.linkPreview).toBeDefined()
     expect(msg.linkPreview.title).toBe('Example')
   })
@@ -546,8 +567,8 @@ describe('App', () => {
       layers: [{ quality: 'high', width: 1920, height: 1080, bitrate: 2000 }],
     })
     await flushPromises()
-    const room = w.findComponent({ name: 'Room' })
-    const vs = room.props('videoStates')[1]
+    const channel = w.findComponent({ name: 'ChannelView' })
+    const vs = channel.props('videoStates')[1]
     expect(vs.layers).toHaveLength(1)
     expect(vs.layers[0].quality).toBe('high')
   })

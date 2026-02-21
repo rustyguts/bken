@@ -63,7 +63,7 @@ const initials = computed(() => {
         {{ muted ? 'Unmute' : 'Mute' }}
       </button>
 
-      <!-- Kick button — only visible to room owner, not on self -->
+      <!-- Kick button — only visible to channel owner, not on self -->
       <button
         v-if="canKick"
         class="btn btn-ghost btn-xs text-error"

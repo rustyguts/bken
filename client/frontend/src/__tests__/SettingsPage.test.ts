@@ -39,7 +39,7 @@ describe('SettingsPage', () => {
 
   it('emits back when back button is clicked', async () => {
     const w = mount(SettingsPage)
-    const backBtn = w.find('[aria-label="Back to room"]')
+    const backBtn = w.find('[aria-label="Back to channel"]')
     await backBtn.trigger('click')
     expect(w.emitted('back')).toHaveLength(1)
   })

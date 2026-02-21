@@ -15,7 +15,7 @@ The server does not process or transcode audio. It relays WebSocket control mess
 ### Memory
 
 - **Base**: ~30 MB (Go runtime + SQLite + HTTP server)
-- **Per connected user**: ~1 MB (WebSocket connection, control state, in-memory room data)
+- **Per connected user**: ~1 MB (WebSocket connection, control state, in-memory channel data)
 - **File uploads**: uploaded files are streamed to disk; memory usage is bounded by request size (max 10 MB)
 
 ### Bandwidth
@@ -35,8 +35,8 @@ Client-to-client audio bandwidth (for network planning):
 ### Disk
 
 - **SQLite database**: typically <1 MB (settings, channels, files, bans, audit log)
-- **Uploaded files**: depends on usage; stored in `uploads/` directory next to the database
-- **Recordings**: stored in `recordings/` directory; OGG/Opus at ~32 kbps ≈ 14 MB/hour per participant track
+- **Blob bytes (uploads, images, videos, recordings)**: depends on usage; stored in `blobs/` directory next to the database (or custom `-blobs-dir`)
+- **Blob metadata**: stored in SQLite (names, types, sizes, UUID disk names)
 - **Logs**: standard output, no log files by default
 
 ### Example Configurations
@@ -74,6 +74,6 @@ Above 25 users per channel, client CPU and bandwidth become the bottleneck, not 
 
 BKEN is intentionally designed for small communities. It is not a replacement for Discord, Slack, or Zoom at scale.
 
-- **Horizontal scaling**: not supported. Each server is an independent room.
+- **Horizontal scaling**: not supported. Each server is an independent channel.
 - **Persistence**: chat messages are ephemeral (in-memory). Only settings, channels, and file metadata are persisted to SQLite.
-- **Backups**: copy the `bken.db` SQLite file and the `uploads/` directory.
+- **Backups**: copy the `bken.db` SQLite file and the `blobs/` directory.

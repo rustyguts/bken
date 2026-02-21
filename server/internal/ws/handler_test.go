@@ -92,9 +92,9 @@ func TestTextOnAnotherServerWhileVoiceConnectedElsewhere(t *testing.T) {
 func startTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 
-	room := core.NewRoom()
+	channelState := core.NewChannelState()
 	e := echo.New()
-	NewHandler(room).Register(e)
+	NewHandler(channelState).Register(e)
 	httpServer := httptest.NewServer(e)
 	t.Cleanup(httpServer.Close)
 

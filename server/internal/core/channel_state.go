@@ -28,22 +28,22 @@ type userState struct {
 	send      chan protocol.Message
 }
 
-// Room is the global in-memory presence state.
+// ChannelState is the global in-memory presence state.
 // Users may connect to multiple servers simultaneously, but each user has at
 // most one global voice connection at any time.
-type Room struct {
+type ChannelState struct {
 	mu     sync.RWMutex
 	users  map[string]*userState
 	nextID atomic.Uint64
 }
 
-// NewRoom returns an empty room.
-func NewRoom() *Room {
-	return &Room{users: make(map[string]*userState)}
+// NewChannelState returns an empty channel state.
+func NewChannelState() *ChannelState {
+	return &ChannelState{users: make(map[string]*userState)}
 }
 
 // Add registers a new user session and returns the session plus full snapshot.
-func (r *Room) Add(username string, sendBuf int) (*Session, []protocol.User, error) {
+func (r *ChannelState) Add(username string, sendBuf int) (*Session, []protocol.User, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
 		return nil, nil, fmt.Errorf("username is required")
@@ -69,7 +69,7 @@ func (r *Room) Add(username string, sendBuf int) (*Session, []protocol.User, err
 }
 
 // Remove unregisters a user session.
-func (r *Room) Remove(userID string) (protocol.User, bool) {
+func (r *ChannelState) Remove(userID string) (protocol.User, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -83,14 +83,14 @@ func (r *Room) Remove(userID string) (protocol.User, bool) {
 }
 
 // ClientCount returns active websocket session count.
-func (r *Room) ClientCount() int {
+func (r *ChannelState) ClientCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.users)
 }
 
 // User returns one user's authoritative state.
-func (r *Room) User(userID string) (protocol.User, bool) {
+func (r *ChannelState) User(userID string) (protocol.User, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -102,13 +102,13 @@ func (r *Room) User(userID string) (protocol.User, bool) {
 }
 
 // Users returns a stable ordered snapshot of all users.
-func (r *Room) Users() []protocol.User {
+func (r *ChannelState) Users() []protocol.User {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.snapshotLocked()
 }
 
-func (r *Room) snapshotLocked() []protocol.User {
+func (r *ChannelState) snapshotLocked() []protocol.User {
 	out := make([]protocol.User, 0, len(r.users))
 	for _, u := range r.users {
 		out = append(out, toProtocolUser(u))
@@ -118,7 +118,7 @@ func (r *Room) snapshotLocked() []protocol.User {
 }
 
 // ConnectServer marks user as connected to a logical server.
-func (r *Room) ConnectServer(userID, serverID string) (protocol.User, bool, error) {
+func (r *ChannelState) ConnectServer(userID, serverID string) (protocol.User, bool, error) {
 	serverID = strings.TrimSpace(serverID)
 	if serverID == "" {
 		return protocol.User{}, false, fmt.Errorf("server_id is required")
@@ -138,7 +138,7 @@ func (r *Room) ConnectServer(userID, serverID string) (protocol.User, bool, erro
 
 // DisconnectServer removes one logical server membership.
 // If the user was voice-connected in that server, voice is disconnected too.
-func (r *Room) DisconnectServer(userID, serverID string) (protocol.User, bool, *protocol.VoiceState, error) {
+func (r *ChannelState) DisconnectServer(userID, serverID string) (protocol.User, bool, *protocol.VoiceState, error) {
 	serverID = strings.TrimSpace(serverID)
 	if serverID == "" {
 		return protocol.User{}, false, nil, fmt.Errorf("server_id is required")
@@ -168,7 +168,7 @@ func (r *Room) DisconnectServer(userID, serverID string) (protocol.User, bool, *
 
 // JoinVoice sets the global voice state.
 // Users can only be in one voice channel globally.
-func (r *Room) JoinVoice(userID, serverID, channelID string) (protocol.User, *protocol.VoiceState, error) {
+func (r *ChannelState) JoinVoice(userID, serverID, channelID string) (protocol.User, *protocol.VoiceState, error) {
 	serverID = strings.TrimSpace(serverID)
 	channelID = strings.TrimSpace(channelID)
 	if serverID == "" || channelID == "" {
@@ -196,7 +196,7 @@ func (r *Room) JoinVoice(userID, serverID, channelID string) (protocol.User, *pr
 }
 
 // DisconnectVoice clears the global voice state.
-func (r *Room) DisconnectVoice(userID string) (protocol.User, *protocol.VoiceState, bool) {
+func (r *ChannelState) DisconnectVoice(userID string) (protocol.User, *protocol.VoiceState, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -213,7 +213,7 @@ func (r *Room) DisconnectVoice(userID string) (protocol.User, *protocol.VoiceSta
 }
 
 // CanSendText reports whether a user is connected to the target server.
-func (r *Room) CanSendText(userID, serverID string) bool {
+func (r *ChannelState) CanSendText(userID, serverID string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -226,7 +226,7 @@ func (r *Room) CanSendText(userID, serverID string) bool {
 }
 
 // Broadcast sends a message to all connected users except exceptUserID.
-func (r *Room) Broadcast(msg protocol.Message, exceptUserID string) {
+func (r *ChannelState) Broadcast(msg protocol.Message, exceptUserID string) {
 	r.mu.RLock()
 	targets := make([]chan protocol.Message, 0, len(r.users))
 	for id, u := range r.users {
@@ -243,7 +243,7 @@ func (r *Room) Broadcast(msg protocol.Message, exceptUserID string) {
 }
 
 // BroadcastToServer sends a message to users connected to serverID.
-func (r *Room) BroadcastToServer(serverID string, msg protocol.Message, exceptUserID string) {
+func (r *ChannelState) BroadcastToServer(serverID string, msg protocol.Message, exceptUserID string) {
 	serverID = strings.TrimSpace(serverID)
 	if serverID == "" {
 		return
@@ -268,7 +268,7 @@ func (r *Room) BroadcastToServer(serverID string, msg protocol.Message, exceptUs
 }
 
 // SendTo sends one message to one user.
-func (r *Room) SendTo(userID string, msg protocol.Message) bool {
+func (r *ChannelState) SendTo(userID string, msg protocol.Message) bool {
 	r.mu.RLock()
 	u, ok := r.users[userID]
 	r.mu.RUnlock()

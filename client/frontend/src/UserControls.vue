@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import MetricsBar from './MetricsBar.vue'
-import { Mic, MicOff, Volume2, VolumeX, Video, Monitor, Settings, LogOut } from 'lucide-vue-next'
+import { Mic, MicOff, Volume2, VolumeX, Settings, LogOut } from 'lucide-vue-next'
 
 const props = defineProps<{
   username: string
@@ -9,8 +9,6 @@ const props = defineProps<{
   deafened: boolean
   connected: boolean
   voiceConnected: boolean
-  videoActive: boolean
-  screenSharing: boolean
 }>()
 
 const emit = defineEmits<{
@@ -19,8 +17,6 @@ const emit = defineEmits<{
   'mute-toggle': []
   'deafen-toggle': []
   'leave-voice': []
-  'video-toggle': []
-  'screen-share-toggle': []
 }>()
 
 const modalOpen = ref(false)
@@ -88,28 +84,6 @@ function confirmRename(): void {
       >
         <Volume2 v-if="!deafened" class="w-4 h-4" aria-hidden="true" />
         <VolumeX v-else class="w-4 h-4" aria-hidden="true" />
-      </button>
-
-      <!-- Video -->
-      <button
-        class="btn btn-ghost btn-sm"
-        :class="videoActive ? 'text-success' : ''"
-        :disabled="!voiceConnected"
-        :title="videoActive ? 'Stop Video' : 'Start Video'"
-        @click="emit('video-toggle')"
-      >
-        <Video class="w-4 h-4" aria-hidden="true" />
-      </button>
-
-      <!-- Screen Share -->
-      <button
-        class="btn btn-ghost btn-sm"
-        :class="screenSharing ? 'text-success' : ''"
-        :disabled="!voiceConnected"
-        :title="screenSharing ? 'Stop Sharing' : 'Share Screen'"
-        @click="emit('screen-share-toggle')"
-      >
-        <Monitor class="w-4 h-4" aria-hidden="true" />
       </button>
 
       <!-- Settings -->

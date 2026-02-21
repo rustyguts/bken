@@ -8,69 +8,97 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-All commands assume Docker Compose unless noted.
-
 ```bash
-# Full stack (server hot-reloads via Air; clients are pre-built images)
+# Server with hot reload (via Air)
 docker compose up
 
-# Server only (hot reload)
-docker compose up server
-
-# Run server tests
+# Run server tests (no CGO needed)
 cd server && go test ./...
 
-# Run client tests (requires CGO toolchain: libopus-devel, portaudio-devel)
+# Run a single server test
+cd server && go test ./internal/core/ -run TestChannelState
+
+# Run client Go tests (requires CGO: libopus-dev, portaudio19-dev)
 cd client && go test ./...
 
-# Build client binary on host
+# Run frontend tests
+cd client/frontend && bun run test
+
+# Run a single frontend test file
+cd client/frontend && bunx vitest run src/__tests__/App.test.ts
+
+# Watch mode for frontend tests
+cd client/frontend && bun run test:watch
+
+# Build client binary (Linux needs -tags webkit2_41; macOS/Windows don't)
 cd client && wails build -tags webkit2_41
 
-# Frontend only
+# Build frontend only
 cd client/frontend && bun run build
+
+# Regenerate Wails bindings after changing Go method signatures
+cd client && wails generate module
 ```
 
-The server accepts a `-addr` flag (default `:8080`).
+The server accepts `-addr` (default `:8080`), `-db` (default `bken.db`), and `-blobs-dir` flags.
 
 ## Architecture
 
 ### Wire protocol
 
-Every connection uses WebSocket over TLS (`/ws` on port 8080):
+Connections use WebSocket on `/ws` (port 8080, plain HTTP):
 
-1. **Control messages** — reliable, bidirectional, newline-delimited JSON. Client connects and immediately sends `{"type":"join","username":"..."}`. Server responds with `user_list` (includes channel list and ICE server config), then pushes events: `user_joined`, `user_left`, `chat`, `edit_message`, `delete_message`, `create_channel`, `rename_channel`, `delete_channel`, `webrtc_offer`, `webrtc_answer`, `webrtc_ice`, `kick`, `move_user`, `reaction`, `typing`, and more.
-2. **Voice audio** — peer-to-peer WebRTC (`pion/webrtc/v4`). The server relays only WebRTC signaling (offer/answer/ICE candidates); Opus audio flows directly between clients over DTLS-SRTP.
+1. Client sends `{"type":"hello","username":"..."}`.
+2. Server responds with `{"type":"snapshot","self_id":"<uuid>","users":[...]}`, then broadcasts `user_joined` to others.
+3. Ongoing message types — client→server: `ping`, `connect_server`, `disconnect_server`, `join_voice`, `disconnect_voice`, `send_text`. Server→client: `snapshot`, `user_joined`, `user_left`, `user_state`, `text_message`, `pong`, `error`.
+
+The server handles presence and text chat only. No WebRTC relay — voice audio flows peer-to-peer between clients.
 
 ### Server (`server/`)
 
-- `server.go` — HTTPS + WebSocket upgrade (`gorilla/websocket`), HTTP routing (`/ws` for signaling, `/` for health check)
-- `client.go` — per-connection goroutine: join handshake, control message read loop, WebRTC signaling relay, chat/channel/admin message handling; fires `broadcastUserJoined` / `broadcastUserLeft`
-- `room.go` — `Room`: thread-safe client registry, channel state, bounded message store, reaction tracking, role-based access control (OWNER > ADMIN > MODERATOR > USER), rate limiting, circuit breaker for slow clients
-- `tls.go` — generates a fresh self-signed ECDSA cert on every start; fingerprint is logged for debugging
-- `api.go` — REST API (Echo): health, settings, channels CRUD, file upload/download, recordings list/download, audit log, ban management
-- `recording.go` — server-side voice recording to OGG/Opus files (max 2 hours)
-- `metrics.go` — periodic connection and message counter logging
+Organized into `internal/` packages:
 
-No CGO. Alpine Docker build.
+- `main.go` — entry point; wires SQLite store, blob store, channel state, and HTTP server. Version injected via `-ldflags`.
+- `internal/protocol/` — `Message` struct (JSON envelope), `User`/`VoiceState` types, protocol type constants.
+- `internal/core/` — `ChannelState`: thread-safe in-memory user presence registry (`sync.RWMutex` + `atomic`). Sessions, broadcast, per-server scoped text relay.
+- `internal/ws/` — `Handler`: gorilla/websocket upgrade, `hello`→`snapshot` handshake, message read loop, dispatches to `ChannelState`.
+- `internal/httpapi/` — Echo HTTP server. Routes: `GET /health`, `GET /api/state`, `POST /api/blobs` (alias `/api/upload`), `GET /api/blobs/:id` (alias `/api/files/:id`). Registers the WS handler.
+- `internal/blob/` — disk-backed blob store with SQLite metadata.
+- `internal/store/` — SQLite store (`modernc.org/sqlite`, pure Go, no CGO). Auto-migrates on open.
+
+No CGO. No TLS (plain HTTP). Alpine Docker build.
 
 ### Client (`client/`)
 
 **Go layer:**
-- `transport.go` — dials WebSocket (`gorilla/websocket`), handles join handshake, manages per-peer WebRTC connections via `pion/webrtc/v4`, fires `runtime.EventsEmit` callbacks so the frontend sees `user:list`, `user:joined`, `user:left`, chat events, etc.
-- `audio.go` — PortAudio capture (48 kHz, mono, 960-sample / 20 ms frames) → Opus VoIP encode → WebRTC track; remote WebRTC tracks → Opus decode → jitter buffer → PortAudio playback
-- `app.go` — `App`: Wails-bound methods (`Connect`, `Disconnect`, `GetInputDevices`, `SetMuted`, `SetDeafened`, etc.); wires transport callbacks to frontend events
-- `interfaces.go` — `Transporter` interface covering all client operations
+- `transport.go` — dials WebSocket, manages per-peer WebRTC connections via `pion/webrtc/v4`, fires `runtime.EventsEmit` callbacks so the frontend sees `user:list`, `user:joined`, `user:left`, chat events, etc. The client supports a richer protocol than the current server (WebRTC signaling, channels, reactions, video, recording).
+- `audio.go` — PortAudio capture (48 kHz, mono, 960-sample / 20 ms frames) → Opus encode → WebRTC track; remote tracks → Opus decode → jitter buffer → PortAudio playback.
+- `app.go` — `App`: Wails-bound methods (`Connect`, `Disconnect`, `SetMuted`, `SetDeafened`, etc.); bridges transport callbacks to frontend events. Supports multiple simultaneous server connections (`sessions` map).
+- `interfaces.go` — `Transporter` interface covering all transport operations.
+- `internal/` — sub-packages: `config` (persisted user settings), `jitter`, `noisegate`, `vad`, `aec`, `agc`, `adapt`.
 
-**Frontend** (`client/frontend/src/`): Vue 3 (Vite + Tailwind + DaisyUI). Wails runtime bindings are auto-generated under `wailsjs/` — do not edit manually; regenerate with `wails generate module` after changing Go method signatures.
+**Frontend** (`client/frontend/src/`): Vue 3, Vite 6, Tailwind CSS v4, DaisyUI v5, TypeScript, Lucide icons. Package manager is `bun`.
+
+Wails runtime bindings are auto-generated under `wailsjs/` — do not edit manually; regenerate with `wails generate module` after changing Go method signatures.
+
+### Frontend testing
+
+Tests use Vitest with jsdom. The setup file (`src/__tests__/setup.ts`) provides:
+- Full `window.runtime` mock (Wails runtime event bus + all window APIs)
+- Full `window.go.main.App` mock (all Go bridge functions)
+- Auto-reset of event bus, config, and mocks via `afterEach`
+- Exported helpers: `emitWailsEvent()`, `resetWailsEvents()`, `resetConfig()`, `getGoMock()`, `flushPromises()`
 
 ### Docker
 
-Server Dockerfile: multi-stage Alpine (prod) + `Dockerfile.dev` (golang:alpine + Air hot reload, source mounted as volume).
+`docker-compose.yml` currently runs only the server (dev profile with Air hot reload). Client service is commented out.
 
-Client Dockerfile: Fedora 43 single-stage. Build flag `-tags webkit2_41` required (Fedora ships `webkit2gtk4.1-devel`). The following env vars are required in `docker-compose.yml` to prevent a black screen on systems without a GPU driver in-container:
+Server Dockerfile: single file with `base`, `dev`, `build`, `prod` stages. Dev stage uses Air; prod stage is Alpine with non-root user and healthcheck.
 
-```
-WEBKIT_DISABLE_COMPOSITING_MODE=1
-WEBKIT_DISABLE_DMABUF_RENDERER=1
-LIBGL_ALWAYS_SOFTWARE=1
-```
+Client Dockerfile: Debian Bookworm base (`golang:1-bookworm`). Installs GTK3, WebKit2GTK 4.1, PortAudio, Opus, PipeWire. Build flag `-tags webkit2_41` required on Linux.
+
+### CI
+
+GitHub Actions (`build.yml`) on push to main:
+- Server: standalone binary (`CGO_ENABLED=0`) + Docker image
+- Client: matrix build for Linux, macOS (brew deps), Windows (MSYS2/MINGW64)

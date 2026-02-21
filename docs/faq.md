@@ -54,11 +54,11 @@ See the [Configuration Reference](/configuration) for all flags.
 
 ### Where is data stored?
 
-In a SQLite database file (default: `bken.db` in the working directory) and an `uploads/` directory for shared files. Chat messages are ephemeral and not persisted to disk.
+In a SQLite database file (default: `bken.db` in the working directory) plus a `blobs/` directory for binary payloads (uploads, recordings, image/video blobs). Blob metadata is stored in SQLite.
 
 ### How do I back up my server?
 
-Copy the `bken.db` file and the `uploads/` directory. SQLite supports concurrent reads, so you can copy while the server is running.
+Copy the `bken.db` file and the `blobs/` directory. SQLite supports concurrent reads, so you can copy while the server is running.
 
 ## Audio
 
@@ -123,4 +123,4 @@ Yes. The dev server runs plain WebSocket/HTTP on port `8080`. For TLS, run BKEN 
 
 1. Verify the REST API is running (port 8080 by default)
 2. Check that the file is under 10 MB
-3. Ensure the `uploads/` directory is writable by the server process
+3. Ensure the `blobs/` directory is writable by the server process

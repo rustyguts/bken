@@ -55,7 +55,7 @@ type ControlMsg struct {
 	Ts            int64           `json:"ts,omitempty"`              // ping/pong timestamp (Unix ms)
 	Message       string          `json:"message,omitempty"`         // chat: body text
 	ServerName    string          `json:"server_name,omitempty"`     // user_list: human-readable server name
-	OwnerID       uint16          `json:"owner_id,omitempty"`        // user_list/owner_changed: current room owner
+	OwnerID       uint16          `json:"owner_id,omitempty"`        // user_list/owner_changed: current channel owner
 	ChannelID     int64           `json:"channel_id,omitempty"`      // join_channel/user_channel: target channel
 	Channels      []ChannelInfo   `json:"channels,omitempty"`        // channel_list: full list of channels
 	APIPort       int             `json:"api_port,omitempty"`        // user_list: HTTP API port for file uploads
@@ -505,13 +505,13 @@ func (t *Transport) GetUserVolume(id uint16) float64 {
 }
 
 // KickUser sends a kick request to the server. Only succeeds if the caller is
-// the room owner; the server enforces the authorisation check.
+// the channel owner; the server enforces the authorisation check.
 func (t *Transport) KickUser(id uint16) error {
 	return t.writeCtrl(ControlMsg{Type: "kick", ID: id})
 }
 
 // RenameServer sends a rename request to the server. Only succeeds if the
-// caller is the room owner; the server enforces the authorisation check.
+// caller is the channel owner; the server enforces the authorisation check.
 func (t *Transport) RenameServer(name string) error {
 	return t.writeCtrl(ControlMsg{Type: "rename", ServerName: name})
 }
@@ -530,25 +530,25 @@ func (t *Transport) JoinChannel(id int64) error {
 }
 
 // CreateChannel asks the server to create a new channel with the given name.
-// Only succeeds if the caller is the room owner; the server enforces the check.
+// Only succeeds if the caller is the channel owner; the server enforces the check.
 func (t *Transport) CreateChannel(name string) error {
 	return t.writeCtrl(ControlMsg{Type: "create_channel", Message: name})
 }
 
 // RenameChannel asks the server to rename a channel.
-// Only succeeds if the caller is the room owner; the server enforces the check.
+// Only succeeds if the caller is the channel owner; the server enforces the check.
 func (t *Transport) RenameChannel(id int64, name string) error {
 	return t.writeCtrl(ControlMsg{Type: "rename_channel", ChannelID: id, Message: name})
 }
 
 // DeleteChannel asks the server to delete a channel.
-// Only succeeds if the caller is the room owner; the server enforces the check.
+// Only succeeds if the caller is the channel owner; the server enforces the check.
 func (t *Transport) DeleteChannel(id int64) error {
 	return t.writeCtrl(ControlMsg{Type: "delete_channel", ChannelID: id})
 }
 
 // MoveUser asks the server to move a user to a different channel.
-// Only succeeds if the caller is the room owner; the server enforces the check.
+// Only succeeds if the caller is the channel owner; the server enforces the check.
 func (t *Transport) MoveUser(userID uint16, channelID int64) error {
 	return t.writeCtrl(ControlMsg{Type: "move_user", ID: userID, ChannelID: channelID})
 }
@@ -578,13 +578,13 @@ func (t *Transport) RequestVideoQuality(targetID uint16, quality string) error {
 }
 
 // StartRecording asks the server to start recording voice in a channel.
-// Only succeeds if the caller is the room owner; the server enforces the check.
+// Only succeeds if the caller is the channel owner; the server enforces the check.
 func (t *Transport) StartRecording(channelID int64) error {
 	return t.writeCtrl(ControlMsg{Type: "start_recording", ChannelID: channelID})
 }
 
 // StopRecording asks the server to stop recording voice in a channel.
-// Only succeeds if the caller is the room owner; the server enforces the check.
+// Only succeeds if the caller is the channel owner; the server enforces the check.
 func (t *Transport) StopRecording(channelID int64) error {
 	return t.writeCtrl(ControlMsg{Type: "stop_recording", ChannelID: channelID})
 }
@@ -599,7 +599,7 @@ func (t *Transport) EditMessage(msgID uint64, message string) error {
 }
 
 // DeleteMessage asks the server to delete a message. The original sender
-// and the room owner are allowed to delete; the server enforces the check.
+// and the channel owner are allowed to delete; the server enforces the check.
 func (t *Transport) DeleteMessage(msgID uint64) error {
 	return t.writeCtrl(ControlMsg{Type: "delete_message", MsgID: msgID})
 }

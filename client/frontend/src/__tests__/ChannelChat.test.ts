@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import ChannelChatroom from '../ChannelChatroom.vue'
+import ChannelChat from '../ChannelChat.vue'
 import type { ChatMessage, Channel } from '../types'
 
 function makeMsg(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -16,7 +16,7 @@ function makeMsg(overrides: Partial<ChatMessage> = {}): ChatMessage {
   }
 }
 
-describe('ChannelChatroom', () => {
+describe('ChannelChat', () => {
   const baseProps = {
     messages: [] as ChatMessage[],
     channels: [] as Channel[],
@@ -29,36 +29,36 @@ describe('ChannelChatroom', () => {
   }
 
   it('mounts without errors', () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     expect(w.exists()).toBe(true)
   })
 
   it('shows empty state when no messages', () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     expect(w.text()).toContain('No messages in this channel yet')
   })
 
   it('shows disconnected message when not connected', () => {
-    const w = mount(ChannelChatroom, { props: { ...baseProps, connected: false } })
+    const w = mount(ChannelChat, { props: { ...baseProps, connected: false } })
     expect(w.text()).toContain('Connect to a server to start chatting')
   })
 
   it('renders messages', () => {
     const messages = [makeMsg({ message: 'Test message' })]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('Alice')
     expect(w.text()).toContain('Test message')
   })
 
   it('renders system messages', () => {
     const messages = [makeMsg({ system: true, message: 'Alice joined the server', username: '' })]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages, showSystemMessages: true } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages, showSystemMessages: true } })
     expect(w.text()).toContain('Alice joined the server')
   })
 
   it('hides system messages when showSystemMessages is false', () => {
     const messages = [makeMsg({ system: true, message: 'Alice joined the server', username: '' })]
-    const w = mount(ChannelChatroom, {
+    const w = mount(ChannelChat, {
       props: { ...baseProps, messages, showSystemMessages: false },
     })
     expect(w.text()).not.toContain('Alice joined the server')
@@ -66,13 +66,13 @@ describe('ChannelChatroom', () => {
 
   it('shows deleted message indicator', () => {
     const messages = [makeMsg({ deleted: true, message: '' })]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('message deleted')
   })
 
   it('shows edited indicator', () => {
     const messages = [makeMsg({ edited: true })]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('(edited)')
   })
 
@@ -81,7 +81,7 @@ describe('ChannelChatroom', () => {
       { id: 1, name: 'General' },
       { id: 2, name: 'Dev' },
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, channels, selectedChannelId: 2 } })
+    const w = mount(ChannelChat, { props: { ...baseProps, channels, selectedChannelId: 2 } })
     expect(w.find('header h2').text()).toContain('# Dev')
   })
 
@@ -90,7 +90,7 @@ describe('ChannelChatroom', () => {
       { id: 1, name: 'General' },
       { id: 2, name: 'Dev' },
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, channels, selectedChannelId: 1 } })
+    const w = mount(ChannelChat, { props: { ...baseProps, channels, selectedChannelId: 1 } })
     expect(w.find('header h2').text()).toContain('# General')
 
     await w.setProps({ selectedChannelId: 2 })
@@ -102,7 +102,7 @@ describe('ChannelChatroom', () => {
       { id: 1, name: 'General' },
       { id: 2, name: 'Dev' },
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, channels } })
+    const w = mount(ChannelChat, { props: { ...baseProps, channels } })
     const hasChannelTabButton = w
       .findAll('header button')
       .some(btn => btn.text().includes('General') || btn.text().includes('Dev'))
@@ -114,7 +114,7 @@ describe('ChannelChatroom', () => {
       makeMsg({ id: 1, channelId: 0, message: 'Lobby msg' }),
       makeMsg({ id: 2, channelId: 1, message: 'General msg' }),
     ]
-    const w = mount(ChannelChatroom, {
+    const w = mount(ChannelChat, {
       props: { ...baseProps, messages, selectedChannelId: 1 },
     })
     expect(w.text()).not.toContain('Lobby msg')
@@ -122,7 +122,7 @@ describe('ChannelChatroom', () => {
   })
 
   it('emits send when Enter is pressed in the input', async () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     const input = w.find('input[type="text"][maxlength="500"]')
     await input.setValue('Hello')
     await input.trigger('keydown', { key: 'Enter' })
@@ -130,7 +130,7 @@ describe('ChannelChatroom', () => {
   })
 
   it('does not emit send for empty input', async () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     const input = w.find('input[type="text"][maxlength="500"]')
     await input.setValue('  ')
     await input.trigger('keydown', { key: 'Enter' })
@@ -138,7 +138,7 @@ describe('ChannelChatroom', () => {
   })
 
   it('clears input after sending', async () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     const input = w.find('input[type="text"][maxlength="500"]')
     await input.setValue('Hello')
     await input.trigger('keydown', { key: 'Enter' })
@@ -146,13 +146,13 @@ describe('ChannelChatroom', () => {
   })
 
   it('disables input when not connected', () => {
-    const w = mount(ChannelChatroom, { props: { ...baseProps, connected: false } })
+    const w = mount(ChannelChat, { props: { ...baseProps, connected: false } })
     const input = w.find('input[type="text"][maxlength="500"]')
     expect(input.attributes('disabled')).toBeDefined()
   })
 
   it('shows placeholder with channel name', () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     const input = w.find('input[type="text"][maxlength="500"]')
     expect(input.attributes('placeholder')).toContain('Message #General')
   })
@@ -163,7 +163,7 @@ describe('ChannelChatroom', () => {
         reactions: [{ emoji: '👍', user_ids: [1, 2], count: 2 }],
       }),
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('👍')
     expect(w.text()).toContain('2')
   })
@@ -176,7 +176,7 @@ describe('ChannelChatroom', () => {
         fileSize: 1024,
       }),
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('report.pdf')
     expect(w.text()).toContain('1.0 KB')
   })
@@ -189,32 +189,32 @@ describe('ChannelChatroom', () => {
         fileSize: 2048,
       }),
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     const img = w.find('img[alt="photo.jpg"]')
     expect(img.exists()).toBe(true)
   })
 
   it('shows pinned badge on pinned messages', () => {
     const messages = [makeMsg({ pinned: true })]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('pinned')
   })
 
   it('shows pinned messages button when there are pinned messages', () => {
     const messages = [makeMsg({ pinned: true })]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     const pinnedBtn = w.findAll('button').find(b => b.attributes('title') === 'Pinned messages')
     expect(pinnedBtn).toBeDefined()
   })
 
   it('shows search button', () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     const searchBtn = w.findAll('button').find(b => b.attributes('title') === 'Search messages')
     expect(searchBtn).toBeDefined()
   })
 
   it('opens search bar when search button is clicked', async () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     const searchBtn = w.findAll('button').find(b => b.attributes('title') === 'Search messages')
     await searchBtn!.trigger('click')
     const searchInput = w.find('input[placeholder="Search messages..."]')
@@ -233,13 +233,13 @@ describe('ChannelChatroom', () => {
         },
       }),
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('Example Site')
     expect(w.text()).toContain('A test page')
   })
 
   it('shows typing indicator when users are typing', () => {
-    const w = mount(ChannelChatroom, {
+    const w = mount(ChannelChat, {
       props: {
         ...baseProps,
         typingUsers: { 2: { username: 'Bob', channelId: 0, expiresAt: Date.now() + 5000 } },
@@ -249,7 +249,7 @@ describe('ChannelChatroom', () => {
   })
 
   it('shows multiple typing users text', () => {
-    const w = mount(ChannelChatroom, {
+    const w = mount(ChannelChat, {
       props: {
         ...baseProps,
         typingUsers: {
@@ -262,7 +262,7 @@ describe('ChannelChatroom', () => {
   })
 
   it('emits uploadFile when upload button is clicked', async () => {
-    const w = mount(ChannelChatroom, { props: baseProps })
+    const w = mount(ChannelChat, { props: baseProps })
     const uploadBtn = w.findAll('button').find(b => b.attributes('title') === 'Upload file')
     await uploadBtn!.trigger('click')
     expect(w.emitted('uploadFile')).toHaveLength(1)
@@ -275,7 +275,7 @@ describe('ChannelChatroom', () => {
         mentions: [10],
       }),
     ]
-    const w = mount(ChannelChatroom, {
+    const w = mount(ChannelChat, {
       props: {
         ...baseProps,
         messages,
@@ -294,14 +294,14 @@ describe('ChannelChatroom', () => {
         replyPreview: { msg_id: 50, username: 'Bob', message: 'Original msg' },
       }),
     ]
-    const w = mount(ChannelChatroom, { props: { ...baseProps, messages } })
+    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
     expect(w.text()).toContain('Bob')
     expect(w.text()).toContain('Original msg')
   })
 
   it('respects compact density', () => {
     const messages = [makeMsg()]
-    const w = mount(ChannelChatroom, {
+    const w = mount(ChannelChat, {
       props: { ...baseProps, messages, messageDensity: 'compact' as const },
     })
     // Compact mode uses space-y-0 class on the messages container
@@ -311,7 +311,7 @@ describe('ChannelChatroom', () => {
 
   it('respects comfortable density with avatar', () => {
     const messages = [makeMsg()]
-    const w = mount(ChannelChatroom, {
+    const w = mount(ChannelChat, {
       props: { ...baseProps, messages, messageDensity: 'comfortable' as const },
     })
     // Comfortable mode uses space-y-2 class

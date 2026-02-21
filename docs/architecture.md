@@ -24,7 +24,7 @@ BKEN is a LAN-first voice chat application. The server handles WebSocket signali
 
 The server is a single Go binary with no external dependencies beyond embedded SQLite. It serves two roles:
 
-1. **WebSocket signaling** (port 8080): upgrades HTTP connections to WebSocket, manages the join handshake, relays control messages (chat, WebRTC signaling, channel management), and maintains the room state.
+1. **WebSocket signaling** (port 8080): upgrades HTTP connections to WebSocket, manages the join handshake, relays control messages (chat, WebRTC signaling, channel management), and maintains the channel state.
 
 2. **REST API** (port 8080): provides HTTP endpoints for health checks, server settings, channel CRUD, file uploads/downloads, and invite pages.
 
@@ -35,7 +35,7 @@ The server is a single Go binary with no external dependencies beyond embedded S
 | `main.go` | Entry point, CLI flags, wiring |
 | `server.go` | HTTPS + WebSocket upgrade (`gorilla/websocket`), HTTP routing |
 | `client.go` | Per-connection goroutine: join handshake, control message loop, WebRTC signaling relay, chat/admin handling |
-| `room.go` | Thread-safe client registry, channel state, message store, reaction tracking, role-based access control, rate limiting |
+| `channel_state.go` | Thread-safe client registry, channel state, message store, reaction tracking, role-based access control, rate limiting |
 | `protocol.go` | Wire protocol types (`ControlMsg`, `UserInfo`, `ChannelInfo`, `ICEServerInfo`, `ReactionInfo`) |
 | `api.go` | REST API (Echo framework): health, settings, channels, file upload/download, recordings, audit log, bans |
 | `recording.go` | Server-side voice recording to OGG/Opus (max 2 hours, auto-stopped) |
@@ -87,10 +87,10 @@ Vue 3 with Composition API, Vite, TailwindCSS, and DaisyUI.
 |-----------|---------|
 | `App.vue` | Root: connection state, event wiring, PTT listeners, auto-join logic |
 | `Sidebar.vue` | Server list with avatars, add server dialog, `bken://` deep links |
-| `Room.vue` | Main layout: title bar + channels + chat |
+| `ChannelView.vue` | Main layout: title bar + channels + chat |
 | `TitleBar.vue` | Server name (inline rename for owner), invite link copy |
 | `ServerChannels.vue` | Channel list (DaisyUI menu), user list per channel, context menus, drag-to-reorder |
-| `ChannelChatroom.vue` | Chat messages, reactions, pins, file uploads, link previews, `@mention` autocomplete |
+| `ChannelChat.vue` | Chat messages, reactions, pins, file uploads, link previews, `@mention` autocomplete |
 | `UserControls.vue` | Mute, deafen, video, screen share, settings, leave voice |
 | `UserCard.vue` | Per-user avatar with mute toggle and kick button |
 | `UserProfilePopup.vue` | User profile card with online/speaking status |

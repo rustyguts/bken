@@ -1,6 +1,6 @@
 /** Shared TypeScript interfaces for the bken frontend. */
 
-/** A connected user in the voice room. */
+/** A connected user in the voice channel. */
 export interface User {
   id: number
   username: string

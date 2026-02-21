@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly REQUIRED_PKG_CONFIG_MODULES=(
+  portaudio-2.0
+  opus
+  opusfile
+)
+
 log() {
   printf '[deps] %s\n' "$*"
 }
@@ -13,6 +19,20 @@ run_root() {
   fi
 }
 
+verify_pkg_config_modules() {
+  local missing=0
+  local module
+  for module in "${REQUIRED_PKG_CONFIG_MODULES[@]}"; do
+    if ! pkg-config --exists "${module}"; then
+      log "${module} pkg-config metadata is missing after install."
+      missing=1
+    fi
+  done
+  if [[ "${missing}" -ne 0 ]]; then
+    exit 1
+  fi
+}
+
 install_macos() {
   if ! command -v brew >/dev/null 2>&1; then
     log "Homebrew is required on macOS. Install it first: https://brew.sh"
@@ -20,46 +40,58 @@ install_macos() {
   fi
 
   log "Installing macOS dependencies with Homebrew..."
-  brew install portaudio opus opusfile pkg-config
+  local packages=(
+    portaudio
+    opus
+    opusfile
+    pkg-config
+  )
+  brew install "${packages[@]}"
 }
 
 install_linux_apt() {
   log "Installing Linux dependencies with apt..."
-  run_root apt-get update
-  run_root apt-get install -y \
-    build-essential \
-    pkg-config \
-    libgtk-3-dev \
-    libwebkit2gtk-4.1-dev \
-    portaudio19-dev \
-    libopus-dev \
+  local packages=(
+    build-essential
+    pkg-config
+    libgtk-3-dev
+    libwebkit2gtk-4.1-dev
+    portaudio19-dev
+    libopus-dev
     libopusfile-dev
+  )
+  run_root apt-get update
+  run_root apt-get install -y "${packages[@]}"
 }
 
 install_linux_dnf() {
   log "Installing Linux dependencies with dnf..."
-  run_root dnf install -y \
-    gcc \
-    gcc-c++ \
-    make \
-    pkgconf-pkg-config \
-    gtk3-devel \
-    webkit2gtk4.1-devel \
-    portaudio-devel \
-    opus-devel \
+  local packages=(
+    gcc
+    gcc-c++
+    make
+    pkgconf-pkg-config
+    gtk3-devel
+    webkit2gtk4.1-devel
+    portaudio-devel
+    opus-devel
     opusfile-devel
+  )
+  run_root dnf install -y "${packages[@]}"
 }
 
 install_linux_pacman() {
   log "Installing Linux dependencies with pacman..."
-  run_root pacman -Sy --noconfirm --needed \
-    base-devel \
-    pkgconf \
-    gtk3 \
-    webkit2gtk-4.1 \
-    portaudio \
-    opus \
+  local packages=(
+    base-devel
+    pkgconf
+    gtk3
+    webkit2gtk-4.1
+    portaudio
+    opus
     opusfile
+  )
+  run_root pacman -Sy --noconfirm --needed "${packages[@]}"
 }
 
 install_linux() {
@@ -89,18 +121,7 @@ main() {
       ;;
   esac
 
-  if ! pkg-config --exists portaudio-2.0; then
-    log "portaudio pkg-config metadata is missing after install."
-    exit 1
-  fi
-  if ! pkg-config --exists opus; then
-    log "opus pkg-config metadata is missing after install."
-    exit 1
-  fi
-  if ! pkg-config --exists opusfile; then
-    log "opusfile pkg-config metadata is missing after install."
-    exit 1
-  fi
+  verify_pkg_config_modules
 
   log "Native development dependencies are installed."
   log "Next: from client/, run: wails dev"

@@ -4,7 +4,7 @@ import type { Channel, User } from './types'
 import UserProfilePopup from './UserProfilePopup.vue'
 import { SetUserVolume, GetUserVolume, StartRecording, StopRecording, RenameServer } from './config'
 import { BKEN_SCHEME } from './constants'
-import { Volume2, Plus, ArrowLeft, Settings, Check, Square, Circle } from 'lucide-vue-next'
+import { Volume2, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor } from 'lucide-vue-next'
 
 const props = defineProps<{
   channels: Channel[]
@@ -15,6 +15,9 @@ const props = defineProps<{
   selectedChannelId: number
   serverName: string
   speakingUsers: Set<number>
+  voiceConnected: boolean
+  videoActive: boolean
+  screenSharing: boolean
   connectError: string
   isOwner: boolean
   unreadCounts: Record<number, number>
@@ -30,6 +33,8 @@ const emit = defineEmits<{
   deleteChannel: [channelID: number]
   moveUser: [userID: number, channelID: number]
   kickUser: [userID: number]
+  'video-toggle': []
+  'screen-share-toggle': []
 }>()
 
 const myChannelId = computed(() => props.userChannels[props.myId] ?? 0)
@@ -83,8 +88,8 @@ const renamingChannelId = ref<number | null>(null)
 const renameValue = ref('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
 
-// Server admin settings panel
-const showServerOptions = ref(false)
+// Server admin settings modal
+const showServerAdminModal = ref(false)
 const serverNameDraft = ref('')
 const serverOptionsError = ref('')
 const savingServerName = ref(false)
@@ -136,16 +141,16 @@ function cancelCreate(): void {
   newChannelName.value = ''
 }
 
-function openServerOptions(): void {
+function openServerAdminModal(): void {
   closeContextMenu()
   closeUserContextMenu()
   serverNameDraft.value = props.serverName || ''
   serverOptionsError.value = ''
-  showServerOptions.value = true
+  showServerAdminModal.value = true
 }
 
-function closeServerOptions(): void {
-  showServerOptions.value = false
+function closeServerAdminModal(): void {
+  showServerAdminModal.value = false
   serverOptionsError.value = ''
 }
 
@@ -164,7 +169,7 @@ async function saveServerName(): Promise<void> {
       serverOptionsError.value = err
       return
     }
-    showServerOptions.value = false
+    showServerAdminModal.value = false
   } finally {
     savingServerName.value = false
   }
@@ -338,17 +343,31 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
 
 <template>
   <section class="flex flex-col h-full min-h-0 " @click="closeContextMenu(); closeUserContextMenu()">
-    <div class="border-b border-base-content/10 px-3 py-1.5 min-h-11 flex flex-col gap-1">
-      <div class="flex h-full items-center gap-2">
-        <h2 class="text-xs font-semibold uppercase tracking-widest opacity-50">{{ serverName || 'Server' }}</h2>
-        <button
-          v-if="canCreateChannels"
-          class="btn btn-ghost btn-xs p-0 w-5 h-5 opacity-40 hover:opacity-100 transition-opacity ml-auto"
-          title="Create channel"
-          @click="openCreateDialog"
-        >
-          <Plus class="w-3.5 h-3.5" aria-hidden="true" />
-        </button>
+    <div class="border-b border-base-content/10 px-2 py-1.5 min-h-11">
+      <div class="dropdown dropdown-bottom w-full">
+        <div tabindex="0" role="button" class="btn btn-ghost btn-sm w-full justify-between px-2 normal-case">
+          <span class="text-xs font-semibold uppercase tracking-widest opacity-60 truncate">
+            {{ serverName || 'Server' }}
+          </span>
+          <ChevronDown class="w-3.5 h-3.5 opacity-50" aria-hidden="true" />
+        </div>
+        <ul tabindex="0" class="dropdown-content menu menu-sm z-[1] mt-1 w-56 rounded-box border border-base-content/10 bg-base-200 p-1 shadow">
+          <li v-if="canCreateChannels">
+            <button class="gap-2" @click="openCreateDialog">
+              <Plus class="w-4 h-4" aria-hidden="true" />
+              Create Channel
+            </button>
+          </li>
+          <li v-if="canOpenServerAdminSettings">
+            <button class="gap-2" @click="openServerAdminModal">
+              <Settings class="w-4 h-4" aria-hidden="true" />
+              Admin Server Settings
+            </button>
+          </li>
+          <li v-if="!canCreateChannels && !canOpenServerAdminSettings">
+            <span class="text-xs opacity-50 cursor-default">No server actions available</span>
+          </li>
+        </ul>
       </div>
     </div>
 
@@ -356,7 +375,7 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
       {{ connectError }}
     </div>
 
-    <ul v-if="!showServerOptions" class="w-full menu menu-sm flex-1 min-h-0 overflow-y-auto px-2 py-1 gap-0.5">
+    <ul class="w-full menu menu-sm flex-1 min-h-0 overflow-y-auto px-2 py-1 gap-0.5">
       <li
         v-for="channel in rows"
         :key="channel.id"
@@ -488,56 +507,30 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
       </li>
     </ul>
 
-    <div v-else class="flex-1 min-h-0 overflow-y-auto px-2 py-2">
-      <div class="rounded-lg border border-base-content/10 bg-base-200/40 p-3 space-y-3">
-        <div class="flex items-center gap-2">
-          <button
-            class="btn btn-ghost btn-xs btn-square"
-            aria-label="Back to channels"
-            title="Back"
-            @click="closeServerOptions"
-          >
-            <ArrowLeft class="w-4 h-4" aria-hidden="true" />
-          </button>
-          <h3 class="text-xs font-semibold uppercase tracking-wider opacity-60">Server Options</h3>
-        </div>
-
-        <div class="space-y-2">
-          <label class="text-[11px] font-medium opacity-70">Server name</label>
-          <input
-            v-model="serverNameDraft"
-            type="text"
-            class="input input-sm input-bordered w-full"
-            maxlength="50"
-            :disabled="!canRenameServer || savingServerName"
-            placeholder="Enter server name"
-          />
-          <button
-            class="btn btn-sm btn-primary"
-            :disabled="!canRenameServer || savingServerName || !serverNameDraft.trim() || serverNameDraft.trim() === (serverName || '').trim()"
-            @click="saveServerName"
-          >
-            {{ savingServerName ? 'Saving...' : 'Save Server Name' }}
-          </button>
-          <p v-if="!canRenameServer" class="text-[11px] opacity-50">
-            Only the server owner can rename the server.
-          </p>
-          <p v-if="serverOptionsError" class="text-[11px] text-error">
-            {{ serverOptionsError }}
-          </p>
-        </div>
+    <div v-if="voiceConnected" class="border-t border-base-content/10 p-2 shrink-0 space-y-1">
+      <p class="px-1 text-[10px] font-semibold uppercase tracking-wider opacity-50">Voice Actions</p>
+      <div class="flex items-center gap-1">
+        <button
+          class="btn btn-ghost btn-sm flex-1 justify-start gap-2"
+          :class="videoActive ? 'text-success' : ''"
+          :disabled="true"
+          title="Video is not available yet"
+          @click="emit('video-toggle')"
+        >
+          <Video class="w-4 h-4" aria-hidden="true" />
+          <span class="text-xs">{{ videoActive ? 'Video On' : 'Video' }}</span>
+        </button>
+        <button
+          class="btn btn-ghost btn-sm flex-1 justify-start gap-2"
+          :class="screenSharing ? 'text-success' : ''"
+          :disabled="true"
+          title="Screen sharing is not available yet"
+          @click="emit('screen-share-toggle')"
+        >
+          <Monitor class="w-4 h-4" aria-hidden="true" />
+          <span class="text-xs">{{ screenSharing ? 'Sharing On' : 'Share Screen' }}</span>
+        </button>
       </div>
-    </div>
-
-    <div v-if="canOpenServerAdminSettings && !showServerOptions" class="border-t border-base-content/10 px-2 py-1.5 shrink-0">
-      <button
-        class="btn btn-ghost btn-sm w-full justify-start gap-2"
-        title="Server admin settings"
-        @click="openServerOptions"
-      >
-        <Settings class="w-4 h-4" aria-hidden="true" />
-        <span class="text-xs">Server Admin Settings</span>
-      </button>
     </div>
 
     <!-- Context menu (owner right-click on channel) -->
@@ -651,6 +644,43 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="cancelCreate">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <dialog class="modal" :class="{ 'modal-open': showServerAdminModal }">
+      <div class="modal-box w-96 max-w-[calc(100vw-2rem)]">
+        <h3 class="text-sm font-semibold mb-3">Server Admin Settings</h3>
+        <div class="space-y-2">
+          <label class="text-[11px] font-medium opacity-70">Server name</label>
+          <input
+            v-model="serverNameDraft"
+            type="text"
+            class="input input-sm input-bordered w-full"
+            maxlength="50"
+            :disabled="!canRenameServer || savingServerName"
+            placeholder="Enter server name"
+            @keydown.enter.prevent="saveServerName"
+          />
+          <p v-if="!canRenameServer" class="text-[11px] opacity-50">
+            Only the server owner can rename the server.
+          </p>
+          <p v-if="serverOptionsError" class="text-[11px] text-error">
+            {{ serverOptionsError }}
+          </p>
+        </div>
+        <div class="modal-action">
+          <button class="btn btn-ghost btn-sm" @click="closeServerAdminModal">Cancel</button>
+          <button
+            class="btn btn-soft btn-primary btn-sm"
+            :disabled="!canRenameServer || savingServerName || !serverNameDraft.trim() || serverNameDraft.trim() === (serverName || '').trim()"
+            @click="saveServerName"
+          >
+            {{ savingServerName ? 'Saving...' : 'Save Server Name' }}
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="closeServerAdminModal">
         <button>close</button>
       </form>
     </dialog>
