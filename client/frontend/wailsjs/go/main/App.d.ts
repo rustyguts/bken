@@ -69,6 +69,12 @@ export function RenameServer(arg1:string):Promise<string>;
 
 export function RenameUser(arg1:string):Promise<string>;
 
+export function RequestChannels():Promise<string>;
+
+export function RequestMessages(arg1:number):Promise<string>;
+
+export function RequestServerInfo():Promise<string>;
+
 export function RequestVideoQuality(arg1:number,arg2:string):Promise<string>;
 
 export function SaveConfig(arg1:config.Config):Promise<void>;

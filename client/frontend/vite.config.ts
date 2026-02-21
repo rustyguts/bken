@@ -4,5 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [vue(), tailwindcss()]
+  plugins: [vue(), tailwindcss()],
+  server: {
+    host: '0.0.0.0',
+    allowedHosts: true,
+  },
 })

@@ -134,6 +134,18 @@ export function RenameUser(arg1) {
   return window['go']['main']['App']['RenameUser'](arg1);
 }
 
+export function RequestChannels() {
+  return window['go']['main']['App']['RequestChannels']();
+}
+
+export function RequestMessages(arg1) {
+  return window['go']['main']['App']['RequestMessages'](arg1);
+}
+
+export function RequestServerInfo() {
+  return window['go']['main']['App']['RequestServerInfo']();
+}
+
 export function RequestVideoQuality(arg1, arg2) {
   return window['go']['main']['App']['RequestVideoQuality'](arg1, arg2);
 }

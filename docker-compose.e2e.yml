@@ -1,0 +1,36 @@
+services:
+  server:
+    build:
+      context: ./server
+      target: prod
+    command: ["-db", "/tmp/bken.db"]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./client/frontend
+      dockerfile: Dockerfile.e2e
+    ports:
+      - "5173:5173"
+    depends_on:
+      server:
+        condition: service_healthy
+
+  e2e:
+    build:
+      context: ./e2e
+    environment:
+      - BASE_URL=http://frontend:5173
+    depends_on:
+      frontend:
+        condition: service_started
+      server:
+        condition: service_healthy
+    volumes:
+      - ./e2e/results:/app/results

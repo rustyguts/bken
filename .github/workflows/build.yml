@@ -84,6 +84,21 @@ jobs:
       - name: Build Docker image
         run: docker build -t bken-server ./server
 
+  e2e:
+    name: "E2E tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run E2E tests
+        run: docker compose -f docker-compose.e2e.yml up --build --abort-on-container-exit e2e
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: e2e/results/
+          if-no-files-found: ignore
+
   client:
     name: "Client: ${{ matrix.build.name }}"
     strategy:

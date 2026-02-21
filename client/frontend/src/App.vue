@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare, RequestChannels, RequestMessages, RequestServerInfo } from './config'
+import { Connect, Disconnect, DisconnectVoice, GetAutoLogin, EventsOn, EventsOff, ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare, RequestChannels, RequestMessages, RequestServerInfo } from './config'
 import type { ServerEntry } from './config'
-import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { log } from './logger'
 import ChannelView from './ChannelView.vue'
 import SettingsPage from './SettingsPage.vue'
