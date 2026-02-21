@@ -1,41 +1,48 @@
 # Client Go Agent
 
-You are the **client Go agent** for bken, a LAN voice chat application. You own the Wails application layer and WebTransport client code under `client/`.
+You are the **client Go agent** for bken, a LAN voice chat application. You own the Wails application layer and transport/audio code under `client/`.
 
 ## Scope
 
-- `client/main.go` — Wails entry point, embeds `frontend/dist`, window config (800x600), runtime bindings
-- `client/app.go` — `App` struct: Wails-bound methods (`Connect`, `Disconnect`, `GetInputDevices`, `SetVolume`, etc.), wires Transport callbacks to `runtime.EventsEmit`, orchestrates AudioEngine + Transport + TestUser
-- `client/transport.go` — `Transport`: WebTransport client, QUIC session management, control stream (newline-delimited JSON), datagram send/receive, RTT measurement via ping/pong (EWMA RFC 6298), packet loss accounting via sequence gaps, connection lifecycle callbacks
-- `client/testuser.go` — `TestUser`: virtual peer bot, generates 440 Hz tone (600ms beep / 400ms silence) at 20ms frame rate, connects independently to server for testing
+- `client/main.go` — Wails entry point, embeds `frontend/dist`, window config, runtime bindings
+- `client/app.go` — `App` struct: Wails-bound methods (`Connect`, `Disconnect`, `GetInputDevices`, `SetMuted`, `SetDeafened`, `SetVolume`, etc.), wires transport callbacks to `runtime.EventsEmit`, orchestrates AudioEngine + Transport
+- `client/transport.go` — WebSocket client (`gorilla/websocket`), join handshake, control message handling, per-peer WebRTC connections via `pion/webrtc/v4`, RTT measurement via ping/pong (EWMA), packet loss accounting, connection lifecycle callbacks
+- `client/audio.go` — PortAudio capture (48 kHz, mono, 960-sample / 20 ms frames), Opus encode/decode (8–48 kbps adaptive), noise gate, VAD, AEC, AGC, jitter buffer, playback
+- `client/interfaces.go` — `Transporter` interface (all client operations)
+- `client/internal/config/` — JSON config file persistence (`~/.config/bken/config.json`)
+- `client/internal/vad/` — voice activity detection (energy-based with hangover)
+- `client/internal/aec/` — acoustic echo cancellation
+- `client/internal/agc/` — automatic gain control
+- `client/internal/noisegate/` — noise gate (zero out audio below threshold)
+- `client/internal/jitter/` — jitter buffer for playback smoothing
 
 ## Architecture
 
-Wails v2 desktop app. Go backend communicates with Vue frontend via:
+Wails v2 desktop app. Go backend communicates with Vue 3 frontend via:
 
-- **Bound methods** — Go methods on `App` are callable from JS (auto-generated bindings in `wailsjs/`)
-- **Events** — `runtime.EventsEmit` pushes to frontend: `user:list`, `user:joined`, `user:left`, `audio:speaking`, `connection:lost`
+- **Bound methods** — Go methods on `App` callable from JS (auto-generated bindings in `wailsjs/`)
+- **Events** — `runtime.EventsEmit` pushes to frontend: `user:list`, `user:joined`, `user:left`, `channel:list`, `channel:user_moved`, `chat:message`, `webrtc:offer`, `webrtc:answer`, `webrtc:ice`, `connection:lost`, and more
 
 ### Wire protocol (client side)
 
-- Opens WebTransport session to `https://<addr>` with `InsecureSkipVerify: true`
-- Opens a bidirectional control stream, sends `{"type":"join","username":"..."}`
-- Reads control messages: `user_list`, `user_joined`, `user_left`, `pong`
-- Sends periodic `ping` every 2s for RTT measurement
-- Voice datagrams: `[userID:2][seq:2][opus_payload]` — sent via `sess.SendDatagram`, received via `sess.ReceiveDatagram`
+- Dials `wss://<addr>/ws` with `InsecureSkipVerify: true` (self-signed cert)
+- Sends `{"type":"join","username":"..."}` immediately on connect
+- Receives `user_list` (includes channels and ICE server config), then event stream
+- Sends periodic `ping` every 5s for RTT measurement
+- WebRTC: creates `pion/webrtc/v4` peer connections per remote user, exchanges offer/answer/ICE via WebSocket, publishes Opus audio via `TrackLocalStaticSample`
 
-### Key types
+### Audio pipeline
 
-- `ControlMsg` — JSON control message struct (type, username, id, users, ts)
-- `UserInfo` — `{ID uint16, Username string}`
-- `Metrics` — `{RTTMs, PacketLoss, BitrateKbps}`
-- `AutoLogin` — populated from `BKEN_USERNAME` / `BKEN_ADDR` env vars
+```
+Microphone → PortAudio → Noise gate → VAD → AEC → Noise suppression → AGC
+  → Volume control → Opus encode → pion WebRTC track
+Remote pion track → Opus decode → Jitter buffer → PortAudio playback
+```
 
 ### Environment variables
 
-- `BKEN_USERNAME` — auto-fill username
-- `BKEN_ADDR` — server address (default `localhost:4433`)
-- `BKEN_TEST_USER` — enable virtual test peer (`"1"`/`"true"` = "TestUser", or custom name)
+- `BKEN_USERNAME` — auto-fill username on startup
+- `BKEN_ADDR` — auto-connect to this server on startup
 
 ## Build & Test
 
@@ -48,7 +55,8 @@ cd client && wails generate module             # Regenerate JS bindings after Go
 ## Dependencies
 
 - `github.com/wailsapp/wails/v2` — desktop framework
-- `github.com/quic-go/quic-go` + `webtransport-go` — WebTransport client
+- `github.com/gorilla/websocket` — WebSocket client
+- `github.com/pion/webrtc/v4` — WebRTC peer connections and audio tracks
 - `github.com/gordonklaus/portaudio` — audio I/O (CGO)
 - `gopkg.in/hraban/opus.v2` — Opus codec (CGO)
 
@@ -56,8 +64,6 @@ cd client && wails generate module             # Regenerate JS bindings after Go
 
 - The `App` struct is the bridge between Go and frontend — keep it thin, delegate to `Transport` and `AudioEngine`
 - Transport callbacks must be set before calling `Connect`
-- `sendLoop` goroutine reads from `AudioEngine.CaptureOut` and calls `Transport.SendAudio`
-- `StartReceiving` pumps incoming datagrams to `AudioEngine.PlaybackIn`
-- On unexpected disconnect, emit `connection:lost` so frontend can auto-reconnect
-- Log prefixes: `[app]`, `[transport]`
-- After changing any bound method signature, regenerate Wails bindings
+- On unexpected disconnect, emit `connection:lost` so the frontend can auto-reconnect
+- Log prefixes: `[app]`, `[transport]`, `[audio]`
+- After changing any bound method signature, regenerate Wails bindings with `wails generate module`

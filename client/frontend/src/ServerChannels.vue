@@ -66,6 +66,7 @@ const isDevLocalServer = computed(() => {
 const canOpenServerAdminSettings = computed(() =>
   props.isOwner || myRole.value === 'OWNER' || myRole.value === 'ADMIN' || isDevLocalServer.value,
 )
+const canCreateChannels = computed(() => canOpenServerAdminSettings.value)
 const canRenameServer = computed(() => props.isOwner || myRole.value === 'OWNER')
 
 // Create channel state
@@ -121,6 +122,7 @@ function openCreateDialog(): void {
 }
 
 function confirmCreate(): void {
+  if (!canCreateChannels.value) return
   const name = newChannelName.value.trim()
   if (!name) return
   emit('createChannel', name)
@@ -339,7 +341,7 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
       <div class="flex h-full items-center gap-2">
         <h2 class="text-xs font-semibold uppercase tracking-widest opacity-50">{{ serverName || 'Server' }}</h2>
         <button
-          v-if="isOwner"
+          v-if="canCreateChannels"
           class="btn btn-ghost btn-xs p-0 w-5 h-5 opacity-40 hover:opacity-100 transition-opacity ml-auto"
           title="Create channel"
           @click="openCreateDialog"

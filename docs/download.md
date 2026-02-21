@@ -35,7 +35,7 @@ xattr -d com.apple.quarantine client
 
 ## Server
 
-One machine on the network runs the relay server. Everyone else connects to it. It does not process or store audio — it forwards encrypted packets and nothing else.
+One machine on the network runs the relay server. Everyone else connects to it. It handles WebSocket signaling and chat — audio flows peer-to-peer between clients and never passes through the server.
 
 ### Linux binary
 
@@ -47,7 +47,7 @@ chmod +x server-linux-amd64
 ./server-linux-amd64
 ```
 
-The server listens on UDP port **8443** by default. To use a different port:
+The server listens on TCP port **8443** (WebSocket signaling) and **8080** (REST API) by default. To use a different port:
 
 ```bash
 ./server-linux-amd64 -addr :9000
@@ -56,11 +56,11 @@ The server listens on UDP port **8443** by default. To use a different port:
 ### Docker
 
 ```bash
-docker run --rm -p 8443:8443/udp ghcr.io/rustyguts/bken-server:latest
+docker run --rm -p 8443:8443 -p 8080:8080 -v bken-data:/data ghcr.io/rustyguts/bken-server:latest
 ```
 
 ::: tip Firewall
-Open UDP port 8443 (or whichever port you chose) on the server machine. TCP is not used.
+Open TCP port 8443 on the server machine. WebRTC audio flows directly between clients on ephemeral ports and does not require any additional firewall rules on the server.
 :::
 
 ---
@@ -71,12 +71,12 @@ Open UDP port 8443 (or whichever port you chose) on the server machine. TCP is n
 2. Open the client on each machine joining the call.
 3. Enter your name and the server address — for example `192.168.1.10:8443` — then click **Connect**.
 
-All participants are placed in the same room automatically. There are no channels or room codes.
+You will be placed into the first channel automatically. Use the channel list on the left to switch channels or create new ones.
 
 ---
 
 ## Why does it say "untrusted certificate"?
 
-BKEN generates a self-signed TLS certificate on each server start. The certificate is only used to encrypt the connection — it is not used for identity. Clients skip certificate validation by design, which is safe on a trusted local network where you control who can connect.
+BKEN generates a self-signed TLS certificate on each server start. The certificate is only used to encrypt the WebSocket connection — it is not used for identity. Clients skip certificate validation by design, which is safe on a trusted local network where you control who can connect.
 
 The fingerprint printed at server startup can be used to manually verify the certificate if needed.

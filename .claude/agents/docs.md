@@ -44,12 +44,12 @@ Uses Bun as the package manager (lockfile: `bun.lock`).
 ## What bken Is
 
 A self-hosted, LAN voice chat application. Key selling points for docs:
-- **Encryption by default** — TLS 1.3 via QUIC/WebTransport
-- **Sub-50ms latency** — UDP-like datagrams, Opus codec at 32 kbps
+- **Encryption by default** — WebSocket signaling over TLS 1.3; audio encrypted via WebRTC DTLS-SRTP
+- **Peer-to-peer audio** — Opus at 48 kHz, 8–48 kbps adaptive; server relays signaling only
 - **Cross-platform** — Linux, macOS, Windows desktop clients
 - **Zero accounts, zero cloud** — runs entirely on your LAN
-- **ML noise suppression** — RNNoise-based, pre-transmission
-- **Lightweight** — single Go binary server, no external dependencies
+- **Voice processing built in** — noise gate, VAD, AEC, AGC, noise suppression
+- **Lightweight** — single Go binary server, SQLite, no external dependencies
 
 ## Guidelines
 

@@ -133,6 +133,19 @@ describe('ServerChannels', () => {
     expect(createBtn).toBeDefined()
   })
 
+  it('shows create channel button for admin users', () => {
+    const users: User[] = [
+      { id: 1, username: 'Alice', role: 'ADMIN' },
+      { id: 2, username: 'Bob', role: 'USER' },
+    ]
+    const w = mount(ServerChannels, {
+      props: { ...baseProps, users, isOwner: false },
+      ...stubs,
+    })
+    const createBtn = w.findAll('button').find(b => b.attributes('title') === 'Create channel')
+    expect(createBtn).toBeDefined()
+  })
+
   it('shows server admin settings icon for admin users', () => {
     const users: User[] = [
       { id: 1, username: 'Alice', role: 'ADMIN' },
