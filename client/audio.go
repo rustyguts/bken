@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"client/internal/aec"
 	"client/internal/agc"
 	"client/internal/jitter"
+	"client/internal/noisegate"
 	"client/internal/vad"
 
 	"github.com/gordonklaus/portaudio"
@@ -75,9 +77,14 @@ type AudioEngine struct {
 	CaptureOut chan []byte
 	// PlaybackIn carries tagged Opus frames from the network (sender ID + seq + data).
 	PlaybackIn chan TaggedAudio
+
+	// UserVolumeFunc, if set, returns the per-user volume multiplier (0.0-2.0)
+	// for the given sender ID. Default (nil) means 1.0 for all users.
+	UserVolumeFunc func(senderID uint16) float64
 	// notifCh carries pre-chunked raw PCM float32 frames (FrameSize each)
 	// synthesised by PlayNotification. Mixed into the output after voice decoding.
-	notifCh chan []float32
+	notifCh    chan []float32
+	notifScale atomic.Uint32 // float32 bits: notification volume scale (default 1.0)
 
 	aecProc    *aec.AEC
 	aecEnabled atomic.Bool
@@ -85,7 +92,8 @@ type AudioEngine struct {
 	agcProc    *agc.AGC
 	agcEnabled atomic.Bool
 
-	vadProc *vad.VAD
+	vadProc  *vad.VAD
+	gateProc *noisegate.Gate
 
 	running        atomic.Bool
 	testMode       atomic.Bool
@@ -101,6 +109,10 @@ type AudioEngine struct {
 	captureDropped  atomic.Uint64
 	playbackDropped atomic.Uint64
 
+	// inputLevel stores the most recent pre-gate RMS level (float32 bits)
+	// for the input level meter. Updated every captureLoop iteration.
+	inputLevel atomic.Uint32
+
 	stopCh     chan struct{}
 	wg         sync.WaitGroup // tracks captureLoop + playbackLoop goroutines
 	OnSpeaking func()         // called (throttled) when mic audio exceeds speaking threshold
@@ -112,18 +124,21 @@ const notifChannelBuf = 200
 
 // NewAudioEngine returns an AudioEngine with default settings.
 func NewAudioEngine() *AudioEngine {
-	return &AudioEngine{
+	ae := &AudioEngine{
 		inputDeviceID:  -1,
 		outputDeviceID: -1,
 		volume:         1.0,
 		aecProc:        aec.New(FrameSize),
 		agcProc:        agc.New(),
 		vadProc:        vad.New(),
+		gateProc:       noisegate.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
 		PlaybackIn:     make(chan TaggedAudio, playbackChannelBuf),
 		notifCh:        make(chan []float32, notifChannelBuf),
 		stopCh:         make(chan struct{}),
 	}
+	ae.notifScale.Store(math.Float32bits(1.0))
+	return ae
 }
 
 // SetNoiseCanceller attaches (or detaches when nc is nil) a NoiseCanceller.
@@ -222,6 +237,38 @@ func (ae *AudioEngine) SetVAD(enabled bool) {
 // higher values suppress more (require louder speech to be considered active).
 func (ae *AudioEngine) SetVADThreshold(level int) {
 	ae.vadProc.SetThreshold(level)
+}
+
+// SetNotificationVolume sets the notification sound volume (0.0-1.0).
+func (ae *AudioEngine) SetNotificationVolume(vol float32) {
+	if vol < 0 {
+		vol = 0
+	}
+	if vol > 1.0 {
+		vol = 1.0
+	}
+	ae.notifScale.Store(math.Float32bits(vol))
+}
+
+// NotificationVolume returns the current notification volume (0.0-1.0).
+func (ae *AudioEngine) NotificationVolume() float32 {
+	return math.Float32frombits(ae.notifScale.Load())
+}
+
+// SetNoiseGate enables or disables the hard noise gate on the capture path.
+func (ae *AudioEngine) SetNoiseGate(enabled bool) {
+	ae.gateProc.SetEnabled(enabled)
+}
+
+// SetNoiseGateThreshold sets the noise gate threshold (0-100).
+func (ae *AudioEngine) SetNoiseGateThreshold(level int) {
+	ae.gateProc.SetThreshold(level)
+}
+
+// InputLevel returns the most recent pre-gate RMS mic input level (0.0-1.0).
+// Suitable for driving a real-time level meter at ~15 fps.
+func (ae *AudioEngine) InputLevel() float32 {
+	return math.Float32frombits(ae.inputLevel.Load())
 }
 
 // SetBitrate changes the Opus encoder target bitrate (kbps) on the fly.
@@ -466,10 +513,15 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			ae.aecProc.Process(buf)
 		}
 
-		// Compute RMS once; reuse for both speaking detection and VAD.
+		// Apply noise gate: zeroes frames below threshold and returns
+		// the pre-gate RMS for the input level meter.
+		preGateRMS := ae.gateProc.Process(buf)
+		ae.inputLevel.Store(math.Float32bits(preGateRMS))
+
+		// Compute RMS after gate for speaking detection and VAD.
 		rms := vad.RMS(buf)
 
-		if ae.OnSpeaking != nil && rms > 0.01 && time.Since(lastSpeakEmit) > 80*time.Millisecond {
+		if ae.OnSpeaking != nil && !ae.muted.Load() && rms > 0.01 && time.Since(lastSpeakEmit) > 80*time.Millisecond {
 			lastSpeakEmit = time.Now()
 			ae.OnSpeaking()
 		}
@@ -632,9 +684,15 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 					continue
 				}
 
+				// Per-user volume multiplier.
+				userScale := scale
+				if ae.UserVolumeFunc != nil {
+					userScale = scale * float32(ae.UserVolumeFunc(f.SenderID))
+				}
+
 				// Additively mix this sender into the output buffer.
 				for i := 0; i < n; i++ {
-					buf[i] += float32(pcm[i]) * scale
+					buf[i] += float32(pcm[i]) * userScale
 				}
 			}
 
@@ -661,8 +719,9 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 		// deafen check so UI sounds (mute, join/leave) are always audible.
 		select {
 		case notifFrame := <-ae.notifCh:
+			ns := math.Float32frombits(ae.notifScale.Load())
 			for i, s := range notifFrame {
-				buf[i] = clampFloat32(buf[i] + s)
+				buf[i] = clampFloat32(buf[i] + s*ns)
 			}
 		default:
 		}

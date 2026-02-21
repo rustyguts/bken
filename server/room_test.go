@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 // mockSender implements DatagramSender for tests.
@@ -852,5 +853,392 @@ func TestChannelCountAfterSetChannels(t *testing.T) {
 	room.SetChannels([]ChannelInfo{{ID: 1, Name: "General"}, {ID: 2, Name: "Music"}})
 	if room.ChannelCount() != 2 {
 		t.Errorf("ChannelCount: got %d, want 2", room.ChannelCount())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8: Administration tests
+// ---------------------------------------------------------------------------
+
+func TestSetClientRole(t *testing.T) {
+	room := NewRoom()
+	c := newTestClient("alice")
+	room.AddClient(c)
+
+	room.SetClientRole(c.ID, RoleAdmin)
+	if got := room.GetClientRole(c.ID); got != RoleAdmin {
+		t.Errorf("role: got %q, want %q", got, RoleAdmin)
+	}
+
+	// Non-existent client returns USER.
+	if got := room.GetClientRole(9999); got != RoleUser {
+		t.Errorf("missing client role: got %q, want %q", got, RoleUser)
+	}
+}
+
+func TestSetClientMute(t *testing.T) {
+	room := NewRoom()
+	c := newTestClient("alice")
+	room.AddClient(c)
+
+	if room.IsClientMuted(c.ID) {
+		t.Error("client should not be muted initially")
+	}
+
+	room.SetClientMute(c.ID, true, 0)
+	if !room.IsClientMuted(c.ID) {
+		t.Error("client should be muted after SetClientMute")
+	}
+
+	room.SetClientMute(c.ID, false, 0)
+	if room.IsClientMuted(c.ID) {
+		t.Error("client should be unmuted")
+	}
+}
+
+func TestMuteExpiry(t *testing.T) {
+	room := NewRoom()
+	c := newTestClient("alice")
+	room.AddClient(c)
+
+	// Set mute that expires in the past.
+	pastExpiry := time.Now().Add(-1 * time.Second).UnixMilli()
+	room.SetClientMute(c.ID, true, pastExpiry)
+
+	// Should not be muted because expiry has passed.
+	if room.IsClientMuted(c.ID) {
+		t.Error("client should not be muted after expiry passed")
+	}
+}
+
+func TestCheckMuteExpiry(t *testing.T) {
+	room := NewRoom()
+	c := newTestClient("alice")
+	room.AddClient(c)
+
+	pastExpiry := time.Now().Add(-1 * time.Second).UnixMilli()
+	room.SetClientMute(c.ID, true, pastExpiry)
+
+	room.CheckMuteExpiry()
+
+	// After CheckMuteExpiry, the mute flag should be cleared.
+	room.mu.RLock()
+	isMuted := c.muted
+	room.mu.RUnlock()
+	if isMuted {
+		t.Error("CheckMuteExpiry should have cleared the mute flag")
+	}
+}
+
+func TestSetAnnouncement(t *testing.T) {
+	room := NewRoom()
+	room.SetAnnouncement("Maintenance tonight", "admin")
+
+	content, user := room.GetAnnouncement()
+	if content != "Maintenance tonight" {
+		t.Errorf("announcement content: got %q", content)
+	}
+	if user != "admin" {
+		t.Errorf("announcement user: got %q", user)
+	}
+}
+
+func TestSlowMode(t *testing.T) {
+	room := NewRoom()
+	room.SetSlowMode(1, 5)
+
+	if room.GetSlowMode(1) != 5 {
+		t.Errorf("slow mode: got %d, want 5", room.GetSlowMode(1))
+	}
+
+	// Channel without slow mode.
+	if room.GetSlowMode(2) != 0 {
+		t.Errorf("slow mode for unconfigured channel: got %d, want 0", room.GetSlowMode(2))
+	}
+
+	// Remove slow mode.
+	room.SetSlowMode(1, 0)
+	if room.GetSlowMode(1) != 0 {
+		t.Errorf("slow mode after removal: got %d, want 0", room.GetSlowMode(1))
+	}
+}
+
+func TestCheckSlowModeAllowsFirst(t *testing.T) {
+	room := NewRoom()
+	c := newTestClient("alice")
+	room.AddClient(c)
+
+	room.SetSlowMode(1, 60) // 60 second cooldown
+
+	// First message should be allowed.
+	if !room.CheckSlowMode(c.ID, 1) {
+		t.Error("first message should be allowed")
+	}
+	// Second immediate message should be denied.
+	if room.CheckSlowMode(c.ID, 1) {
+		t.Error("second immediate message should be denied by slow mode")
+	}
+}
+
+func TestCheckSlowModeExemptsAdmins(t *testing.T) {
+	room := NewRoom()
+	c := newTestClient("alice")
+	room.AddClient(c)
+	room.SetClientRole(c.ID, RoleAdmin)
+
+	room.SetSlowMode(1, 60)
+
+	// Admin should be exempt from slow mode.
+	if !room.CheckSlowMode(c.ID, 1) {
+		t.Error("first message should be allowed for admin")
+	}
+	if !room.CheckSlowMode(c.ID, 1) {
+		t.Error("admin should be exempt from slow mode")
+	}
+}
+
+func TestBroadcastBlocksMutedSender(t *testing.T) {
+	room := NewRoom()
+
+	sender := &Client{Username: "alice", session: &mockSender{}}
+	receiver := &Client{Username: "bob", session: &mockSender{}}
+
+	room.AddClient(sender)
+	room.AddClient(receiver)
+	sender.channelID.Store(1)
+	receiver.channelID.Store(1)
+
+	// Mute the sender.
+	room.SetClientMute(sender.ID, true, 0)
+
+	data := []byte{0, 0, 0, 1, 0xAA, 0xBB}
+	room.Broadcast(sender.ID, data)
+
+	// Receiver should not have received anything.
+	ms := receiver.session.(*mockSender)
+	ms.mu.Lock()
+	count := len(ms.received)
+	ms.mu.Unlock()
+	if count != 0 {
+		t.Errorf("muted sender's datagrams should be blocked, got %d", count)
+	}
+}
+
+func TestAuditLogCallback(t *testing.T) {
+	room := NewRoom()
+	var logged []string
+	room.SetOnAuditLog(func(actorID int, actorName, action, target, details string) {
+		logged = append(logged, action)
+	})
+
+	room.AuditLog(1, "alice", "ban", "bob", "{}")
+	if len(logged) != 1 || logged[0] != "ban" {
+		t.Errorf("audit log callback: got %v", logged)
+	}
+}
+
+func TestRecordBanCallsCallback(t *testing.T) {
+	room := NewRoom()
+	var banCalled bool
+	room.SetOnBan(func(pubkey, ip, reason, bannedBy string, durationS int) {
+		banCalled = true
+	})
+	room.SetOnAuditLog(func(actorID int, actorName, action, target, details string) {})
+
+	room.RecordBan("alice", "1.2.3.4", "spam", "admin", 0)
+	if !banCalled {
+		t.Error("ban callback should have been called")
+	}
+}
+
+func TestRemoveBanCallsCallback(t *testing.T) {
+	room := NewRoom()
+	var removedID int64
+	room.SetOnUnban(func(banID int64) {
+		removedID = banID
+	})
+
+	room.RemoveBan(42)
+	if removedID != 42 {
+		t.Errorf("unban callback: got %d, want 42", removedID)
+	}
+}
+
+func TestClientsIncludesRoleAndMuted(t *testing.T) {
+	room := NewRoom()
+	c := newTestClient("alice")
+	room.AddClient(c)
+	room.SetClientRole(c.ID, RoleAdmin)
+	room.SetClientMute(c.ID, true, 0)
+
+	users := room.Clients()
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(users))
+	}
+	if users[0].Role != RoleAdmin {
+		t.Errorf("role: got %q, want %q", users[0].Role, RoleAdmin)
+	}
+	if !users[0].Muted {
+		t.Error("expected user to be reported as muted")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8: HasPermission tests
+// ---------------------------------------------------------------------------
+
+func TestHasPermission(t *testing.T) {
+	tests := []struct {
+		role   string
+		action string
+		want   bool
+	}{
+		{RoleOwner, "set_role", true},
+		{RoleAdmin, "set_role", false},
+		{RoleAdmin, "ban", true},
+		{RoleModerator, "kick", true},
+		{RoleModerator, "ban", false},
+		{RoleUser, "kick", false},
+		{RoleUser, "chat", true},
+		{RoleOwner, "announce", true},
+		{RoleAdmin, "announce", false},
+	}
+
+	for _, tt := range tests {
+		got := HasPermission(tt.role, tt.action)
+		if got != tt.want {
+			t.Errorf("HasPermission(%q, %q) = %v, want %v", tt.role, tt.action, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10: Performance & Reliability tests
+// ---------------------------------------------------------------------------
+
+func TestCanConnect(t *testing.T) {
+	room := NewRoom()
+	room.SetMaxConnections(2)
+
+	c1 := newTestClient("alice")
+	c2 := newTestClient("bob")
+	room.AddClient(c1)
+	room.AddClient(c2)
+
+	if room.CanConnect("1.2.3.4") {
+		t.Error("should not allow connection when max reached")
+	}
+
+	room.RemoveClient(c1.ID)
+	if !room.CanConnect("1.2.3.4") {
+		t.Error("should allow connection after removal")
+	}
+}
+
+func TestPerIPLimit(t *testing.T) {
+	room := NewRoom()
+	room.SetPerIPLimit(2)
+
+	room.TrackIPConnect("1.2.3.4")
+	room.TrackIPConnect("1.2.3.4")
+
+	if room.CanConnect("1.2.3.4") {
+		t.Error("should not allow connection from IP over limit")
+	}
+	if !room.CanConnect("5.6.7.8") {
+		t.Error("should allow connection from different IP")
+	}
+
+	room.TrackIPDisconnect("1.2.3.4")
+	if !room.CanConnect("1.2.3.4") {
+		t.Error("should allow connection after disconnect")
+	}
+}
+
+func TestTrackIPDisconnectCleansUp(t *testing.T) {
+	room := NewRoom()
+	room.TrackIPConnect("1.2.3.4")
+	room.TrackIPDisconnect("1.2.3.4")
+
+	room.mu.RLock()
+	count := room.ipConnections["1.2.3.4"]
+	room.mu.RUnlock()
+	if count != 0 {
+		t.Errorf("expected 0 connections for IP after disconnect, got %d", count)
+	}
+}
+
+func TestControlRateLimit(t *testing.T) {
+	room := NewRoom()
+	room.SetControlRateLimit(3) // 3 per second
+
+	c := newTestClient("alice")
+	room.AddClient(c)
+
+	// First 3 should be allowed.
+	for i := 0; i < 3; i++ {
+		if !room.CheckControlRate(c.ID) {
+			t.Errorf("message %d should be allowed", i+1)
+		}
+	}
+	// 4th should be denied.
+	if room.CheckControlRate(c.ID) {
+		t.Error("4th message should be denied by rate limit")
+	}
+}
+
+func TestBufferAndGetMessages(t *testing.T) {
+	room := NewRoom()
+
+	msg1 := ControlMsg{Type: "chat", Message: "hello"}
+	msg2 := ControlMsg{Type: "chat", Message: "world"}
+
+	room.BufferMessage(1, msg1)
+	room.BufferMessage(1, msg2)
+
+	// Sequence numbers should be assigned.
+	if room.GetChannelSeq(1) != 2 {
+		t.Errorf("channel seq: got %d, want 2", room.GetChannelSeq(1))
+	}
+
+	// Get all messages.
+	msgs := room.GetMessagesSince(1, 0)
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].Message != "hello" || msgs[1].Message != "world" {
+		t.Errorf("unexpected messages: %v", msgs)
+	}
+
+	// Get messages since seq 1.
+	msgs = room.GetMessagesSince(1, 1)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message after seq 1, got %d", len(msgs))
+	}
+	if msgs[0].Message != "world" {
+		t.Errorf("expected 'world', got %q", msgs[0].Message)
+	}
+}
+
+func TestBufferMessageLimitsSize(t *testing.T) {
+	room := NewRoom()
+
+	for i := 0; i < maxMsgBuffer+100; i++ {
+		room.BufferMessage(1, ControlMsg{Type: "chat", Message: fmt.Sprintf("msg-%d", i)})
+	}
+
+	msgs := room.GetMessagesSince(1, 0)
+	if len(msgs) != maxMsgBuffer {
+		t.Errorf("expected buffer capped at %d, got %d", maxMsgBuffer, len(msgs))
+	}
+}
+
+func TestBufferMessageIgnoresChannelZero(t *testing.T) {
+	room := NewRoom()
+	room.BufferMessage(0, ControlMsg{Type: "chat", Message: "test"})
+
+	msgs := room.GetMessagesSince(0, 0)
+	if len(msgs) != 0 {
+		t.Errorf("expected 0 messages for channel 0, got %d", len(msgs))
 	}
 }

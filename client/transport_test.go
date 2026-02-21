@@ -1,98 +1,10 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"testing"
 	"time"
 )
-
-func TestMarshalDatagram(t *testing.T) {
-	opus := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	dgram := MarshalDatagram(42, 7, opus)
-
-	if len(dgram) != 4+len(opus) {
-		t.Fatalf("expected length %d, got %d", 4+len(opus), len(dgram))
-	}
-
-	userID := binary.BigEndian.Uint16(dgram[0:2])
-	seq := binary.BigEndian.Uint16(dgram[2:4])
-
-	if userID != 42 {
-		t.Errorf("expected userID 42, got %d", userID)
-	}
-	if seq != 7 {
-		t.Errorf("expected seq 7, got %d", seq)
-	}
-
-	for i, b := range opus {
-		if dgram[4+i] != b {
-			t.Errorf("payload byte %d: expected 0x%02X, got 0x%02X", i, b, dgram[4+i])
-		}
-	}
-}
-
-func TestParseDatagram(t *testing.T) {
-	original := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	dgram := MarshalDatagram(100, 200, original)
-
-	userID, seq, payload, ok := ParseDatagram(dgram)
-	if !ok {
-		t.Fatal("ParseDatagram returned ok=false")
-	}
-	if userID != 100 {
-		t.Errorf("expected userID 100, got %d", userID)
-	}
-	if seq != 200 {
-		t.Errorf("expected seq 200, got %d", seq)
-	}
-	if string(payload) != string(original) {
-		t.Errorf("payload mismatch: got %v, want %v", payload, original)
-	}
-}
-
-func TestParseDatagramTooShort(t *testing.T) {
-	_, _, _, ok := ParseDatagram([]byte{0, 1})
-	if ok {
-		t.Error("expected ok=false for short datagram")
-	}
-}
-
-func TestParseDatagramEmpty(t *testing.T) {
-	_, _, _, ok := ParseDatagram(nil)
-	if ok {
-		t.Error("expected ok=false for nil datagram")
-	}
-}
-
-func TestMarshalParseRoundTrip(t *testing.T) {
-	for _, tc := range []struct {
-		userID uint16
-		seq    uint16
-		data   []byte
-	}{
-		{0, 0, nil},
-		{1, 1, []byte{0xFF}},
-		{0xFFFF, 0xFFFF, make([]byte, 1200)},
-		{42, 100, []byte("hello opus")},
-	} {
-		dgram := MarshalDatagram(tc.userID, tc.seq, tc.data)
-		uid, s, payload, ok := ParseDatagram(dgram)
-		if !ok {
-			t.Errorf("round trip failed for userID=%d seq=%d", tc.userID, tc.seq)
-			continue
-		}
-		if uid != tc.userID {
-			t.Errorf("userID: got %d, want %d", uid, tc.userID)
-		}
-		if s != tc.seq {
-			t.Errorf("seq: got %d, want %d", s, tc.seq)
-		}
-		if string(payload) != string(tc.data) {
-			t.Errorf("payload mismatch for userID=%d seq=%d", tc.userID, tc.seq)
-		}
-	}
-}
 
 // --- mute set tests ---
 
@@ -541,59 +453,6 @@ func TestPlaybackDroppedCounter(t *testing.T) {
 	}
 }
 
-// --- Datagram pool tests ---
-
-func TestDgramPoolBufferSize(t *testing.T) {
-	// Pool buffers must be large enough for the maximum datagram: 4-byte header + max Opus packet.
-	bp := dgramPool.Get().(*[]byte)
-	defer dgramPool.Put(bp)
-
-	buf := *bp
-	maxDgramSize := 4 + opusMaxPacketBytes
-	if len(buf) != maxDgramSize {
-		t.Errorf("pool buffer len = %d, want %d", len(buf), maxDgramSize)
-	}
-	if cap(buf) < maxDgramSize {
-		t.Errorf("pool buffer cap = %d, want >= %d", cap(buf), maxDgramSize)
-	}
-}
-
-func TestDgramPoolReuse(t *testing.T) {
-	// Verify that Get/Put cycle reuses the same underlying array.
-	bp1 := dgramPool.Get().(*[]byte)
-	ptr1 := &(*bp1)[0]
-	dgramPool.Put(bp1)
-
-	bp2 := dgramPool.Get().(*[]byte)
-	ptr2 := &(*bp2)[0]
-	dgramPool.Put(bp2)
-
-	if ptr1 != ptr2 {
-		t.Log("pool did not reuse buffer (may happen under GC pressure, not a hard failure)")
-	}
-}
-
-func TestDgramPoolSubsliceIntegrity(t *testing.T) {
-	// Simulate what SendAudio does: sub-slice the pool buffer, fill it, then
-	// verify the content matches what MarshalDatagram would produce.
-	opus := []byte{0xCA, 0xFE, 0xBA, 0xBE, 0x01, 0x02}
-	var userID uint16 = 42
-	var seq uint16 = 100
-
-	bp := dgramPool.Get().(*[]byte)
-	dgram := (*bp)[:4+len(opus)]
-	binary.BigEndian.PutUint16(dgram[0:2], userID)
-	binary.BigEndian.PutUint16(dgram[2:4], seq)
-	copy(dgram[4:], opus)
-	dgramPool.Put(bp)
-
-	// Compare with the allocation-based MarshalDatagram.
-	expected := MarshalDatagram(userID, seq, opus)
-	if string(dgram) != string(expected) {
-		t.Errorf("pooled datagram = %x, want %x", dgram, expected)
-	}
-}
-
 func TestSendAudioNilSessionPoolSafe(t *testing.T) {
 	// SendAudio with nil session should return nil without touching the pool
 	// in a way that causes panics.
@@ -625,75 +484,101 @@ func TestOnDisconnectedCallbackSignature(t *testing.T) {
 	}
 }
 
-// --- NACK control message tests ---
+// --- buildICEServers tests ---
 
-func TestNACKControlMsgJSON(t *testing.T) {
-	msg := ControlMsg{
-		Type: "nack",
-		ID:   42,
-		Seqs: []uint16{10, 11, 12},
+func TestBuildICEServersDefault(t *testing.T) {
+	// With no server-provided ICE servers, buildICEServers should return
+	// a single entry pointing to Google STUN.
+	tr := NewTransport()
+	tr.mu.Lock()
+	servers := tr.buildICEServers()
+	tr.mu.Unlock()
+
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 ICE server, got %d", len(servers))
 	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var out ControlMsg
-	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if out.Type != "nack" {
-		t.Errorf("type: got %q, want %q", out.Type, "nack")
-	}
-	if out.ID != 42 {
-		t.Errorf("id: got %d, want 42", out.ID)
-	}
-	if len(out.Seqs) != 3 || out.Seqs[0] != 10 || out.Seqs[1] != 11 || out.Seqs[2] != 12 {
-		t.Errorf("seqs: got %v, want [10 11 12]", out.Seqs)
+	if servers[0].URLs[0] != "stun:stun.l.google.com:19302" {
+		t.Errorf("expected Google STUN URL, got %q", servers[0].URLs[0])
 	}
 }
 
-func TestNACKControlMsgOmitsEmptySeqs(t *testing.T) {
-	msg := ControlMsg{Type: "ping"}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+func TestBuildICEServersFromServer(t *testing.T) {
+	// When the server provides ICE servers (e.g. STUN + TURN), those should
+	// be used instead of the default.
+	tr := NewTransport()
+	tr.mu.Lock()
+	tr.iceServers = []ICEServerInfo{
+		{URLs: []string{"stun:stun.example.com:3478"}},
+		{URLs: []string{"turn:turn.example.com:3478"}, Username: "user", Credential: "pass"},
 	}
-	// "seqs" should not appear in JSON when nil/empty.
-	if string(data) != `{"type":"ping"}` {
-		// Just check it doesn't contain "seqs".
-		var m map[string]interface{}
-		json.Unmarshal(data, &m)
-		if _, ok := m["seqs"]; ok {
-			t.Error("seqs field should be omitted when empty")
-		}
+	servers := tr.buildICEServers()
+	tr.mu.Unlock()
+
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 ICE servers, got %d", len(servers))
+	}
+
+	// First entry: STUN, no credentials.
+	if servers[0].URLs[0] != "stun:stun.example.com:3478" {
+		t.Errorf("server[0] URL = %q, want stun:stun.example.com:3478", servers[0].URLs[0])
+	}
+	if servers[0].Username != "" {
+		t.Errorf("server[0] Username = %q, want empty", servers[0].Username)
+	}
+
+	// Second entry: TURN with credentials.
+	if servers[1].URLs[0] != "turn:turn.example.com:3478" {
+		t.Errorf("server[1] URL = %q, want turn:turn.example.com:3478", servers[1].URLs[0])
+	}
+	if servers[1].Username != "user" {
+		t.Errorf("server[1] Username = %q, want %q", servers[1].Username, "user")
+	}
+	if servers[1].Credential != "pass" {
+		t.Errorf("server[1] Credential = %v, want %q", servers[1].Credential, "pass")
 	}
 }
 
-// --- Benchmarks ---
+// --- Per-user volume tests ---
 
-func BenchmarkDgramBuildPooled(b *testing.B) {
-	// Measures the pooled datagram construction path used by SendAudio.
-	opus := make([]byte, 80) // typical Opus VoIP frame at 32 kbps
-	b.ReportAllocs()
-	for b.Loop() {
-		bp := dgramPool.Get().(*[]byte)
-		dgram := (*bp)[:4+len(opus)]
-		binary.BigEndian.PutUint16(dgram[0:2], 1)
-		binary.BigEndian.PutUint16(dgram[2:4], 1)
-		copy(dgram[4:], opus)
-		dgramPool.Put(bp)
+func TestUserVolumeDefault(t *testing.T) {
+	tr := NewTransport()
+	// Default volume should be 1.0 (100%).
+	if v := tr.GetUserVolume(42); v != 1.0 {
+		t.Errorf("default volume = %f, want 1.0", v)
 	}
 }
 
-func BenchmarkDgramBuildAlloc(b *testing.B) {
-	// Measures the old allocation-per-frame path for comparison.
-	opus := make([]byte, 80)
-	b.ReportAllocs()
-	for b.Loop() {
-		dgram := make([]byte, 4+len(opus))
-		binary.BigEndian.PutUint16(dgram[0:2], 1)
-		binary.BigEndian.PutUint16(dgram[2:4], 1)
-		copy(dgram[4:], opus)
-		_ = dgram
+func TestUserVolumeSetAndGet(t *testing.T) {
+	tr := NewTransport()
+	tr.SetUserVolume(10, 1.5)
+	if v := tr.GetUserVolume(10); v != 1.5 {
+		t.Errorf("volume = %f, want 1.5", v)
+	}
+}
+
+func TestUserVolumeClamped(t *testing.T) {
+	tr := NewTransport()
+	tr.SetUserVolume(1, -0.5)
+	if v := tr.GetUserVolume(1); v != 0 {
+		t.Errorf("negative volume should clamp to 0, got %f", v)
+	}
+	tr.SetUserVolume(1, 5.0)
+	if v := tr.GetUserVolume(1); v != 2.0 {
+		t.Errorf("volume > 2.0 should clamp to 2.0, got %f", v)
+	}
+}
+
+func TestUserVolumeIsolated(t *testing.T) {
+	tr := NewTransport()
+	tr.SetUserVolume(1, 0.5)
+	tr.SetUserVolume(2, 1.8)
+	if v := tr.GetUserVolume(1); v != 0.5 {
+		t.Errorf("user 1 volume = %f, want 0.5", v)
+	}
+	if v := tr.GetUserVolume(2); v != 1.8 {
+		t.Errorf("user 2 volume = %f, want 1.8", v)
+	}
+	if v := tr.GetUserVolume(3); v != 1.0 {
+		t.Errorf("unset user volume = %f, want 1.0", v)
 	}
 }

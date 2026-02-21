@@ -71,7 +71,7 @@ func TestSaveAndLoad(t *testing.T) {
 		PTTEnabled:     true,
 		PTTKey:         "Space",
 		Servers: []config.ServerEntry{
-			{Name: "Home", Addr: "192.168.1.10:4433"},
+			{Name: "Home", Addr: "192.168.1.10:8443"},
 		},
 	}
 
@@ -116,7 +116,7 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.PTTKey != cfg.PTTKey {
 		t.Errorf("ptt key: want %q got %q", cfg.PTTKey, loaded.PTTKey)
 	}
-	if len(loaded.Servers) != 1 || loaded.Servers[0].Addr != "192.168.1.10:4433" {
+	if len(loaded.Servers) != 1 || loaded.Servers[0].Addr != "192.168.1.10:8443" {
 		t.Errorf("servers: unexpected value %+v", loaded.Servers)
 	}
 }

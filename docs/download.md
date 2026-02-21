@@ -47,7 +47,7 @@ chmod +x server-linux-amd64
 ./server-linux-amd64
 ```
 
-The server listens on UDP port **4433** by default. To use a different port:
+The server listens on UDP port **8443** by default. To use a different port:
 
 ```bash
 ./server-linux-amd64 -addr :9000
@@ -56,11 +56,11 @@ The server listens on UDP port **4433** by default. To use a different port:
 ### Docker
 
 ```bash
-docker run --rm -p 4433:4433/udp ghcr.io/rustyguts/bken-server:latest
+docker run --rm -p 8443:8443/udp ghcr.io/rustyguts/bken-server:latest
 ```
 
 ::: tip Firewall
-Open UDP port 4433 (or whichever port you chose) on the server machine. TCP is not used.
+Open UDP port 8443 (or whichever port you chose) on the server machine. TCP is not used.
 :::
 
 ---
@@ -69,7 +69,7 @@ Open UDP port 4433 (or whichever port you chose) on the server machine. TCP is n
 
 1. Start the server and note the machine's local IP address (e.g. `192.168.1.10`).
 2. Open the client on each machine joining the call.
-3. Enter your name and the server address — for example `192.168.1.10:4433` — then click **Connect**.
+3. Enter your name and the server address — for example `192.168.1.10:8443` — then click **Connect**.
 
 All participants are placed in the same room automatically. There are no channels or room codes.
 

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import {
   SetNoiseSuppression,
   SetNoiseSuppressionLevel,
 } from '../wailsjs/go/main/App'
-import { GetConfig, SaveConfig, SetAEC, SetAGC, SetAGCLevel, SetVAD, SetVADThreshold, SetPTTMode } from './config'
+import { GetConfig, SaveConfig, SetAEC, SetAGC, SetAGCLevel, SetVAD, SetVADThreshold, SetNoiseGate, SetNoiseGateThreshold, GetInputLevel, SetNotificationVolume, GetNotificationVolume } from './config'
+import { SlidersHorizontal } from 'lucide-vue-next'
 
 const aecEnabled = ref(true)
 const noiseEnabled = ref(false)
@@ -13,26 +14,11 @@ const agcEnabled = ref(true)
 const agcLevel = ref(50)
 const vadEnabled = ref(true)
 const vadThreshold = ref(30)
-const pttEnabled = ref(false)
-const pttKey = ref('Backquote')
-const rebindingPTT = ref(false)
-
-/** Human-readable label for a KeyboardEvent.code value. */
-function keyLabel(code: string): string {
-  const labels: Record<string, string> = {
-    Backquote: '`',
-    Space: 'Space',
-    CapsLock: 'CapsLock',
-    Tab: 'Tab',
-    ShiftLeft: 'L-Shift',
-    ShiftRight: 'R-Shift',
-    ControlLeft: 'L-Ctrl',
-    ControlRight: 'R-Ctrl',
-    AltLeft: 'L-Alt',
-    AltRight: 'R-Alt',
-  }
-  return labels[code] ?? code.replace(/^Key/, '').replace(/^Digit/, '')
-}
+const gateEnabled = ref(false)
+const gateThreshold = ref(20)
+const inputLevel = ref(0)
+const notifVolume = ref(100) // 0-200%
+let levelTimer: ReturnType<typeof setInterval> | null = null
 
 async function persistConfig(): Promise<void> {
   const cfg = await GetConfig()
@@ -45,8 +31,8 @@ async function persistConfig(): Promise<void> {
     agc_level: agcLevel.value,
     vad_enabled: vadEnabled.value,
     vad_threshold: vadThreshold.value,
-    ptt_enabled: pttEnabled.value,
-    ptt_key: pttKey.value,
+    noise_gate_enabled: gateEnabled.value,
+    noise_gate_threshold: gateThreshold.value,
   })
 }
 
@@ -85,30 +71,50 @@ async function handleVADThresholdChange(): Promise<void> {
   await persistConfig()
 }
 
-async function handlePTTToggle(): Promise<void> {
-  await SetPTTMode(pttEnabled.value)
+async function handleGateToggle(): Promise<void> {
+  await SetNoiseGate(gateEnabled.value)
   await persistConfig()
-  window.dispatchEvent(new CustomEvent('ptt-config-changed', {
-    detail: { enabled: pttEnabled.value, key: pttKey.value },
-  }))
 }
 
-function startRebindPTT(): void {
-  rebindingPTT.value = true
-  function onKey(e: KeyboardEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    pttKey.value = e.code
-    rebindingPTT.value = false
-    window.removeEventListener('keydown', onKey, true)
-    SetPTTMode(pttEnabled.value)
-    persistConfig()
-    window.dispatchEvent(new CustomEvent('ptt-config-changed', {
-      detail: { enabled: pttEnabled.value, key: pttKey.value },
-    }))
-  }
-  window.addEventListener('keydown', onKey, true)
+async function handleGateThresholdChange(): Promise<void> {
+  await SetNoiseGateThreshold(gateThreshold.value)
+  await persistConfig()
 }
+
+async function handleNotifVolumeChange(): Promise<void> {
+  await SetNotificationVolume(notifVolume.value / 100)
+}
+
+// Input level meter: polls ~15fps
+function startLevelMeter(): void {
+  if (levelTimer) return
+  levelTimer = setInterval(async () => {
+    try {
+      inputLevel.value = await GetInputLevel()
+    } catch {
+      inputLevel.value = 0
+    }
+  }, 66) // ~15fps
+}
+
+function stopLevelMeter(): void {
+  if (levelTimer) {
+    clearInterval(levelTimer)
+    levelTimer = null
+  }
+  inputLevel.value = 0
+}
+
+// Level meter color: green < 0.3, yellow 0.3-0.7, red > 0.7
+const levelColor = computed(() => {
+  const l = inputLevel.value
+  if (l > 0.7) return 'bg-error'
+  if (l > 0.3) return 'bg-warning'
+  return 'bg-success'
+})
+
+// Level as percentage (capped at 100)
+const levelPercent = computed(() => Math.min(100, Math.round(inputLevel.value * 100 / 0.5)))
 
 onMounted(async () => {
   const cfg = await GetConfig()
@@ -119,54 +125,30 @@ onMounted(async () => {
   agcLevel.value = cfg.agc_level
   vadEnabled.value = cfg.vad_enabled
   vadThreshold.value = cfg.vad_threshold
-  pttEnabled.value = cfg.ptt_enabled ?? false
-  pttKey.value = cfg.ptt_key || 'Backquote'
+  gateEnabled.value = cfg.noise_gate_enabled ?? false
+  gateThreshold.value = cfg.noise_gate_threshold ?? 20
+  try {
+    const vol = await GetNotificationVolume()
+    notifVolume.value = Math.round(vol * 100)
+  } catch {
+    notifVolume.value = 100
+  }
+  startLevelMeter()
+})
+
+onBeforeUnmount(() => {
+  stopLevelMeter()
 })
 </script>
 
 <template>
   <section>
     <div class="flex items-center gap-2 mb-3">
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
-      </svg>
+      <SlidersHorizontal class="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
       <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Voice Processing</span>
     </div>
 
     <div class="card bg-base-200/40 border border-base-content/10 p-4 flex flex-col gap-4">
-
-      <!-- Push-to-Talk -->
-      <div>
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium leading-none">Push to Talk</p>
-            <p class="text-xs opacity-50 mt-0.5">Hold a key to transmit</p>
-          </div>
-          <input
-            type="checkbox"
-            v-model="pttEnabled"
-            class="toggle toggle-primary toggle-sm"
-            aria-label="Toggle push-to-talk"
-            @change="handlePTTToggle"
-          />
-        </div>
-        <div class="mt-3 transition-opacity" :class="{ 'opacity-30 pointer-events-none': !pttEnabled }">
-          <div class="flex items-center justify-between">
-            <span class="text-xs opacity-70">Key</span>
-            <button
-              class="btn btn-xs btn-outline font-mono min-w-[4rem]"
-              :class="{ 'btn-primary animate-pulse': rebindingPTT }"
-              :disabled="!pttEnabled"
-              @click="startRebindPTT"
-            >
-              {{ rebindingPTT ? '...' : keyLabel(pttKey) }}
-            </button>
-          </div>
-          <p class="text-xs opacity-40 mt-2">Works when the app is focused</p>
-        </div>
-      </div>
-
-      <div class="divider my-0 opacity-30"></div>
 
       <!-- Echo Cancellation -->
       <div>
@@ -287,6 +269,84 @@ onMounted(async () => {
             :disabled="!vadEnabled"
             @input="handleVADThresholdChange"
           />
+        </div>
+      </div>
+
+      <div class="divider my-0 opacity-30"></div>
+
+      <!-- Noise Gate -->
+      <div>
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium leading-none">Noise Gate</p>
+            <p class="text-xs opacity-50 mt-0.5">Zero out audio below threshold</p>
+          </div>
+          <input
+            type="checkbox"
+            v-model="gateEnabled"
+            class="toggle toggle-primary toggle-sm"
+            aria-label="Toggle noise gate"
+            @change="handleGateToggle"
+          />
+        </div>
+        <div class="mt-3 transition-opacity" :class="{ 'opacity-30 pointer-events-none': !gateEnabled }">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs opacity-70">Threshold</span>
+            <span class="text-xs font-mono font-medium tabular-nums">{{ gateThreshold }}%</span>
+          </div>
+          <input
+            type="range"
+            v-model.number="gateThreshold"
+            min="0"
+            max="100"
+            class="range range-xs range-primary w-full"
+            :aria-label="`Noise gate threshold: ${gateThreshold}%`"
+            :disabled="!gateEnabled"
+            @input="handleGateThresholdChange"
+          />
+        </div>
+      </div>
+
+      <div class="divider my-0 opacity-30"></div>
+
+      <!-- Notification Volume -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <p class="text-sm font-medium leading-none">Notification Volume</p>
+            <p class="text-xs opacity-50 mt-0.5">Join/leave/mute sounds</p>
+          </div>
+          <span class="text-xs font-mono font-medium tabular-nums">{{ notifVolume }}%</span>
+        </div>
+        <input
+          type="range"
+          v-model.number="notifVolume"
+          min="0"
+          max="200"
+          step="5"
+          class="range range-xs range-primary w-full"
+          :aria-label="`Notification volume: ${notifVolume}%`"
+          @input="handleNotifVolumeChange"
+        />
+      </div>
+
+      <div class="divider my-0 opacity-30"></div>
+
+      <!-- Input Level Meter -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <p class="text-sm font-medium leading-none">Input Level</p>
+            <p class="text-xs opacity-50 mt-0.5">Real-time mic input</p>
+          </div>
+          <span class="text-xs font-mono font-medium tabular-nums">{{ Math.round(inputLevel * 100) }}%</span>
+        </div>
+        <div class="w-full h-2 bg-base-300 rounded-full overflow-hidden">
+          <div
+            class="h-full rounded-full transition-all duration-75"
+            :class="levelColor"
+            :style="{ width: levelPercent + '%' }"
+          ></div>
         </div>
       </div>
 

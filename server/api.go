@@ -20,7 +20,7 @@ import (
 )
 
 // APIServer provides HTTP REST endpoints for health checking and room state.
-// It runs on a separate TCP port from the WebTransport/QUIC server.
+// It runs on a separate TCP port from the websocket signaling server.
 type APIServer struct {
 	room       *Room
 	store      *store.Store
@@ -64,6 +64,17 @@ func (s *APIServer) registerRoutes() {
 	s.echo.GET("/invite", s.handleInvite)
 	s.echo.POST("/api/upload", s.handleUpload)
 	s.echo.GET("/api/files/:id", s.handleGetFile)
+	// Phase 8: Server Administration
+	s.echo.GET("/api/audit", s.handleGetAuditLog)
+	s.echo.GET("/api/bans", s.handleGetBans)
+	s.echo.DELETE("/api/bans/:id", s.handleDeleteBan)
+	// Phase 7: Recordings
+	s.echo.GET("/api/recordings", s.handleListRecordings)
+	s.echo.GET("/api/recordings/:filename", s.handleDownloadRecording)
+	// Phase 10: Performance metrics
+	s.echo.GET("/api/metrics", s.handleMetrics)
+	// Phase 11: Version endpoint
+	s.echo.GET("/api/version", s.handleVersion)
 }
 
 // Run starts the Echo HTTP server on addr and blocks until ctx is cancelled.
@@ -116,6 +127,18 @@ func (s *APIServer) handlePutSettings(c echo.Context) error {
 	s.room.SetServerName(name)
 	s.room.BroadcastControl(ControlMsg{Type: "server_info", ServerName: name}, 0)
 	return c.NoContent(http.StatusNoContent)
+}
+
+// Version is the current server version. Set at build time via -ldflags.
+var Version = "0.1.0-dev"
+
+// VersionResponse is the payload for GET /api/version.
+type VersionResponse struct {
+	Version string `json:"version"`
+}
+
+func (s *APIServer) handleVersion(c echo.Context) error {
+	return c.JSON(http.StatusOK, VersionResponse{Version: Version})
 }
 
 // HealthResponse is the payload for GET /health.
@@ -230,7 +253,7 @@ func (s *APIServer) handleDeleteChannel(c echo.Context) error {
 }
 
 // handleInvite serves a browser-friendly invite page for the server.
-// The optional ?addr=host:port query parameter is the WebTransport address;
+// The optional ?addr=host:port query parameter is the signaling server address;
 // when provided the page includes a clickable bken:// deep-link.
 func (s *APIServer) handleInvite(c echo.Context) error {
 	name := s.room.ServerName()
@@ -383,6 +406,98 @@ func (s *APIServer) refreshChannels() {
 	}
 	s.room.SetChannels(convertChannels(chs))
 }
+
+// --- Phase 8: Audit Log API ---
+
+func (s *APIServer) handleGetAuditLog(c echo.Context) error {
+	action := c.QueryParam("action")
+	limit := 100
+	if l := c.QueryParam("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	entries, err := s.store.GetAuditLog(action, limit)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if entries == nil {
+		entries = []store.AuditEntry{}
+	}
+	return c.JSON(http.StatusOK, entries)
+}
+
+// --- Phase 8: Ban Management API ---
+
+func (s *APIServer) handleGetBans(c echo.Context) error {
+	bans, err := s.store.GetBans()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if bans == nil {
+		bans = []store.Ban{}
+	}
+	return c.JSON(http.StatusOK, bans)
+}
+
+func (s *APIServer) handleDeleteBan(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid ban id")
+	}
+	if err := s.store.DeleteBan(id); err != nil {
+		if err == sql.ErrNoRows {
+			return echo.NewHTTPError(http.StatusNotFound, "ban not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// --- Phase 7: Recordings API ---
+
+func (s *APIServer) handleListRecordings(c echo.Context) error {
+	recordings := s.room.ListRecordings()
+	if recordings == nil {
+		recordings = []RecordingInfo{}
+	}
+	return c.JSON(http.StatusOK, recordings)
+}
+
+func (s *APIServer) handleDownloadRecording(c echo.Context) error {
+	filename := c.Param("filename")
+	if filename == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "missing filename")
+	}
+	// Sanitize filename to prevent path traversal.
+	filename = filepath.Base(filename)
+	path := s.room.GetRecordingFilePath(filename)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return echo.NewHTTPError(http.StatusNotFound, "recording not found")
+	}
+	c.Response().Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"`, filename))
+	return c.File(path)
+}
+
+// --- Phase 10: Metrics endpoint ---
+
+// MetricsResponse includes runtime metrics for health monitoring.
+type MetricsResponse struct {
+	Status     string `json:"status"`
+	Clients    int    `json:"clients"`
+	Channels   int    `json:"channels"`
+	Goroutines int    `json:"goroutines"`
+}
+
+func (s *APIServer) handleMetrics(c echo.Context) error {
+	return c.JSON(http.StatusOK, MetricsResponse{
+		Status:   "ok",
+		Clients:  s.room.ClientCount(),
+		Channels: s.room.ChannelCount(),
+	})
+}
+
 
 // jsonErrorHandler ensures all error responses have a consistent JSON body:
 //

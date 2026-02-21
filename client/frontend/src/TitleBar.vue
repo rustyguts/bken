@@ -2,6 +2,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 import { RenameServer } from './config'
+import { Check, Pencil, Link, Minus, Square, X } from 'lucide-vue-next'
 
 const props = defineProps<{ serverName?: string; isOwner?: boolean; serverAddr?: string }>()
 
@@ -77,9 +78,7 @@ watch(() => props.serverName, () => { editing.value = false })
             tabindex="-1"
             @mousedown.prevent="confirmEdit"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true">
-              <path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
-            </svg>
+            <Check class="w-3 h-3" aria-hidden="true" />
           </button>
         </template>
 
@@ -94,9 +93,7 @@ watch(() => props.serverName, () => { editing.value = false })
               title="Rename server"
               @click="startEdit"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true">
-                <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.263a1.75 1.75 0 0 0 0-2.473ZM4.75 13.25a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5h-7.5Z" />
-              </svg>
+              <Pencil class="w-3 h-3" aria-hidden="true" />
             </button>
             <!-- Copy invite link (chain link / check) -->
             <button
@@ -106,14 +103,8 @@ watch(() => props.serverName, () => { editing.value = false })
               :title="copied ? 'Copied!' : 'Copy invite link'"
               @click="copyInvite"
             >
-              <!-- Check mark when recently copied -->
-              <svg v-if="copied" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true">
-                <path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
-              </svg>
-              <!-- Chain-link icon otherwise -->
-              <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3" aria-hidden="true">
-                <path d="M8.914 6.025a.75.75 0 0 1 1.06 1.06L6.918 10.143a3.25 3.25 0 1 1-4.596-4.596L4.85 3.02a.75.75 0 0 1 1.06 1.06L3.383 6.607a1.75 1.75 0 1 0 2.475 2.475l3.056-3.057Zm.11-3.05a.75.75 0 0 1 1.06-1.06l2.528 2.528a3.25 3.25 0 1 1-4.596 4.596L5.49 7.51a.75.75 0 0 1 1.06-1.06l2.528 2.528a1.75 1.75 0 1 0 2.475-2.475L9.025 2.975Z" />
-              </svg>
+              <Check v-if="copied" class="w-3 h-3" aria-hidden="true" />
+              <Link v-else class="w-3 h-3" aria-hidden="true" />
             </button>
           </div>
         </template>
@@ -130,9 +121,7 @@ watch(() => props.serverName, () => { editing.value = false })
         aria-label="Minimise window"
         @click="WindowMinimise()"
       >
-        <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor" aria-hidden="true">
-          <rect width="10" height="1" />
-        </svg>
+        <Minus class="w-2.5 h-2.5" aria-hidden="true" />
       </button>
 
       <!-- Maximise / restore -->
@@ -141,9 +130,7 @@ watch(() => props.serverName, () => { editing.value = false })
         aria-label="Maximise window"
         @click="WindowToggleMaximise()"
       >
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
-          <rect x="0.5" y="0.5" width="9" height="9" />
-        </svg>
+        <Square class="w-2.5 h-2.5" aria-hidden="true" />
       </button>
 
       <!-- Close -->
@@ -152,10 +139,7 @@ watch(() => props.serverName, () => { editing.value = false })
         aria-label="Close window"
         @click="Quit()"
       >
-        <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true">
-          <line x1="0" y1="0" x2="10" y2="10" />
-          <line x1="10" y1="0" x2="0" y2="10" />
-        </svg>
+        <X class="w-2.5 h-2.5" aria-hidden="true" />
       </button>
     </div>
   </header>

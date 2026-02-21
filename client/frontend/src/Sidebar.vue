@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { GetConfig, SaveConfig } from './config'
 import type { ServerEntry } from './config'
 import type { ConnectPayload } from './types'
+import { Server } from 'lucide-vue-next'
 
 const props = defineProps<{
   activeServerAddr: string
@@ -24,7 +25,7 @@ const newName = ref('')
 const newAddr = ref('')
 const browserError = ref('')
 
-const servers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:4433' }])
+const servers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:8443' }])
 
 function normalizeAddr(raw: string): string {
   let addr = raw.trim()
@@ -44,7 +45,7 @@ function normalizeServers(entries: ServerEntry[]): ServerEntry[] {
       addr,
     })
   }
-  return out.length ? out : [{ name: 'Local Dev', addr: 'localhost:4433' }]
+  return out.length ? out : [{ name: 'Local Dev', addr: 'localhost:8443' }]
 }
 
 async function loadConfig(): Promise<void> {
@@ -134,6 +135,33 @@ async function ensureStartupAddr(addr: string): Promise<void> {
   if (!newAddr.value.trim()) newAddr.value = clean
 }
 
+// Server context menu
+const serverContextMenu = ref<{ x: number; y: number; server: ServerEntry } | null>(null)
+
+function openServerContextMenu(event: MouseEvent, server: ServerEntry): void {
+  event.preventDefault()
+  serverContextMenu.value = { x: event.clientX, y: event.clientY, server }
+}
+
+function closeServerContextMenu(): void {
+  serverContextMenu.value = null
+}
+
+async function removeServer(): Promise<void> {
+  if (!serverContextMenu.value) return
+  const addr = normalizeAddr(serverContextMenu.value.server.addr)
+  servers.value = servers.value.filter(s => normalizeAddr(s.addr) !== addr)
+  if (!servers.value.length) {
+    servers.value = [{ name: 'Local Dev', addr: 'localhost:8443' }]
+  }
+  closeServerContextMenu()
+  await saveConfig()
+  // If the removed server was the active one, deselect it
+  if (normalizeAddr(props.activeServerAddr) === addr) {
+    emit('selectServer', servers.value[0].addr)
+  }
+}
+
 watch(() => props.connectedAddr, () => {
   connectingAddr.value = ''
   browserOpen.value = false
@@ -147,30 +175,37 @@ watch(() => props.startupAddr, (addr) => {
   void ensureStartupAddr(addr)
 })
 
+function handleGlobalClick(): void {
+  closeServerContextMenu()
+}
+
 onMounted(async () => {
+  document.addEventListener('click', handleGlobalClick)
   await loadConfig()
   await ensureStartupAddr(props.startupAddr)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleGlobalClick)
 })
 </script>
 
 <template>
   <div class="h-full min-h-0">
-    <aside class="relative flex flex-col items-center border-r border-base-content/10 bg-base-300 py-3 px-2 gap-2 w-[64px] min-w-[64px] max-w-[64px] h-full overflow-x-hidden">
-      <button
-        class="btn btn-ghost btn-square btn-sm"
-        aria-label="Server browser"
-        :class="browserOpen ? 'text-primary' : 'opacity-70 hover:opacity-100'"
-        @click="browserOpen = true"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
-        </svg>
-      </button>
+    <aside class="relative flex flex-col items-center border-r border-base-content/10 bg-base-300 w-[64px] min-w-[64px] max-w-[64px] h-full overflow-x-hidden" @click="closeServerContextMenu()">
+      <div class="border-b border-base-content/10 min-h-11 w-full flex items-center justify-center shrink-0">
+        <button
+          class="btn btn-ghost btn-square btn-sm"
+          aria-label="Server browser"
+          :class="browserOpen ? 'text-primary' : 'opacity-70 hover:opacity-100'"
+          @click="browserOpen = true"
+        >
+          <Server class="w-5 h-5" aria-hidden="true" />
+        </button>
+      </div>
 
-      <div class="w-full border-t border-base-content/20 my-1" />
-
-      <div class="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden">
-        <div class="flex flex-col items-center gap-2 mt-1">
+      <div class="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden py-2 px-2">
+        <div class="flex flex-col items-center gap-2">
           <button
             v-for="server in servers"
             :key="server.addr"
@@ -180,6 +215,7 @@ onMounted(async () => {
             :aria-label="`Open ${server.name}`"
             :class="normalizeAddr(server.addr) === normalizeAddr(activeServerAddr) ? 'ring-2 ring-offset-1 ring-base-content/35' : ''"
             @click="selectServer(server.addr)"
+            @contextmenu="openServerContextMenu($event, server)"
           >
             {{ initials(server.name) }}
             <span
@@ -191,6 +227,26 @@ onMounted(async () => {
         </div>
       </div>
     </aside>
+
+    <!-- Server right-click context menu -->
+    <Teleport to="body">
+      <div
+        v-if="serverContextMenu"
+        class="fixed z-50 min-w-[140px] rounded-lg border border-base-content/15 bg-base-200 shadow-lg py-1"
+        :style="{ left: serverContextMenu.x + 'px', top: serverContextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="px-3 py-1 text-[10px] uppercase tracking-wider opacity-40 select-none truncate max-w-[180px]">
+          {{ serverContextMenu.server.name }}
+        </div>
+        <button
+          class="w-full text-left px-3 py-1.5 text-xs text-error hover:bg-error/10 transition-colors"
+          @click="removeServer"
+        >
+          Remove Server
+        </button>
+      </div>
+    </Teleport>
 
     <dialog class="modal" :class="{ 'modal-open': browserOpen }">
       <div class="modal-box w-11/12 max-w-md">

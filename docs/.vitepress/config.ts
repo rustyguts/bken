@@ -15,11 +15,20 @@ export default defineConfig({
 
   themeConfig: {
     nav: [
-      { text: 'Download', link: '/download' },
+      { text: 'Getting Started', link: '/download' },
+      { text: 'Self-Hosting', link: '/self-hosting' },
+      { text: 'Configuration', link: '/configuration' },
+      { text: 'Architecture', link: '/architecture' },
+      { text: 'FAQ', link: '/faq' },
     ],
 
     sidebar: [
-      { text: 'Download', link: '/download' },
+      { text: 'Getting Started', link: '/download' },
+      { text: 'Self-Hosting', link: '/self-hosting' },
+      { text: 'Resource Planning', link: '/resources' },
+      { text: 'Configuration', link: '/configuration' },
+      { text: 'Architecture', link: '/architecture' },
+      { text: 'FAQ', link: '/faq' },
     ],
 
     search: {

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import { GetConfig, SaveConfig } from '../config'
 
 const THEMES = [
@@ -41,28 +41,96 @@ const THEMES = [
   { name: 'abyss', label: 'Abyss' },
 ] as const
 
+/** Theme mode: a specific theme name, or 'system' to follow OS preference. */
+type ThemeMode = 'system' | string
+
 const currentTheme = ref('dark')
+const themeMode = ref<ThemeMode>('dark')
+
+/** Detect the system preferred theme (light or dark). */
+function systemTheme(): string {
+  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: light)').matches) {
+    return 'light'
+  }
+  return 'dark'
+}
+
+/** Resolve which DaisyUI theme to apply given the current mode. */
+function resolveTheme(mode: ThemeMode): string {
+  return mode === 'system' ? systemTheme() : mode
+}
+
+let mediaQuery: MediaQueryList | null = null
+let mediaHandler: ((e: MediaQueryListEvent) => void) | null = null
+
+function applyToDOM(theme: string): void {
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem('bken-theme', theme)
+}
+
+/** Listen for OS-level theme changes when in system mode. */
+function startSystemListener(): void {
+  stopSystemListener()
+  if (typeof window === 'undefined') return
+  mediaQuery = window.matchMedia('(prefers-color-scheme: light)')
+  mediaHandler = () => {
+    if (themeMode.value === 'system') {
+      const resolved = systemTheme()
+      currentTheme.value = resolved
+      applyToDOM(resolved)
+    }
+  }
+  mediaQuery.addEventListener('change', mediaHandler)
+}
+
+function stopSystemListener(): void {
+  if (mediaQuery && mediaHandler) {
+    mediaQuery.removeEventListener('change', mediaHandler)
+  }
+  mediaQuery = null
+  mediaHandler = null
+}
 
 /** Restore theme from config. Call once during settings mount. */
 async function restoreFromConfig(): Promise<void> {
   const cfg = await GetConfig()
+  const savedMode = (cfg as unknown as Record<string, unknown>).theme_mode as string | undefined
   const validTheme = THEMES.some(t => t.name === cfg.theme)
-  if (validTheme) {
+
+  if (savedMode === 'system') {
+    themeMode.value = 'system'
+    const resolved = systemTheme()
+    currentTheme.value = resolved
+    applyToDOM(resolved)
+    startSystemListener()
+  } else if (validTheme) {
+    themeMode.value = cfg.theme
     currentTheme.value = cfg.theme
-    document.documentElement.setAttribute('data-theme', cfg.theme)
-    localStorage.setItem('bken-theme', cfg.theme)
+    applyToDOM(cfg.theme)
   }
 }
 
-/** Apply a theme: update DOM, localStorage, and persist to config. */
+/** Apply a specific theme: update DOM, localStorage, and persist to config. */
 async function applyTheme(theme: string): Promise<void> {
+  stopSystemListener()
+  themeMode.value = theme
   currentTheme.value = theme
-  document.documentElement.setAttribute('data-theme', theme)
-  localStorage.setItem('bken-theme', theme)
+  applyToDOM(theme)
   const cfg = await GetConfig()
   await SaveConfig({ ...cfg, theme })
 }
 
+/** Set theme mode to 'system' to follow OS preference. */
+async function setSystemMode(): Promise<void> {
+  themeMode.value = 'system'
+  const resolved = systemTheme()
+  currentTheme.value = resolved
+  applyToDOM(resolved)
+  startSystemListener()
+  const cfg = await GetConfig()
+  await SaveConfig({ ...cfg, theme: resolved })
+}
+
 export function useTheme() {
-  return { THEMES, currentTheme, applyTheme, restoreFromConfig }
+  return { THEMES, currentTheme, themeMode, applyTheme, setSystemMode, restoreFromConfig, stopSystemListener }
 }

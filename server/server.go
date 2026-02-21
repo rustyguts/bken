@@ -3,22 +3,20 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"log"
 	"net/http"
 	"time"
 
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/http3"
-	"github.com/quic-go/webtransport-go"
+	"github.com/gorilla/websocket"
 )
 
-// Server holds the WebTransport server and room state.
+// Server holds the signaling/control server and room state.
 type Server struct {
 	addr        string
 	tlsConfig   *tls.Config
 	room        *Room
 	idleTimeout time.Duration
-	wt          *webtransport.Server
 }
 
 func NewServer(addr string, tlsConfig *tls.Config, room *Room, idleTimeout time.Duration) *Server {
@@ -30,43 +28,49 @@ func NewServer(addr string, tlsConfig *tls.Config, room *Room, idleTimeout time.
 	}
 }
 
-// Run starts the WebTransport server and blocks until the context is canceled.
+// Run starts the HTTPS + WebSocket server and blocks until the context is canceled.
 func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
-
-	s.wt = &webtransport.Server{
-		H3: &http3.Server{
-			Addr:      s.addr,
-			TLSConfig: s.tlsConfig,
-			Handler:   mux,
-			// Close QUIC connections that have been idle for 30 s.
-			// This reclaims resources from clients that disappear without a
-			// clean disconnect (e.g. crash, network change, power loss).
-			QUICConfig: &quic.Config{
-				MaxIdleTimeout: s.idleTimeout,
-			},
-		},
-		CheckOrigin: func(r *http.Request) bool { return true },
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
 	}
 
-	webtransport.ConfigureHTTP3Server(s.wt.H3)
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		sess, err := s.wt.Upgrade(w, r)
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("[server] upgrade failed: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("[server] websocket upgrade failed: %v", err)
 			return
 		}
-		handleClient(ctx, sess, s.room)
+		go handleWebSocketClient(ctx, conn, s.room)
 	})
 
-	log.Printf("[server] listening on %s", s.addr)
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("bken signaling server"))
+	})
+
+	httpSrv := &http.Server{
+		Addr:              s.addr,
+		Handler:           mux,
+		TLSConfig:         s.tlsConfig,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       s.idleTimeout,
+	}
 
 	go func() {
 		<-ctx.Done()
-		s.wt.Close()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("[server] shutdown: %v", err)
+		}
 	}()
 
-	return s.wt.ListenAndServe()
+	log.Printf("[server] listening on %s", s.addr)
+
+	err := httpSrv.ListenAndServeTLS("", "")
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }

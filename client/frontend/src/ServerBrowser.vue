@@ -11,7 +11,7 @@ const username = ref('')
 const error = ref('')
 const connecting = ref(false)
 const connectingAddr = ref('')
-const servers = ref([{ name: 'Local Dev', addr: 'localhost:4433' }])
+const servers = ref([{ name: 'Local Dev', addr: 'localhost:8443' }])
 
 // Add-server form state
 const showAddForm = ref(false)

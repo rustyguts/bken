@@ -16,11 +16,11 @@ hero:
 features:
   - icon: 🔒
     title: Encrypted by default
-    details: Every call is encrypted with TLS 1.3 — the same standard used by HTTPS. WebTransport makes this automatic. There is no "turn on encryption" toggle because it was never off.
+    details: Signaling is TLS 1.3 over WebSocket; audio is encrypted DTLS-SRTP via WebRTC — the same standard used by every browser call. There is no "turn on encryption" toggle because it was never off.
 
   - icon: ⚡
     title: Sub-50ms latency
-    details: Built on QUIC and WebTransport with Opus audio at 48 kHz. Conversations feel like phone calls, not video conferences. Silence is transmitted as nothing, not silence.
+    details: Peer-to-peer WebRTC with Opus audio at 48 kHz. Conversations feel like phone calls, not video conferences. Silence is transmitted as nothing, not silence.
 
   - icon: 💻
     title: Cross-platform client
@@ -36,5 +36,5 @@ features:
 
   - icon: 🚀
     title: Zero configuration
-    details: Run the server, open the client, type a name and an address. That is the entire setup. No DNS, no certificates to manage, no firewall rules beyond one UDP port.
+    details: Run the server, open the client, type a name and an address. That is the entire setup. No DNS, no certificates to manage, no firewall rules beyond one TCP port.
 ---

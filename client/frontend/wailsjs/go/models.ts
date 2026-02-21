@@ -29,6 +29,9 @@ export namespace config {
 	    vad_threshold: number;
 	    ptt_enabled: boolean;
 	    ptt_key: string;
+	    noise_gate_enabled: boolean;
+	    noise_gate_threshold: number;
+	    notification_volume: number;
 	    servers: ServerEntry[];
 	
 	    static createFrom(source: any = {}) {
@@ -51,6 +54,9 @@ export namespace config {
 	        this.vad_threshold = source["vad_threshold"];
 	        this.ptt_enabled = source["ptt_enabled"];
 	        this.ptt_key = source["ptt_key"];
+	        this.noise_gate_enabled = source["noise_gate_enabled"];
+	        this.noise_gate_threshold = source["noise_gate_threshold"];
+	        this.notification_volume = source["notification_volume"];
 	        this.servers = this.convertValues(source["servers"], ServerEntry);
 	    }
 	

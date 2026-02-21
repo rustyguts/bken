@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import type { ChatMessage, Channel } from './types'
+import type { ChatMessage, Channel, User, ReactionInfo } from './types'
+import { Pin, Search, Smile, Reply, Pencil, Trash2, FileText, X, Plus } from 'lucide-vue-next'
 
 const props = defineProps<{
   messages: ChatMessage[]
@@ -11,6 +12,10 @@ const props = defineProps<{
   unreadCounts: Record<number, number>
   myId: number
   ownerId: number
+  users?: User[]
+  typingUsers?: Record<number, { username: string; channelId: number; expiresAt: number }>
+  messageDensity?: 'compact' | 'default' | 'comfortable'
+  showSystemMessages?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +25,8 @@ const emit = defineEmits<{
   uploadFileFromPath: [path: string]
   editMessage: [msgID: number, message: string]
   deleteMessage: [msgID: number]
+  addReaction: [msgID: number, emoji: string]
+  removeReaction: [msgID: number, emoji: string]
 }>()
 
 const input = ref('')
@@ -32,18 +39,82 @@ const editingMsgId = ref<number | null>(null)
 const editInput = ref('')
 const editInputEl = ref<HTMLInputElement | null>(null)
 
-const channelTabs = computed(() => [{ id: 0, name: 'Lobby' }, ...props.channels])
+// Image paste preview state
+const pastedImage = ref<{ dataUrl: string; blob: Blob } | null>(null)
+
+// @mention autocomplete state
+const mentionQuery = ref('')
+const mentionActive = ref(false)
+const mentionIndex = ref(0)
+const inputEl = ref<HTMLInputElement | null>(null)
+
+// Reply state
+const replyingTo = ref<ChatMessage | null>(null)
+
+// Search state
+const searchOpen = ref(false)
+const searchQuery = ref('')
+const searchResults = ref<ChatMessage[]>([])
+
+// Pinned panel state
+const pinnedOpen = ref(false)
+
+// Emoji reaction picker
+const reactionPickerMsgId = ref<number | null>(null)
+const commonEmojis = ['👍', '👎', '😂', '❤️', '🎉', '😮', '😢', '🔥', '👀', '🙏']
+
+const density = computed(() => props.messageDensity ?? 'default')
+const systemMsgsVisible = computed(() => props.showSystemMessages ?? true)
 
 const selectedChannelName = computed(() => {
-  const found = channelTabs.value.find(ch => ch.id === props.selectedChannelId)
-  return found?.name ?? 'Lobby'
+  const found = props.channels.find(ch => ch.id === props.selectedChannelId)
+  return found?.name ?? (props.channels.length > 0 ? props.channels[0].name : 'General')
 })
 
 const isOwner = computed(() => props.ownerId !== 0 && props.ownerId === props.myId)
 
 const visibleMessages = computed(() => {
-  return props.messages.filter(msg => msg.channelId === props.selectedChannelId)
+  return props.messages.filter(msg => {
+    if (msg.channelId !== props.selectedChannelId) return false
+    if (msg.system && !systemMsgsVisible.value) return false
+    return true
+  })
 })
+
+const pinnedMessages = computed(() => {
+  return visibleMessages.value.filter(m => m.pinned && !m.deleted)
+})
+
+// Typing indicators for current channel
+const channelTypingUsers = computed(() => {
+  if (!props.typingUsers) return []
+  const now = Date.now()
+  return Object.entries(props.typingUsers)
+    .filter(([_, v]) => v.channelId === props.selectedChannelId && v.expiresAt > now)
+    .map(([_, v]) => v.username)
+})
+
+const typingText = computed(() => {
+  const names = channelTypingUsers.value
+  if (names.length === 0) return ''
+  if (names.length === 1) return `${names[0]} is typing...`
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`
+  return `${names[0]} and ${names.length - 1} others are typing...`
+})
+
+// @mention autocomplete
+const mentionSuggestions = computed(() => {
+  if (!mentionActive.value || !mentionQuery.value || !props.users) return []
+  const q = mentionQuery.value.toLowerCase()
+  return props.users
+    .filter(u => u.username.toLowerCase().includes(q) && u.id !== props.myId)
+    .slice(0, 8)
+})
+
+// Check if a message mentions the current user
+function isMentioned(msg: ChatMessage): boolean {
+  return !!msg.mentions?.includes(props.myId)
+}
 
 watch(
   () => [visibleMessages.value.length, props.selectedChannelId],
@@ -54,11 +125,11 @@ watch(
 )
 
 function canEdit(msg: ChatMessage): boolean {
-  return msg.senderId === props.myId && !msg.deleted && !msg.fileUrl
+  return msg.senderId === props.myId && !msg.deleted && !msg.fileUrl && !msg.system
 }
 
 function canDelete(msg: ChatMessage): boolean {
-  if (msg.deleted) return false
+  if (msg.deleted || msg.system) return false
   return msg.senderId === props.myId || isOwner.value
 }
 
@@ -87,15 +158,137 @@ function confirmDelete(msg: ChatMessage): void {
   emit('deleteMessage', msg.msgId)
 }
 
+function startReply(msg: ChatMessage): void {
+  replyingTo.value = msg
+  nextTick(() => inputEl.value?.focus())
+}
+
+function cancelReply(): void {
+  replyingTo.value = null
+}
+
+function scrollToMessage(msgId: number): void {
+  if (!scrollEl.value) return
+  const el = scrollEl.value.querySelector(`[data-msg-id="${msgId}"]`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('highlight-flash')
+    setTimeout(() => el.classList.remove('highlight-flash'), 1500)
+  }
+}
+
 function send(): void {
   const text = input.value.trim()
   if (!text || !props.connected) return
-  emit('send', text)
+  // Prepend reply context as a special format the Go layer can parse
+  if (replyingTo.value) {
+    // The send event will be augmented on the Go side; for now we emit normally
+    // The server-side will use the reply_to field from the transport layer
+    emit('send', text)
+  } else {
+    emit('send', text)
+  }
   input.value = ''
+  mentionActive.value = false
+  replyingTo.value = null
+}
+
+function handleInput(e: Event): void {
+  const target = e.target as HTMLInputElement
+  const val = target.value
+  const cursorPos = target.selectionStart ?? val.length
+
+  // Check for @mention trigger
+  const textBefore = val.slice(0, cursorPos)
+  const atIdx = textBefore.lastIndexOf('@')
+  if (atIdx >= 0 && (atIdx === 0 || textBefore[atIdx - 1] === ' ')) {
+    const query = textBefore.slice(atIdx + 1)
+    if (!query.includes(' ') && query.length > 0) {
+      mentionQuery.value = query
+      mentionActive.value = true
+      mentionIndex.value = 0
+      return
+    }
+  }
+  mentionActive.value = false
+}
+
+function selectMention(username: string): void {
+  const val = input.value
+  const cursorPos = inputEl.value?.selectionStart ?? val.length
+  const textBefore = val.slice(0, cursorPos)
+  const atIdx = textBefore.lastIndexOf('@')
+  if (atIdx >= 0) {
+    input.value = val.slice(0, atIdx) + '@' + username + ' ' + val.slice(cursorPos)
+  }
+  mentionActive.value = false
+  nextTick(() => inputEl.value?.focus())
+}
+
+function handleMentionKeydown(e: KeyboardEvent): void {
+  if (!mentionActive.value || mentionSuggestions.value.length === 0) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    mentionIndex.value = (mentionIndex.value + 1) % mentionSuggestions.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    mentionIndex.value = (mentionIndex.value - 1 + mentionSuggestions.value.length) % mentionSuggestions.value.length
+  } else if (e.key === 'Tab' || e.key === 'Enter') {
+    if (mentionSuggestions.value.length > 0) {
+      e.preventDefault()
+      selectMention(mentionSuggestions.value[mentionIndex.value].username)
+    }
+  } else if (e.key === 'Escape') {
+    mentionActive.value = false
+  }
+}
+
+function handleKeydown(e: KeyboardEvent): void {
+  if (mentionActive.value && mentionSuggestions.value.length > 0) {
+    handleMentionKeydown(e)
+    return
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    send()
+  }
+}
+
+function toggleReactionPicker(msgId: number): void {
+  reactionPickerMsgId.value = reactionPickerMsgId.value === msgId ? null : msgId
 }
 
 function handleUploadClick(): void {
   if (!props.connected || uploading.value) return
+  emit('uploadFile')
+}
+
+function handlePaste(e: ClipboardEvent): void {
+  if (!props.connected) return
+  const items = e.clipboardData?.items
+  if (!items) return
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault()
+      const blob = item.getAsFile()
+      if (!blob) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        pastedImage.value = { dataUrl: reader.result as string, blob }
+      }
+      reader.readAsDataURL(blob)
+      return
+    }
+  }
+}
+
+function cancelPastedImage(): void {
+  pastedImage.value = null
+}
+
+function sendPastedImage(): void {
+  if (!pastedImage.value) return
+  pastedImage.value = null
   emit('uploadFile')
 }
 
@@ -112,6 +305,30 @@ function onDragLeave(): void {
 function onDrop(e: DragEvent): void {
   e.preventDefault()
   dragging.value = false
+}
+
+function toggleSearch(): void {
+  searchOpen.value = !searchOpen.value
+  if (!searchOpen.value) {
+    searchQuery.value = ''
+    searchResults.value = []
+  }
+}
+
+function doSearch(): void {
+  if (!searchQuery.value.trim()) {
+    searchResults.value = []
+    return
+  }
+  const q = searchQuery.value.toLowerCase()
+  searchResults.value = visibleMessages.value
+    .filter(m => !m.deleted && !m.system && m.message.toLowerCase().includes(q))
+    .reverse()
+    .slice(0, 50)
+}
+
+function togglePinnedPanel(): void {
+  pinnedOpen.value = !pinnedOpen.value
 }
 
 function formatTime(ts: number): string {
@@ -131,6 +348,33 @@ function formatFileSize(bytes: number): string {
 function isImageFile(name: string): boolean {
   const ext = name.toLowerCase().split('.').pop() ?? ''
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)
+}
+
+function initials(name: string): string {
+  const first = name.trim()[0]
+  return first ? first.toUpperCase() : '?'
+}
+
+// Render message text with @mentions highlighted
+function renderMessage(msg: ChatMessage): string {
+  if (!msg.message) return ''
+  let text = msg.message
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  // Highlight @mentions
+  if (msg.mentions && msg.mentions.length > 0 && props.users) {
+    for (const uid of msg.mentions) {
+      const user = props.users.find(u => u.id === uid)
+      if (user) {
+        const token = '@' + user.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const isSelf = uid === props.myId
+        const cls = isSelf ? 'mention mention-self' : 'mention'
+        text = text.replace(new RegExp(token, 'g'), `<span class="${cls}">@${user.username}</span>`)
+      }
+    }
+  }
+  return text
 }
 </script>
 
@@ -152,41 +396,100 @@ function isImageFile(name: string): boolean {
       </div>
     </Transition>
 
-    <header class="border-b border-base-content/10 px-3 py-1.5 flex flex-col gap-1">
-      <div class="flex items-center gap-2">
+    <header class="border-b border-base-content/10 px-3 py-1.5 min-h-11 flex flex-col gap-1">
+      <div class="flex h-full items-center gap-2">
         <h2 class="text-sm font-semibold"># {{ selectedChannelName }}</h2>
+        <div class="ml-auto flex gap-1">
+          <button
+            v-if="pinnedMessages.length > 0"
+            class="btn btn-ghost btn-xs"
+            :class="pinnedOpen ? 'btn-active' : ''"
+            title="Pinned messages"
+            @click="togglePinnedPanel"
+          >
+            <Pin class="w-3.5 h-3.5" aria-hidden="true" />
+            <span class="text-[10px]">{{ pinnedMessages.length }}</span>
+          </button>
+          <button
+            class="btn btn-ghost btn-xs"
+            :class="searchOpen ? 'btn-active' : ''"
+            title="Search messages"
+            @click="toggleSearch"
+          >
+            <Search class="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
-      <div class="flex gap-1 overflow-x-auto">
-        <button
-          v-for="channel in channelTabs"
-          :key="channel.id"
-          class="btn btn-xs whitespace-nowrap relative"
-          :class="channel.id === selectedChannelId ? 'btn-soft btn-primary' : 'btn-ghost'"
-          @click="emit('selectChannel', channel.id)"
-        >
-          {{ channel.name }}
-          <span
-            v-if="unreadCounts[channel.id]"
-            class="badge badge-xs badge-error absolute -top-1.5 -right-1.5 min-w-[16px] h-4 text-[10px] font-bold"
-          >
-            {{ unreadCounts[channel.id] > 99 ? '99+' : unreadCounts[channel.id] }}
-          </span>
-        </button>
+      <!-- Search bar -->
+      <div v-if="searchOpen" class="flex gap-1 items-center">
+        <input
+          v-model="searchQuery"
+          type="text"
+          class="input input-xs input-bordered flex-1"
+          placeholder="Search messages..."
+          @input="doSearch"
+          @keydown.escape="toggleSearch"
+        />
+        <button class="btn btn-xs btn-ghost" @click="toggleSearch">Close</button>
       </div>
+
     </header>
 
-    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto px-3 py-1 space-y-0.5">
+    <!-- Search results panel -->
+    <div v-if="searchOpen && searchResults.length > 0" class="border-b border-base-content/10 max-h-[200px] overflow-y-auto bg-base-200/50">
+      <div
+        v-for="result in searchResults"
+        :key="result.msgId"
+        class="px-3 py-1 hover:bg-base-300 cursor-pointer text-sm"
+        @click="scrollToMessage(result.msgId); toggleSearch()"
+      >
+        <span class="text-xs font-semibold text-primary">{{ result.username }}</span>
+        <span class="text-[11px] opacity-40 ml-1">{{ formatTime(result.ts) }}</span>
+        <span class="ml-1 text-xs opacity-70 truncate">{{ result.message }}</span>
+      </div>
+    </div>
+
+    <!-- Pinned messages panel -->
+    <div v-if="pinnedOpen" class="border-b border-base-content/10 max-h-[200px] overflow-y-auto bg-base-200/50">
+      <div class="px-3 py-1 text-[11px] font-semibold opacity-50 uppercase tracking-wider">Pinned Messages</div>
+      <div
+        v-for="msg in pinnedMessages"
+        :key="msg.msgId"
+        class="px-3 py-1 hover:bg-base-300 cursor-pointer text-sm"
+        @click="scrollToMessage(msg.msgId); pinnedOpen = false"
+      >
+        <span class="text-xs font-semibold text-primary">{{ msg.username }}</span>
+        <span class="text-[11px] opacity-40 ml-1">{{ formatTime(msg.ts) }}</span>
+        <span class="ml-1 text-xs opacity-70 truncate">{{ msg.message }}</span>
+      </div>
+    </div>
+
+    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto px-3 py-1" :class="density === 'compact' ? 'space-y-0' : density === 'comfortable' ? 'space-y-2' : 'space-y-0.5'">
       <div v-if="!connected" class="text-sm opacity-40 text-center pt-6">Connect to a server to start chatting</div>
       <div v-else-if="visibleMessages.length === 0" class="text-sm opacity-40 text-center pt-6">No messages in this channel yet</div>
 
       <article
         v-for="msg in visibleMessages"
         :key="msg.id"
-        class="group py-1 px-1.5 rounded hover:bg-base-200 transition-colors relative"
+        :data-msg-id="msg.msgId"
+        class="group rounded hover:bg-base-200 transition-colors relative"
+        :class="[
+          msg.system ? '' : (density === 'compact' ? 'py-0.5 px-1' : density === 'comfortable' ? 'py-2 px-2' : 'py-1 px-1.5'),
+          isMentioned(msg) ? 'bg-warning/10 border-l-2 border-warning' : '',
+          msg.pinned ? 'border-l-2 border-info/40' : '',
+        ]"
       >
+        <!-- System message -->
+        <div v-if="msg.system" class="text-center py-1">
+          <span class="text-[11px] opacity-40 italic">{{ msg.message }}</span>
+        </div>
+
         <!-- Deleted message -->
-        <div v-if="msg.deleted" class="flex items-baseline gap-2">
+        <div v-else-if="msg.deleted" class="flex items-baseline gap-2">
+          <template v-if="density === 'comfortable'">
+            <span class="w-6 h-6 rounded-full bg-base-300 border border-base-content/20 text-[9px] font-mono flex items-center justify-center shrink-0">{{ initials(msg.username) }}</span>
+          </template>
           <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
           <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
           <span class="text-sm italic opacity-40">message deleted</span>
@@ -194,6 +497,13 @@ function isImageFile(name: string): boolean {
 
         <!-- Normal / edited message -->
         <template v-else>
+          <!-- Reply preview -->
+          <div v-if="msg.replyPreview" class="flex items-center gap-1.5 mb-0.5 pl-3 border-l-2 border-base-content/20 opacity-60 cursor-pointer text-[11px]" @click="scrollToMessage(msg.replyPreview.msg_id)">
+            <span class="font-semibold text-primary">{{ msg.replyPreview.username }}</span>
+            <span v-if="msg.replyPreview.deleted" class="italic">message deleted</span>
+            <span v-else class="truncate max-w-[300px]">{{ msg.replyPreview.message }}</span>
+          </div>
+
           <!-- Inline edit mode -->
           <div v-if="editingMsgId === msg.msgId" class="flex items-center gap-2">
             <input
@@ -210,44 +520,125 @@ function isImageFile(name: string): boolean {
           </div>
 
           <!-- Normal display -->
-          <div v-else class="flex items-baseline gap-2">
-            <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
-            <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
-            <span v-if="msg.message" class="text-sm break-words">{{ msg.message }}</span>
-            <span v-if="msg.edited" class="text-[10px] opacity-30 shrink-0">(edited)</span>
+          <div v-else>
+            <!-- Comfortable: avatar + name on separate line -->
+            <template v-if="density === 'comfortable'">
+              <div class="flex items-start gap-2">
+                <span class="w-6 h-6 rounded-full bg-base-300 border border-base-content/20 text-[9px] font-mono flex items-center justify-center shrink-0 mt-0.5">{{ initials(msg.username) }}</span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-xs font-semibold text-primary">{{ msg.username }}</span>
+                    <span class="text-[11px] opacity-40">{{ formatTime(msg.ts) }}</span>
+                    <span v-if="msg.edited" class="text-[10px] opacity-30">(edited)</span>
+                    <span v-if="msg.pinned" class="text-[10px] opacity-40 text-info" title="Pinned">pinned</span>
+                    <!-- Hover action icons -->
+                    <span
+                      class="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
+                    >
+                      <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
+                        <Smile class="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                      <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
+                        <Reply class="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                      <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
+                        <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                      <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
+                        <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    </span>
+                  </div>
+                  <p v-if="msg.message" class="text-sm break-words mt-0.5" v-html="renderMessage(msg)" />
+                </div>
+              </div>
+            </template>
 
-            <!-- Hover action icons -->
-            <span
-              v-if="canEdit(msg) || canDelete(msg)"
-              class="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
+            <!-- Compact: everything inline, no avatar -->
+            <template v-else-if="density === 'compact'">
+              <div class="flex items-baseline gap-1.5">
+                <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
+                <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
+                <span v-if="msg.message" class="text-xs break-words" v-html="renderMessage(msg)" />
+                <span v-if="msg.edited" class="text-[9px] opacity-30 shrink-0">(edited)</span>
+                <span
+                  class="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
+                >
+                  <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
+                    <Smile class="w-3 h-3" aria-hidden="true" />
+                  </button>
+                  <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
+                    <Reply class="w-3 h-3" aria-hidden="true" />
+                  </button>
+                  <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
+                    <Pencil class="w-3 h-3" aria-hidden="true" />
+                  </button>
+                  <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
+                    <Trash2 class="w-3 h-3" aria-hidden="true" />
+                  </button>
+                </span>
+              </div>
+            </template>
+
+            <!-- Default density -->
+            <template v-else>
+              <div class="flex items-baseline gap-2">
+                <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
+                <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
+                <span v-if="msg.message" class="text-sm break-words" v-html="renderMessage(msg)" />
+                <span v-if="msg.edited" class="text-[10px] opacity-30 shrink-0">(edited)</span>
+                <span v-if="msg.pinned" class="text-[10px] opacity-40 text-info shrink-0" title="Pinned">pinned</span>
+
+                <!-- Hover action icons -->
+                <span
+                  class="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
+                >
+                  <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
+                    <Smile class="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                  <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
+                    <Reply class="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                  <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
+                    <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                  <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
+                    <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                </span>
+              </div>
+            </template>
+          </div>
+
+          <!-- Reaction picker dropdown -->
+          <div v-if="reactionPickerMsgId === msg.msgId" class="flex gap-0.5 flex-wrap mt-1 p-1 bg-base-300 rounded-lg w-fit">
+            <button
+              v-for="emoji in commonEmojis"
+              :key="emoji"
+              class="btn btn-ghost btn-xs btn-square text-base"
+              @click="$emit('addReaction', msg.msgId, emoji); reactionPickerMsgId = null"
             >
-              <!-- Edit icon (pencil) -->
-              <button
-                v-if="canEdit(msg)"
-                class="btn btn-ghost btn-xs btn-square"
-                title="Edit message"
-                @click="startEdit(msg)"
-              >
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                </svg>
-              </button>
-              <!-- Delete icon (trash) -->
-              <button
-                v-if="canDelete(msg)"
-                class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error"
-                title="Delete message"
-                @click="confirmDelete(msg)"
-              >
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                </svg>
-              </button>
-            </span>
+              {{ emoji }}
+            </button>
+          </div>
+
+          <!-- Reactions display -->
+          <div v-if="msg.reactions && msg.reactions.length > 0" class="flex flex-wrap gap-1 mt-1" :class="density === 'comfortable' ? 'ml-8' : ''">
+            <button
+              v-for="rx in msg.reactions"
+              :key="rx.emoji"
+              class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] border transition-colors"
+              :class="rx.user_ids.includes(myId) ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-base-300 border-base-content/10 hover:bg-base-content/10'"
+              :title="rx.user_ids.map(id => users?.find(u => u.id === id)?.username ?? 'Unknown').join(', ')"
+              @click="rx.user_ids.includes(myId) ? $emit('removeReaction', msg.msgId, rx.emoji) : $emit('addReaction', msg.msgId, rx.emoji)"
+            >
+              <span>{{ rx.emoji }}</span>
+              <span class="font-mono">{{ rx.count }}</span>
+            </button>
           </div>
 
           <!-- File attachment -->
-          <div v-if="msg.fileUrl" class="mt-1">
+          <div v-if="msg.fileUrl" class="mt-1" :class="density === 'comfortable' ? 'ml-8' : ''">
             <!-- Image preview -->
             <a
               v-if="msg.fileName && isImageFile(msg.fileName)"
@@ -272,9 +663,7 @@ function isImageFile(name: string): boolean {
               target="_blank"
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-base-300 hover:bg-base-content/10 transition-colors text-sm"
             >
-              <svg class="w-4 h-4 opacity-60 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
-              </svg>
+              <FileText class="w-4 h-4 opacity-60 shrink-0" aria-hidden="true" />
               <span class="truncate max-w-[200px]">{{ msg.fileName }}</span>
               <span class="text-[11px] opacity-50 shrink-0">({{ formatFileSize(msg.fileSize ?? 0) }})</span>
             </a>
@@ -287,6 +676,7 @@ function isImageFile(name: string): boolean {
             target="_blank"
             rel="noopener noreferrer"
             class="mt-2 block max-w-[400px] rounded-lg border border-base-content/10 bg-base-300 overflow-hidden hover:border-primary/30 transition-colors no-underline"
+            :class="density === 'comfortable' ? 'ml-8' : ''"
           >
             <img
               v-if="msg.linkPreview.image"
@@ -305,25 +695,63 @@ function isImageFile(name: string): boolean {
       </article>
     </div>
 
-    <footer class="border-t border-base-content/10 p-2 flex gap-2">
+    <!-- Typing indicator -->
+    <div v-if="typingText" class="px-3 py-0.5 text-[11px] opacity-50 italic border-t border-base-content/5">
+      {{ typingText }}
+    </div>
+
+    <!-- Pasted image preview -->
+    <div v-if="pastedImage" class="border-t border-base-content/10 px-3 py-2 bg-base-200/50 flex items-center gap-3">
+      <img :src="pastedImage.dataUrl" alt="Pasted image" class="max-w-[120px] max-h-[80px] rounded border border-base-content/10 object-contain" />
+      <div class="flex gap-1.5">
+        <button class="btn btn-xs btn-primary" @click="sendPastedImage">Send</button>
+        <button class="btn btn-xs btn-ghost" @click="cancelPastedImage">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Reply preview bar -->
+    <div v-if="replyingTo" class="px-3 py-1.5 bg-base-200/50 border-t border-base-content/10 flex items-center gap-2 text-xs">
+      <span class="opacity-50">Replying to</span>
+      <span class="font-semibold text-primary">{{ replyingTo.username }}</span>
+      <span class="opacity-50 truncate max-w-[200px]">{{ replyingTo.message }}</span>
+      <button class="btn btn-ghost btn-xs btn-square ml-auto" @click="cancelReply">
+        <X class="w-3 h-3" aria-hidden="true" />
+      </button>
+    </div>
+
+    <footer class="border-t border-base-content/10 p-2 flex gap-2 relative">
+      <!-- @mention autocomplete popup -->
+      <div v-if="mentionActive && mentionSuggestions.length > 0" class="absolute bottom-full left-0 right-0 mx-2 mb-1 bg-base-300 rounded-lg border border-base-content/10 shadow-lg max-h-[200px] overflow-y-auto z-40">
+        <button
+          v-for="(user, idx) in mentionSuggestions"
+          :key="user.id"
+          class="block w-full text-left px-3 py-1.5 text-sm hover:bg-base-content/10 transition-colors"
+          :class="idx === mentionIndex ? 'bg-primary/10 text-primary' : ''"
+          @click="selectMention(user.username)"
+        >
+          @{{ user.username }}
+        </button>
+      </div>
+
       <button
         class="btn btn-sm btn-ghost btn-square shrink-0"
         :disabled="!connected || uploading"
         title="Upload file"
         @click="handleUploadClick"
       >
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
+        <Plus class="w-4 h-4" aria-hidden="true" />
       </button>
       <input
+        ref="inputEl"
         v-model="input"
         type="text"
         maxlength="500"
         class="input input-sm input-bordered w-full"
         :placeholder="connected ? `Message #${selectedChannelName}` : 'Disconnected'"
         :disabled="!connected"
-        @keydown.enter.prevent="send"
+        @keydown="handleKeydown"
+        @input="handleInput"
+        @paste="handlePaste"
       />
     </footer>
   </section>
@@ -337,5 +765,27 @@ function isImageFile(name: string): boolean {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+:deep(.mention) {
+  color: oklch(var(--p));
+  font-weight: 600;
+  background: oklch(var(--p) / 0.1);
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+:deep(.mention-self) {
+  background: oklch(var(--wa) / 0.15);
+  color: oklch(var(--wa));
+}
+
+.highlight-flash {
+  animation: flash-highlight 1.5s ease-out;
+}
+
+@keyframes flash-highlight {
+  0% { background-color: oklch(var(--p) / 0.2); }
+  100% { background-color: transparent; }
 }
 </style>

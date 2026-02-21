@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`bken` is a LAN voice chat application. The server is a pure-Go WebTransport (QUIC/HTTP3) relay; the client is a Wails v2 desktop app (Go + Vue/Svelte frontend) that captures microphone audio, encodes it with Opus, and streams it over WebTransport.
+`bken` is a LAN voice chat application. The server is a pure-Go WebSocket signaling server; the client is a Wails v2 desktop app (Go + Vue 3 frontend) that captures microphone audio, encodes it with Opus, and streams it peer-to-peer over WebRTC.
 
 ## Commands
 
@@ -30,35 +30,38 @@ cd client && wails build -tags webkit2_41
 cd client/frontend && bun run build
 ```
 
-The server accepts a `-addr` flag (default `:4433`).
+The server accepts a `-addr` flag (default `:8443`).
 
 ## Architecture
 
 ### Wire protocol
 
-Every connection uses a single WebTransport session over QUIC:
+Every connection uses WebSocket over TLS (`/ws` on port 8443):
 
-1. **Control stream** — reliable, bidirectional, newline-delimited JSON. Client opens it and immediately sends `{"type":"join","username":"..."}`. Server responds with `user_list`, then pushes `user_joined` / `user_left` as peers connect.
-2. **Voice datagrams** — unreliable UDP-like. Each datagram is `[senderID: uint16 BE][seq: uint16 BE][opus_payload]`. The server overwrites `senderID` before fan-out to prevent spoofing, then broadcasts to all other sessions.
+1. **Control messages** — reliable, bidirectional, newline-delimited JSON. Client connects and immediately sends `{"type":"join","username":"..."}`. Server responds with `user_list` (includes channel list and ICE server config), then pushes events: `user_joined`, `user_left`, `chat`, `edit_message`, `delete_message`, `create_channel`, `rename_channel`, `delete_channel`, `webrtc_offer`, `webrtc_answer`, `webrtc_ice`, `kick`, `move_user`, `reaction`, `typing`, and more.
+2. **Voice audio** — peer-to-peer WebRTC (`pion/webrtc/v4`). The server relays only WebRTC signaling (offer/answer/ICE candidates); Opus audio flows directly between clients over DTLS-SRTP.
 
 ### Server (`server/`)
 
-- `server.go` — WebTransport upgrade, single HTTP route `/`
-- `client.go` — per-session goroutine: accepts control stream → join handshake → `readDatagrams` goroutine → control read loop until disconnect; fires `broadcastUserJoined` / `broadcastUserLeft`
-- `room.go` — `Room`: thread-safe client registry; `Broadcast` fans datagrams out under `RLock`
-- `tls.go` — generates a fresh self-signed ECDSA cert on every start; fingerprint is logged for debugging. Client uses `InsecureSkipVerify: true`.
-- `metrics.go` — logs datagrams/bytes every 5 s (resets counters each tick); silent when room is empty
+- `server.go` — HTTPS + WebSocket upgrade (`gorilla/websocket`), HTTP routing (`/ws` for signaling, `/` for health check)
+- `client.go` — per-connection goroutine: join handshake, control message read loop, WebRTC signaling relay, chat/channel/admin message handling; fires `broadcastUserJoined` / `broadcastUserLeft`
+- `room.go` — `Room`: thread-safe client registry, channel state, bounded message store, reaction tracking, role-based access control (OWNER > ADMIN > MODERATOR > USER), rate limiting, circuit breaker for slow clients
+- `tls.go` — generates a fresh self-signed ECDSA cert on every start; fingerprint is logged for debugging
+- `api.go` — REST API (Echo): health, settings, channels CRUD, file upload/download, recordings list/download, audit log, ban management
+- `recording.go` — server-side voice recording to OGG/Opus files (max 2 hours)
+- `metrics.go` — periodic connection and message counter logging
 
 No CGO. Alpine Docker build.
 
 ### Client (`client/`)
 
 **Go layer:**
-- `transport.go` — `Transport`: dials WebTransport, opens control stream, sends join, reads control messages → fires `OnUserList` / `OnUserJoined` / `OnUserLeft` callbacks; `SendAudio` builds datagrams; `StartReceiving` pumps incoming datagrams to a playback channel
-- `audio.go` — `AudioEngine`: PortAudio capture (48 kHz, mono, 960-sample / 20 ms frames) → Opus VoIP encode (32 kbps) → `CaptureOut` chan; `PlaybackIn` chan → Opus decode → PortAudio playback; `testMode` routes capture directly to playback for loopback testing
-- `app.go` — `App`: Wails-bound methods (`Connect`, `Disconnect`, `GetInputDevices`, etc.); wires `Transport` callbacks to `runtime.EventsEmit` so the frontend sees `user:list`, `user:joined`, `user:left`
+- `transport.go` — dials WebSocket (`gorilla/websocket`), handles join handshake, manages per-peer WebRTC connections via `pion/webrtc/v4`, fires `runtime.EventsEmit` callbacks so the frontend sees `user:list`, `user:joined`, `user:left`, chat events, etc.
+- `audio.go` — PortAudio capture (48 kHz, mono, 960-sample / 20 ms frames) → Opus VoIP encode → WebRTC track; remote WebRTC tracks → Opus decode → jitter buffer → PortAudio playback
+- `app.go` — `App`: Wails-bound methods (`Connect`, `Disconnect`, `GetInputDevices`, `SetMuted`, `SetDeafened`, etc.); wires transport callbacks to frontend events
+- `interfaces.go` — `Transporter` interface covering all client operations
 
-**Frontend** (`client/frontend/src/`): Vue (Vite + Tailwind + DaisyUI). Wails runtime bindings are auto-generated under `wailsjs/` — do not edit manually; regenerate with `wails generate module` after changing Go method signatures.
+**Frontend** (`client/frontend/src/`): Vue 3 (Vite + Tailwind + DaisyUI). Wails runtime bindings are auto-generated under `wailsjs/` — do not edit manually; regenerate with `wails generate module` after changing Go method signatures.
 
 ### Docker
 

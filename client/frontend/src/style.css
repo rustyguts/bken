@@ -17,6 +17,11 @@
     height: 100vh;
 }
 
+/* ── Theme transition ─────────────────────────────────────────────────────── */
+html {
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
 /* ── View transitions ──────────────────────────────────────────────────────── */
 
 /* Crossfade: connect ↔ disconnect, settings toggle */

@@ -812,251 +812,6 @@ func TestProcessControlMoveUserZeroID(t *testing.T) {
 	}
 }
 
-// --- datagram cache ---
-
-func TestCacheDatagram(t *testing.T) {
-	c := newTestClient("alice")
-	data := []byte{0, 1, 0, 42, 0xAA, 0xBB}
-
-	c.cacheDatagram(42, data)
-	got := c.getCachedDatagram(42)
-	if got == nil {
-		t.Fatal("expected cached datagram, got nil")
-	}
-	if string(got) != string(data) {
-		t.Errorf("cached data = %x, want %x", got, data)
-	}
-}
-
-func TestCacheDatagramEvictsOldEntry(t *testing.T) {
-	c := newTestClient("alice")
-	data1 := []byte{0, 1, 0, 5, 0xAA}
-	data2 := []byte{0, 1, 0, 5, 0xBB, 0xCC}
-
-	c.cacheDatagram(5, data1)
-	// seq 5 + dgramCacheSize wraps to the same slot.
-	c.cacheDatagram(5+dgramCacheSize, data2)
-
-	// Old entry should be gone.
-	if got := c.getCachedDatagram(5); got != nil {
-		t.Error("old entry should have been evicted")
-	}
-	// New entry should be present.
-	got := c.getCachedDatagram(5 + dgramCacheSize)
-	if got == nil {
-		t.Fatal("new entry should be present")
-	}
-	if string(got) != string(data2) {
-		t.Errorf("cached data = %x, want %x", got, data2)
-	}
-}
-
-func TestCacheDatagramMiss(t *testing.T) {
-	c := newTestClient("alice")
-	if got := c.getCachedDatagram(99); got != nil {
-		t.Errorf("expected nil for uncached seq, got %x", got)
-	}
-}
-
-func TestCacheDatagramCopiesData(t *testing.T) {
-	c := newTestClient("alice")
-	data := []byte{0, 1, 0, 1, 0xAA, 0xBB}
-	c.cacheDatagram(1, data)
-
-	// Mutate the original — cached copy should be unaffected.
-	data[4] = 0xFF
-	got := c.getCachedDatagram(1)
-	if got[4] != 0xAA {
-		t.Error("cache should store an independent copy of the data")
-	}
-}
-
-// --- processControl: nack ---
-
-func TestProcessControlNACKRetransmits(t *testing.T) {
-	room := NewRoom()
-	sender := newTestClient("alice")
-	receiver := newTestClient("bob")
-	room.AddClient(sender)
-	room.AddClient(receiver)
-	sender.channelID.Store(1)
-	receiver.channelID.Store(1)
-
-	// Cache some datagrams on the sender.
-	for seq := uint16(10); seq < 15; seq++ {
-		data := make([]byte, 6)
-		data[0], data[1] = 0, byte(sender.ID)
-		data[2], data[3] = 0, byte(seq)
-		data[4], data[5] = 0xAA, byte(seq)
-		sender.cacheDatagram(seq, data)
-	}
-
-	// Bob sends a NACK for seq 11 and 13.
-	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{11, 13}}, receiver, room)
-
-	// Bob should have received 2 retransmitted datagrams.
-	ms := receiver.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count != 2 {
-		t.Fatalf("expected 2 retransmitted datagrams, got %d", count)
-	}
-}
-
-func TestProcessControlNACKMissingSender(t *testing.T) {
-	room := NewRoom()
-	receiver := newTestClient("bob")
-	room.AddClient(receiver)
-	receiver.channelID.Store(1)
-
-	// NACK for a sender that doesn't exist — should not panic.
-	processControl(ControlMsg{Type: "nack", ID: 9999, Seqs: []uint16{1}}, receiver, room)
-
-	ms := receiver.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count != 0 {
-		t.Errorf("expected no retransmissions for missing sender, got %d", count)
-	}
-}
-
-func TestProcessControlNACKDifferentChannel(t *testing.T) {
-	room := NewRoom()
-	sender := newTestClient("alice")
-	receiver := newTestClient("bob")
-	room.AddClient(sender)
-	room.AddClient(receiver)
-	sender.channelID.Store(1)
-	receiver.channelID.Store(2) // different channel
-
-	sender.cacheDatagram(1, []byte{0, 0, 0, 1, 0xAA})
-	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{1}}, receiver, room)
-
-	ms := receiver.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count != 0 {
-		t.Errorf("NACK across channels should be rejected, got %d retransmissions", count)
-	}
-}
-
-func TestProcessControlNACKSenderInLobby(t *testing.T) {
-	room := NewRoom()
-	sender := newTestClient("alice")
-	receiver := newTestClient("bob")
-	room.AddClient(sender)
-	room.AddClient(receiver)
-	sender.channelID.Store(0) // lobby
-	receiver.channelID.Store(0)
-
-	sender.cacheDatagram(1, []byte{0, 0, 0, 1, 0xAA})
-	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{1}}, receiver, room)
-
-	ms := receiver.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count != 0 {
-		t.Errorf("NACK in lobby should be rejected, got %d retransmissions", count)
-	}
-}
-
-func TestProcessControlNACKCacheMiss(t *testing.T) {
-	room := NewRoom()
-	sender := newTestClient("alice")
-	receiver := newTestClient("bob")
-	room.AddClient(sender)
-	room.AddClient(receiver)
-	sender.channelID.Store(1)
-	receiver.channelID.Store(1)
-
-	// NACK for a seq that was never cached.
-	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{99}}, receiver, room)
-
-	ms := receiver.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count != 0 {
-		t.Errorf("expected no retransmissions for cache miss, got %d", count)
-	}
-}
-
-func TestProcessControlNACKTruncatesLargeRequest(t *testing.T) {
-	room := NewRoom()
-	sender := newTestClient("alice")
-	receiver := newTestClient("bob")
-	room.AddClient(sender)
-	room.AddClient(receiver)
-	sender.channelID.Store(1)
-	receiver.channelID.Store(1)
-
-	// Cache 20 datagrams.
-	for seq := uint16(0); seq < 20; seq++ {
-		data := make([]byte, 5)
-		data[2], data[3] = byte(seq>>8), byte(seq)
-		sender.cacheDatagram(seq, data)
-	}
-
-	// Send a NACK with more than maxNACKSeqs entries.
-	seqs := make([]uint16, 20)
-	for i := range seqs {
-		seqs[i] = uint16(i)
-	}
-	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: seqs}, receiver, room)
-
-	ms := receiver.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count > maxNACKSeqs {
-		t.Errorf("expected at most %d retransmissions, got %d", maxNACKSeqs, count)
-	}
-}
-
-func TestProcessControlNACKSelfIgnored(t *testing.T) {
-	room := NewRoom()
-	client, _ := newCtrlClient("alice")
-	room.AddClient(client)
-	client.channelID.Store(1)
-
-	client.cacheDatagram(1, []byte{0, 0, 0, 1, 0xAA})
-	// NACKing your own ID should be ignored.
-	processControl(ControlMsg{Type: "nack", ID: client.ID, Seqs: []uint16{1}}, client, room)
-
-	ms := client.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count != 0 {
-		t.Errorf("self-NACK should be ignored, got %d retransmissions", count)
-	}
-}
-
-func TestProcessControlNACKEmptySeqs(t *testing.T) {
-	room := NewRoom()
-	sender := newTestClient("alice")
-	receiver := newTestClient("bob")
-	room.AddClient(sender)
-	room.AddClient(receiver)
-	sender.channelID.Store(1)
-	receiver.channelID.Store(1)
-
-	// Empty seqs list should be silently ignored.
-	processControl(ControlMsg{Type: "nack", ID: sender.ID, Seqs: []uint16{}}, receiver, room)
-
-	ms := receiver.session.(*mockSender)
-	ms.mu.Lock()
-	count := len(ms.received)
-	ms.mu.Unlock()
-	if count != 0 {
-		t.Errorf("NACK with empty seqs should be ignored, got %d retransmissions", count)
-	}
-}
-
 // --- processControl: unknown type ---
 
 func TestProcessControlUnknownTypeIsIgnored(t *testing.T) {
@@ -1535,4 +1290,381 @@ func TestRoomMsgOwnerEviction(t *testing.T) {
 	if _, ok := room.GetMsgOwner(maxMsgOwners + 1); !ok {
 		t.Error("msg_id maxMsgOwners+1 should still exist")
 	}
+}
+
+// --- processControl: video_state ---
+
+func TestProcessControlVideoStateStartBroadcasts(t *testing.T) {
+	room := NewRoom()
+	sender, senderBuf := newCtrlClient("alice")
+	receiver, receiverBuf := newCtrlClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+
+	active := true
+	processControl(ControlMsg{Type: "video_state", VideoActive: &active}, sender, room)
+
+	// Both sender and receiver should get the broadcast.
+	for _, tc := range []struct {
+		name string
+		buf  *bytes.Buffer
+	}{
+		{"sender", senderBuf},
+		{"receiver", receiverBuf},
+	} {
+		got := decodeControl(t, tc.buf)
+		if got.Type != "video_state" {
+			t.Errorf("%s: type: got %q, want %q", tc.name, got.Type, "video_state")
+		}
+		if got.ID != sender.ID {
+			t.Errorf("%s: id: got %d, want %d (server should stamp sender ID)", tc.name, got.ID, sender.ID)
+		}
+		if got.VideoActive == nil || !*got.VideoActive {
+			t.Errorf("%s: video_active should be true", tc.name)
+		}
+	}
+}
+
+func TestProcessControlVideoStateStopBroadcasts(t *testing.T) {
+	room := NewRoom()
+	sender, _ := newCtrlClient("alice")
+	receiver, receiverBuf := newCtrlClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+
+	inactive := false
+	processControl(ControlMsg{Type: "video_state", VideoActive: &inactive}, sender, room)
+
+	got := decodeControl(t, receiverBuf)
+	if got.Type != "video_state" {
+		t.Errorf("type: got %q, want %q", got.Type, "video_state")
+	}
+	if got.VideoActive == nil || *got.VideoActive {
+		t.Error("video_active should be false")
+	}
+}
+
+func TestProcessControlVideoStateScreenShare(t *testing.T) {
+	room := NewRoom()
+	sender, _ := newCtrlClient("alice")
+	receiver, receiverBuf := newCtrlClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+
+	active := true
+	screen := true
+	processControl(ControlMsg{Type: "video_state", VideoActive: &active, ScreenShare: &screen}, sender, room)
+
+	got := decodeControl(t, receiverBuf)
+	if got.Type != "video_state" {
+		t.Errorf("type: got %q, want %q", got.Type, "video_state")
+	}
+	if got.VideoActive == nil || !*got.VideoActive {
+		t.Error("video_active should be true")
+	}
+	if got.ScreenShare == nil || !*got.ScreenShare {
+		t.Error("screen_share should be true")
+	}
+	if got.ID != sender.ID {
+		t.Errorf("id: got %d, want %d (server should stamp sender ID)", got.ID, sender.ID)
+	}
+}
+
+// --- processControl: join_channel with user limit ---
+
+func TestProcessControlJoinChannelFullRejected(t *testing.T) {
+	room := NewRoom()
+	room.SetChannels([]ChannelInfo{{ID: 5, Name: "Limited", MaxUsers: 1}})
+
+	alice, _ := newCtrlClient("alice")
+	bob, bobBuf := newCtrlClient("bob")
+	room.AddClient(alice)
+	room.AddClient(bob)
+
+	// Alice joins channel 5 — should succeed.
+	processControl(ControlMsg{Type: "join_channel", ChannelID: 5}, alice, room)
+	if alice.channelID.Load() != 5 {
+		t.Fatalf("alice should be in channel 5, got %d", alice.channelID.Load())
+	}
+
+	// Drain bob's user_channel broadcast from alice's join.
+	_ = decodeControl(t, bobBuf)
+
+	// Bob tries to join — channel is full (max_users=1).
+	processControl(ControlMsg{Type: "join_channel", ChannelID: 5}, bob, room)
+
+	// Bob should NOT be moved.
+	if bob.channelID.Load() != 0 {
+		t.Errorf("bob should remain in lobby (channel 0), got %d", bob.channelID.Load())
+	}
+
+	// Bob should receive an error message.
+	got := decodeControl(t, bobBuf)
+	if got.Type != "error" {
+		t.Errorf("expected error message, got type %q", got.Type)
+	}
+	if got.Error != "Channel is full" {
+		t.Errorf("error message: got %q, want %q", got.Error, "Channel is full")
+	}
+}
+
+func TestProcessControlJoinChannelLobbyAlwaysAllowed(t *testing.T) {
+	room := NewRoom()
+	// Even if "channel 0" somehow had a max, joining lobby should always work.
+	alice, _ := newCtrlClient("alice")
+	room.AddClient(alice)
+	alice.channelID.Store(5)
+
+	processControl(ControlMsg{Type: "join_channel", ChannelID: 0}, alice, room)
+	if alice.channelID.Load() != 0 {
+		t.Errorf("should be able to leave to lobby, got channel %d", alice.channelID.Load())
+	}
+}
+
+func TestProcessControlSetChannelLimitByOwner(t *testing.T) {
+	room := NewRoom()
+	room.SetChannels([]ChannelInfo{{ID: 5, Name: "General"}, {ID: 6, Name: "Music"}})
+	room.SetOnRefreshChannels(func() ([]ChannelInfo, error) {
+		return room.GetChannelList(), nil
+	})
+
+	owner, _ := newCtrlClient("alice")
+	room.AddClient(owner)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "set_channel_limit", ChannelID: 5, MaxUsers: 10}, owner, room)
+
+	if max := room.GetChannelMaxUsers(5); max != 10 {
+		t.Errorf("channel 5 max_users: got %d, want 10", max)
+	}
+}
+
+func TestProcessControlSetChannelLimitByNonOwner(t *testing.T) {
+	room := NewRoom()
+	room.SetChannels([]ChannelInfo{{ID: 5, Name: "General"}})
+
+	owner, _ := newCtrlClient("alice")
+	attacker, _ := newCtrlClient("eve")
+	room.AddClient(owner)
+	room.AddClient(attacker)
+	room.ClaimOwnership(owner.ID)
+
+	processControl(ControlMsg{Type: "set_channel_limit", ChannelID: 5, MaxUsers: 10}, attacker, room)
+
+	if max := room.GetChannelMaxUsers(5); max != 0 {
+		t.Errorf("non-owner should not be able to set channel limit, got max_users=%d", max)
+	}
+}
+
+func TestRoomCanJoinChannelUnlimited(t *testing.T) {
+	room := NewRoom()
+	room.SetChannels([]ChannelInfo{{ID: 5, Name: "General"}})
+	// No limit set — always allowed.
+	if !room.CanJoinChannel(5) {
+		t.Error("should be able to join unlimited channel")
+	}
+}
+
+func TestRoomChannelUserCount(t *testing.T) {
+	room := NewRoom()
+	a, _ := newCtrlClient("alice")
+	b, _ := newCtrlClient("bob")
+	room.AddClient(a)
+	room.AddClient(b)
+	a.channelID.Store(5)
+	b.channelID.Store(5)
+
+	if count := room.ChannelUserCount(5); count != 2 {
+		t.Errorf("ChannelUserCount(5): got %d, want 2", count)
+	}
+	if count := room.ChannelUserCount(0); count != 0 {
+		t.Errorf("ChannelUserCount(0): got %d, want 0", count)
+	}
+}
+
+func TestProcessControlVideoStateSpoofedIDReplaced(t *testing.T) {
+	room := NewRoom()
+	sender, _ := newCtrlClient("alice")
+	receiver, receiverBuf := newCtrlClient("bob")
+	room.AddClient(sender)
+	room.AddClient(receiver)
+
+	// Attacker tries to set a different ID — server should overwrite with sender's ID.
+	active := true
+	processControl(ControlMsg{Type: "video_state", ID: 9999, VideoActive: &active}, sender, room)
+
+	got := decodeControl(t, receiverBuf)
+	if got.ID != sender.ID {
+		t.Errorf("server should stamp authoritative sender ID: got %d, want %d", got.ID, sender.ID)
+	}
+}
+
+// --- Phase 7: Simulcast / Video Quality tests ---
+
+func TestProcessControlVideoStateIncludesLayers(t *testing.T) {
+	room := NewRoom()
+
+	sender, _ := newCtrlClient("alice")
+	sender.ID = 1
+	room.AddClient(sender)
+
+	receiver, receiverBuf := newCtrlClient("bob")
+	receiver.ID = 2
+	room.AddClient(receiver)
+
+	active := true
+	processControl(ControlMsg{Type: "video_state", VideoActive: &active}, sender, room)
+
+	got := decodeControl(t, receiverBuf)
+	if got.Type != "video_state" {
+		t.Fatalf("expected video_state, got %q", got.Type)
+	}
+	if len(got.VideoLayers) != 3 {
+		t.Fatalf("expected 3 simulcast layers, got %d", len(got.VideoLayers))
+	}
+
+	// Verify layers are high, medium, low.
+	qualities := make(map[string]bool)
+	for _, l := range got.VideoLayers {
+		qualities[l.Quality] = true
+		if l.Width <= 0 || l.Height <= 0 || l.Bitrate <= 0 {
+			t.Errorf("layer %q has invalid dimensions: %dx%d @ %dkbps", l.Quality, l.Width, l.Height, l.Bitrate)
+		}
+	}
+	for _, q := range []string{"high", "medium", "low"} {
+		if !qualities[q] {
+			t.Errorf("missing %q layer", q)
+		}
+	}
+}
+
+func TestProcessControlVideoStateStopNoLayers(t *testing.T) {
+	room := NewRoom()
+
+	sender, _ := newCtrlClient("alice")
+	sender.ID = 1
+	room.AddClient(sender)
+
+	receiver, receiverBuf := newCtrlClient("bob")
+	receiver.ID = 2
+	room.AddClient(receiver)
+
+	active := false
+	processControl(ControlMsg{Type: "video_state", VideoActive: &active}, sender, room)
+
+	got := decodeControl(t, receiverBuf)
+	if len(got.VideoLayers) != 0 {
+		t.Errorf("stop video should not include layers, got %d", len(got.VideoLayers))
+	}
+}
+
+func TestProcessControlSetVideoQuality(t *testing.T) {
+	room := NewRoom()
+
+	receiver, _ := newCtrlClient("alice")
+	receiver.ID = 1
+	room.AddClient(receiver)
+
+	target, targetBuf := newCtrlClient("bob")
+	target.ID = 2
+	room.AddClient(target)
+
+	processControl(ControlMsg{Type: "set_video_quality", TargetID: 2, VideoQuality: "medium"}, receiver, room)
+
+	got := decodeControl(t, targetBuf)
+	if got.Type != "set_video_quality" {
+		t.Fatalf("expected set_video_quality, got %q", got.Type)
+	}
+	if got.ID != 1 {
+		t.Errorf("expected requesting user ID 1, got %d", got.ID)
+	}
+	if got.VideoQuality != "medium" {
+		t.Errorf("expected quality 'medium', got %q", got.VideoQuality)
+	}
+}
+
+func TestProcessControlSetVideoQualityInvalid(t *testing.T) {
+	room := NewRoom()
+
+	client1, _ := newCtrlClient("alice")
+	client1.ID = 1
+	room.AddClient(client1)
+
+	target, targetBuf := newCtrlClient("bob")
+	target.ID = 2
+	room.AddClient(target)
+
+	// Invalid quality should be silently dropped.
+	processControl(ControlMsg{Type: "set_video_quality", TargetID: 2, VideoQuality: "ultra"}, client1, room)
+
+	if targetBuf.Len() > 0 {
+		t.Error("invalid quality should not forward a message to the target")
+	}
+}
+
+func TestProcessControlSetVideoQualityNoTarget(t *testing.T) {
+	room := NewRoom()
+
+	client1, _ := newCtrlClient("alice")
+	client1.ID = 1
+	room.AddClient(client1)
+
+	// Missing target ID should be silently dropped.
+	processControl(ControlMsg{Type: "set_video_quality", TargetID: 0, VideoQuality: "high"}, client1, room)
+}
+
+func TestDefaultVideoLayers(t *testing.T) {
+	layers := DefaultVideoLayers()
+	if len(layers) != 3 {
+		t.Fatalf("expected 3 layers, got %d", len(layers))
+	}
+
+	// Verify descending resolution order.
+	for i := 1; i < len(layers); i++ {
+		if layers[i].Width >= layers[i-1].Width {
+			t.Errorf("layer %d width (%d) should be < layer %d width (%d)",
+				i, layers[i].Width, i-1, layers[i-1].Width)
+		}
+		if layers[i].Bitrate >= layers[i-1].Bitrate {
+			t.Errorf("layer %d bitrate (%d) should be < layer %d bitrate (%d)",
+				i, layers[i].Bitrate, i-1, layers[i-1].Bitrate)
+		}
+	}
+}
+
+func TestSendControlToSpecificClient(t *testing.T) {
+	room := NewRoom()
+
+	client1, _ := newCtrlClient("alice")
+	client1.ID = 1
+	room.AddClient(client1)
+
+	client2, buf2 := newCtrlClient("bob")
+	client2.ID = 2
+	room.AddClient(client2)
+
+	client3, buf3 := newCtrlClient("charlie")
+	client3.ID = 3
+	room.AddClient(client3)
+
+	// Send to client2 only.
+	room.SendControlTo(2, ControlMsg{Type: "test", Message: "hello"})
+
+	if buf2.Len() == 0 {
+		t.Error("client2 should have received the message")
+	}
+	if buf3.Len() > 0 {
+		t.Error("client3 should NOT have received the message")
+	}
+
+	got := decodeControl(t, buf2)
+	if got.Message != "hello" {
+		t.Errorf("expected message 'hello', got %q", got.Message)
+	}
+}
+
+func TestSendControlToNonExistent(t *testing.T) {
+	room := NewRoom()
+	// Should not panic.
+	room.SendControlTo(999, ControlMsg{Type: "test"})
 }

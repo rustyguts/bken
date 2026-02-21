@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bken.fullname" . }}
+  labels:
+    {{- include "bken.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.wsPort }}
+      targetPort: ws
+      protocol: TCP
+      name: ws
+    - port: {{ .Values.service.wsPort }}
+      targetPort: ws-udp
+      protocol: UDP
+      name: ws-udp
+    - port: {{ .Values.service.apiPort }}
+      targetPort: api
+      protocol: TCP
+      name: api
+  selector:
+    {{- include "bken.selectorLabels" . | nindent 4 }}

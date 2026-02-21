@@ -22,9 +22,12 @@ type Config struct {
 	AECEnabled     bool          `json:"aec_enabled"`
 	VADEnabled     bool          `json:"vad_enabled"`
 	VADThreshold   int           `json:"vad_threshold"`
-	PTTEnabled     bool          `json:"ptt_enabled"`
-	PTTKey         string        `json:"ptt_key"` // keyboard key code (e.g. "Space", "Backquote")
-	Servers        []ServerEntry `json:"servers"`
+	PTTEnabled         bool          `json:"ptt_enabled"`
+	PTTKey             string        `json:"ptt_key"` // keyboard key code (e.g. "Space", "Backquote")
+	NoiseGateEnabled   bool          `json:"noise_gate_enabled"`
+	NoiseGateThreshold int           `json:"noise_gate_threshold"`
+	NotificationVolume float64       `json:"notification_volume"` // 0.0-1.0
+	Servers            []ServerEntry `json:"servers"`
 }
 
 // ServerEntry is a saved server shown in the server browser.
@@ -45,12 +48,15 @@ func Default() Config {
 		AGCLevel:       50,
 		VADEnabled:     true,
 		VADThreshold:   30,
-		PTTEnabled:     false,
-		PTTKey:         "Backquote",
-		InputDeviceID:  -1,
-		OutputDeviceID: -1,
+		PTTEnabled:         false,
+		PTTKey:             "Backquote",
+		NoiseGateEnabled:   false,
+		NoiseGateThreshold: 20,
+		NotificationVolume: 1.0,
+		InputDeviceID:      -1,
+		OutputDeviceID:     -1,
 		Servers: []ServerEntry{
-			{Name: "Local Dev", Addr: "localhost:4433"},
+			{Name: "Local Dev", Addr: "localhost:8443"},
 		},
 	}
 }

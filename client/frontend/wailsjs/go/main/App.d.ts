@@ -3,6 +3,8 @@
 import {main} from '../models';
 import {config} from '../models';
 
+export function AddReaction(arg1:number,arg2:string):Promise<string>;
+
 export function ApplyConfig():Promise<void>;
 
 export function Connect(arg1:string,arg2:string):Promise<string>;
@@ -27,13 +29,19 @@ export function GetConfig():Promise<config.Config>;
 
 export function GetInputDevices():Promise<Array<main.AudioDevice>>;
 
+export function GetInputLevel():Promise<number>;
+
 export function GetMetrics():Promise<main.Metrics>;
 
 export function GetMutedUsers():Promise<Array<number>>;
 
+export function GetNotificationVolume():Promise<number>;
+
 export function GetOutputDevices():Promise<Array<main.AudioDevice>>;
 
 export function GetStartupAddr():Promise<string>;
+
+export function GetUserVolume(arg1:number):Promise<number>;
 
 export function IsConnected():Promise<boolean>;
 
@@ -49,17 +57,23 @@ export function PTTKeyDown():Promise<void>;
 
 export function PTTKeyUp():Promise<void>;
 
+export function RemoveReaction(arg1:number,arg2:string):Promise<string>;
+
 export function RenameChannel(arg1:number,arg2:string):Promise<string>;
 
 export function RenameServer(arg1:string):Promise<string>;
 
 export function RenameUser(arg1:string):Promise<string>;
 
+export function RequestVideoQuality(arg1:number,arg2:string):Promise<string>;
+
 export function SaveConfig(arg1:config.Config):Promise<void>;
 
 export function SendChannelChat(arg1:number,arg2:string):Promise<string>;
 
 export function SendChat(arg1:string):Promise<string>;
+
+export function SendTyping(arg1:number):Promise<string>;
 
 export function SetAEC(arg1:boolean):Promise<void>;
 
@@ -73,13 +87,21 @@ export function SetInputDevice(arg1:number):Promise<void>;
 
 export function SetMuted(arg1:boolean):Promise<void>;
 
+export function SetNoiseGate(arg1:boolean):Promise<void>;
+
+export function SetNoiseGateThreshold(arg1:number):Promise<void>;
+
 export function SetNoiseSuppression(arg1:boolean):Promise<void>;
 
 export function SetNoiseSuppressionLevel(arg1:number):Promise<void>;
 
+export function SetNotificationVolume(arg1:number):Promise<void>;
+
 export function SetOutputDevice(arg1:number):Promise<void>;
 
 export function SetPTTMode(arg1:boolean):Promise<void>;
+
+export function SetUserVolume(arg1:number,arg2:number):Promise<void>;
 
 export function SetVAD(arg1:boolean):Promise<void>;
 
@@ -87,9 +109,21 @@ export function SetVADThreshold(arg1:number):Promise<void>;
 
 export function SetVolume(arg1:number):Promise<void>;
 
+export function StartRecording(arg1:number):Promise<string>;
+
+export function StartScreenShare():Promise<string>;
+
 export function StartTest():Promise<string>;
 
+export function StartVideo():Promise<string>;
+
+export function StopRecording(arg1:number):Promise<string>;
+
+export function StopScreenShare():Promise<string>;
+
 export function StopTest():Promise<void>;
+
+export function StopVideo():Promise<string>;
 
 export function UnmuteUser(arg1:number):Promise<void>;
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { User } from './types'
+import { VolumeX, Volume2, X } from 'lucide-vue-next'
 
 const props = defineProps<{
   user: User
@@ -39,9 +40,7 @@ const initials = computed(() => {
         class="badge badge-error absolute -bottom-1 -right-1 w-5 h-5 !p-0"
         aria-hidden="true"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3 text-error-content">
-          <path d="M9.547 3.062A.75.75 0 0 1 10 3.75v12.5a.75.75 0 0 1-1.264.546L4.703 13H3.167a.75.75 0 0 1-.7-.48A6.985 6.985 0 0 1 2 10c0-.887.165-1.737.468-2.52a.75.75 0 0 1 .699-.48H4.7l4.033-3.296a.75.75 0 0 1 .814-.142ZM13.78 7.22a.75.75 0 1 0-1.06 1.06L14.44 10l-1.72 1.72a.75.75 0 0 0 1.06 1.06L15.5 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L16.56 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L15.5 8.94l-1.72-1.72Z" />
-        </svg>
+        <VolumeX class="w-3 h-3 text-error-content" aria-hidden="true" />
       </div>
     </div>
 
@@ -59,14 +58,8 @@ const initials = computed(() => {
         :aria-pressed="muted"
         @click.stop="emit('toggleMute', user.id)"
       >
-        <!-- Speaker-off (currently muted) -->
-        <svg v-if="muted" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-          <path d="M9.547 3.062A.75.75 0 0 1 10 3.75v12.5a.75.75 0 0 1-1.264.546L4.703 13H3.167a.75.75 0 0 1-.7-.48A6.985 6.985 0 0 1 2 10c0-.887.165-1.737.468-2.52a.75.75 0 0 1 .699-.48H4.7l4.033-3.296a.75.75 0 0 1 .814-.142ZM13.78 7.22a.75.75 0 1 0-1.06 1.06L14.44 10l-1.72 1.72a.75.75 0 0 0 1.06 1.06L15.5 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L16.56 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L15.5 8.94l-1.72-1.72Z" />
-        </svg>
-        <!-- Speaker (not muted) -->
-        <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-          <path d="M9.547 3.062A.75.75 0 0 1 10 3.75v12.5a.75.75 0 0 1-1.264.546L4.703 13H3.167a.75.75 0 0 1-.7-.48A6.985 6.985 0 0 1 2 10c0-.887.165-1.737.468-2.52a.75.75 0 0 1 .699-.48H4.7l4.033-3.296a.75.75 0 0 1 .814-.142ZM13.5 8a.75.75 0 0 1 .75.75 3.5 3.5 0 0 1 0 4.5.75.75 0 0 1-1.06-1.06 2 2 0 0 0 0-2.38.75.75 0 0 1 .31-1.01Z" />
-        </svg>
+        <VolumeX v-if="muted" class="w-3.5 h-3.5" aria-hidden="true" />
+        <Volume2 v-else class="w-3.5 h-3.5" aria-hidden="true" />
         {{ muted ? 'Unmute' : 'Mute' }}
       </button>
 
@@ -77,9 +70,7 @@ const initials = computed(() => {
         :title="`Kick ${user.username}`"
         @click.stop="emit('kick', user.id)"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
-          <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-        </svg>
+        <X class="w-3.5 h-3.5" aria-hidden="true" />
         Kick
       </button>
     </div>

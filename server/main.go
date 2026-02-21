@@ -14,12 +14,24 @@ import (
 )
 
 func main() {
-	addr          := flag.String("addr",          ":4433",   "WebTransport listen address")
-	apiAddr       := flag.String("api-addr",      ":8080",   "REST API listen address (empty to disable)")
-	dbPath        := flag.String("db",            "bken.db", "SQLite database path")
-	idleTimeout   := flag.Duration("idle-timeout", 30*time.Second, "QUIC connection idle timeout")
-	certValidity  := flag.Duration("cert-validity", 24*time.Hour,  "self-signed TLS certificate validity")
-	testUser      := flag.String("test-user",     "",        "name for a virtual test bot that emits a 440 Hz tone (empty to disable)")
+	// Check for CLI subcommands before parsing flags.
+	if len(os.Args) > 1 {
+		// Default DB path for CLI commands (overridable by the -db flag in serve mode).
+		cliDB := "bken.db"
+		if RunCLI(os.Args[1:], cliDB) {
+			return
+		}
+	}
+
+	addr := flag.String("addr", ":8443", "HTTPS/WebSocket listen address")
+	apiAddr := flag.String("api-addr", ":8080", "REST API listen address (empty to disable)")
+	dbPath := flag.String("db", "bken.db", "SQLite database path")
+	idleTimeout := flag.Duration("idle-timeout", 30*time.Second, "HTTP idle timeout")
+	certValidity := flag.Duration("cert-validity", 24*time.Hour, "self-signed TLS certificate validity")
+	testUser := flag.String("test-user", "", "name for a virtual test bot that emits a 440 Hz tone (empty to disable)")
+	turnURL := flag.String("turn-url", "", "TURN server URL (e.g. turn:turn.example.com:3478)")
+	turnUsername := flag.String("turn-username", "", "TURN server username")
+	turnCredential := flag.String("turn-credential", "", "TURN server credential")
 	flag.Parse()
 
 	// Open persistent store; seed defaults on first run.
@@ -34,6 +46,24 @@ func main() {
 	log.Printf("[server] TLS certificate fingerprint: %s", fingerprint)
 
 	room := NewRoom()
+	room.SetDataDir(filepath.Dir(*dbPath))
+
+	// Configure ICE servers (STUN + optional TURN) for WebRTC peer connections.
+	iceServers := []ICEServerInfo{
+		{URLs: []string{"stun:stun.l.google.com:19302"}},
+	}
+	if *turnURL != "" {
+		turnServer := ICEServerInfo{URLs: []string{*turnURL}}
+		if *turnUsername != "" {
+			turnServer.Username = *turnUsername
+		}
+		if *turnCredential != "" {
+			turnServer.Credential = *turnCredential
+		}
+		iceServers = append(iceServers, turnServer)
+		log.Printf("[server] TURN server configured: %s", *turnURL)
+	}
+	room.SetICEServers(iceServers)
 
 	// Seed room with persisted server name so connecting clients see it immediately.
 	if name, ok, err := st.GetSetting("server_name"); err == nil && ok {
@@ -68,6 +98,28 @@ func main() {
 		room.SetChannels(convertChannels(chs))
 	}
 
+	// Phase 8: Wire audit log and ban callbacks to the store.
+	room.SetOnAuditLog(func(actorID int, actorName, action, target, details string) {
+		if err := st.InsertAuditLog(actorID, actorName, action, target, details); err != nil {
+			log.Printf("[audit] insert: %v", err)
+		}
+	})
+	room.SetOnBan(func(pubkey, ip, reason, bannedBy string, durationS int) {
+		if _, err := st.InsertBan(pubkey, ip, reason, bannedBy, durationS); err != nil {
+			log.Printf("[ban] insert: %v", err)
+		}
+	})
+	room.SetOnUnban(func(banID int64) {
+		if err := st.DeleteBan(banID); err != nil {
+			log.Printf("[ban] delete %d: %v", banID, err)
+		}
+	})
+
+	// Phase 10: Connection limits.
+	room.SetMaxConnections(500)
+	room.SetPerIPLimit(10)
+	room.SetControlRateLimit(50) // max 50 control messages/second per client
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -82,6 +134,39 @@ func main() {
 
 	// Start metrics logging.
 	go RunMetrics(ctx, room, 5*time.Second)
+
+	// Periodically check mute expiry and purge expired bans.
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				room.CheckMuteExpiry()
+				if _, err := st.PurgeExpiredBans(); err != nil {
+					log.Printf("[ban] purge expired: %v", err)
+				}
+			}
+		}
+	}()
+
+	// Periodically optimize SQLite query planner.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := st.Optimize(); err != nil {
+					log.Printf("[store] optimize: %v", err)
+				}
+			}
+		}
+	}()
 
 	// Start virtual test bot if configured.
 	if *testUser != "" {

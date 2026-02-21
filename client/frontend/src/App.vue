@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import Room from './Room.vue'
 import SettingsPage from './SettingsPage.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
 import TitleBar from './TitleBar.vue'
+import KeyboardShortcuts from './KeyboardShortcuts.vue'
 import { useReconnect } from './composables/useReconnect'
 import { useSpeakingUsers } from './composables/useSpeakingUsers'
-import type { User, UserJoinedEvent, UserLeftEvent, ConnectPayload, ChatMessage, Channel, SpeakingEvent } from './types'
+import type { User, UserJoinedEvent, UserLeftEvent, ConnectPayload, ChatMessage, Channel, SpeakingEvent, VideoState, ReactionInfo } from './types'
 
 type AppRoute = 'room' | 'settings'
+const LAST_CONNECTED_ADDR_KEY = 'bken:last-connected-addr'
 
 const connected = ref(false)
 const voiceConnected = ref(false)
@@ -21,18 +23,28 @@ const serverName = ref('')
 const ownerID = ref(0)
 const myID = ref(0)
 const channels = ref<Channel[]>([])
-/** Maps userID -> channelID (0 = lobby). Updated by user:list, user:joined, user:left, channel:user_moved. */
+/** Maps userID -> channelID. Updated by user:list, user:joined, user:left, channel:user_moved. */
 const userChannels = ref<Record<number, number>>({})
+const firstChannelId = computed(() => channels.value.length > 0 ? channels.value[0].id : 0)
+
 let chatIdCounter = 0
 
 const activeChannelId = ref(0) // tracks the currently-viewed chatroom channel (for file drops)
 const viewedChannelId = ref(0) // tracks which channel's chat the user is currently viewing
 const unreadCounts = ref<Record<number, number>>({}) // channelId -> unread message count
+const videoStates = ref<Record<number, VideoState>>({}) // userId -> video state
+const recordingChannels = ref<Record<number, { recording: boolean; startedBy: string }>>({}) // channelId -> recording state
 const connectError = ref('')
 const startupAddrHint = ref('')
 const currentRoute = ref<AppRoute>('room')
 const globalUsername = ref('')
 const joiningVoice = ref(false)
+const disconnectingVoice = ref(false)
+const showShortcutsHelp = ref(false)
+const messageDensity = ref<'compact' | 'default' | 'comfortable'>('default')
+const typingUsers = ref<Record<number, { username: string; channelId: number; expiresAt: number }>>({})
+let typingCleanupInterval: ReturnType<typeof setInterval> | null = null
+const showSystemMessages = ref(true)
 
 // Push-to-Talk state
 const pttEnabled = ref(false)
@@ -61,10 +73,48 @@ function handlePTTKeyUp(e: KeyboardEvent): void {
   PTTKeyUp()
 }
 
+function handleGlobalShortcuts(e: KeyboardEvent): void {
+  // Ctrl+/ or ? => shortcuts help
+  if ((e.ctrlKey && e.key === '/') || (e.key === '?' && !isTextInput(e.target))) {
+    e.preventDefault()
+    showShortcutsHelp.value = !showShortcutsHelp.value
+    return
+  }
+  // Ctrl+Shift+M => toggle mute (works even in text input)
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyM') {
+    e.preventDefault()
+    window.dispatchEvent(new CustomEvent('shortcut:mute-toggle'))
+    return
+  }
+  // Skip remaining shortcuts if typing in a text input
+  if (isTextInput(e.target)) return
+  // M => toggle mute
+  if (e.key === 'm' || e.key === 'M') {
+    if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+      window.dispatchEvent(new CustomEvent('shortcut:mute-toggle'))
+      return
+    }
+  }
+  // D => toggle deafen
+  if (e.key === 'd' || e.key === 'D') {
+    if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+      window.dispatchEvent(new CustomEvent('shortcut:deafen-toggle'))
+      return
+    }
+  }
+  // Escape => close modals/shortcuts
+  if (e.key === 'Escape') {
+    if (showShortcutsHelp.value) {
+      showShortcutsHelp.value = false
+      return
+    }
+  }
+}
+
 const { reconnecting, reconnectAttempt, reconnectSecondsLeft, startReconnect, cancelReconnect, clearTimers, setLastCredentials } = useReconnect()
 const { speakingUsers, setSpeaking, clearSpeaking, cleanup: cleanupSpeaking } = useSpeakingUsers()
 
-/** The WebTransport address the client is currently connected to. Exposed to TitleBar so the owner can generate an invite link. */
+/** The server address the client is currently connected to. Exposed to TitleBar so the owner can generate an invite link. */
 const connectedAddr = ref('')
 
 function parseRoute(hash: string): AppRoute {
@@ -105,6 +155,9 @@ function resetState(): void {
   userChannels.value = {}
   viewedChannelId.value = 0
   unreadCounts.value = {}
+  videoStates.value = {}
+  recordingChannels.value = {}
+  typingUsers.value = {}
 }
 
 function normaliseUsername(name: string): string {
@@ -116,20 +169,20 @@ function normaliseAddr(addr: string): string {
   return cleaned.startsWith('bken://') ? cleaned.slice('bken://'.length) : cleaned
 }
 
-function hostFromAddr(addr: string): string {
-  const clean = normaliseAddr(addr)
-  if (!clean) return ''
-  if (clean.startsWith('[')) {
-    const end = clean.indexOf(']')
-    if (end > 1) return clean.slice(1, end)
+function getLastConnectedAddr(): string {
+  try {
+    return normaliseAddr(localStorage.getItem(LAST_CONNECTED_ADDR_KEY) ?? '')
+  } catch {
+    return ''
   }
-  const firstColon = clean.indexOf(':')
-  return firstColon === -1 ? clean : clean.slice(0, firstColon)
 }
 
-function isLocalDevAddr(addr: string): boolean {
-  const host = hostFromAddr(addr).toLowerCase()
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0'
+function setLastConnectedAddr(addr: string): void {
+  try {
+    localStorage.setItem(LAST_CONNECTED_ADDR_KEY, normaliseAddr(addr))
+  } catch {
+    // Ignore storage failures; reconnect fallback is best-effort.
+  }
 }
 
 async function connectToServer(addr: string, username: string): Promise<boolean> {
@@ -144,7 +197,7 @@ async function connectToServer(addr: string, username: string): Promise<boolean>
     return false
   }
 
-  if (connected.value && connectedAddr.value === targetAddr) {
+  if (connected.value && connectedAddr.value === targetAddr && channels.value.length > 0) {
     return true
   }
 
@@ -156,15 +209,27 @@ async function connectToServer(addr: string, username: string): Promise<boolean>
   setLastCredentials(targetAddr, user)
   connectError.value = ''
 
-  const err = await Connect(targetAddr, user)
-  if (err && err !== 'already connected') {
+  let err = await Connect(targetAddr, user)
+
+  // In dev/hot-reload flows, the backend can still hold an old session while
+  // the frontend state is fresh. Force a clean reconnect so we receive
+  // user_list/channel_list snapshots again.
+  if (err === 'already connected') {
+    await Disconnect()
+    resetState()
+    err = await Connect(targetAddr, user)
+  }
+
+  if (err) {
     connectError.value = err
     return false
   }
 
   connected.value = true
-  voiceConnected.value = true
+  // Connecting to a server should not auto-join voice.
+  voiceConnected.value = false
   connectedAddr.value = targetAddr
+  setLastConnectedAddr(targetAddr)
   connectError.value = ''
   startupAddrHint.value = ''
   return true
@@ -233,6 +298,14 @@ async function handleDeleteMessage(msgID: number): Promise<void> {
   await DeleteMessage(msgID)
 }
 
+async function handleAddReaction(msgID: number, emoji: string): Promise<void> {
+  await AddReaction(msgID, emoji)
+}
+
+async function handleRemoveReaction(msgID: number, emoji: string): Promise<void> {
+  await RemoveReaction(msgID, emoji)
+}
+
 async function handleSendChat(message: string): Promise<void> {
   activeChannelId.value = 0
   await SendChat(message)
@@ -259,6 +332,10 @@ async function handleMoveUser(userID: number, channelID: number): Promise<void> 
   await MoveUserToChannel(userID, channelID)
 }
 
+async function handleKickUser(userID: number): Promise<void> {
+  await KickUser(userID)
+}
+
 function handleViewChannel(channelID: number): void {
   viewedChannelId.value = channelID
   if (unreadCounts.value[channelID]) {
@@ -283,14 +360,38 @@ async function handleUploadFileFromPath(channelID: number, path: string): Promis
   }
 }
 
+async function handleStartVideo(): Promise<void> {
+  await StartVideo()
+}
+
+async function handleStopVideo(): Promise<void> {
+  await StopVideo()
+}
+
+async function handleStartScreenShare(): Promise<void> {
+  await StartScreenShare()
+}
+
+async function handleStopScreenShare(): Promise<void> {
+  await StopScreenShare()
+}
+
 async function handleDisconnectVoice(): Promise<void> {
-  const err = await DisconnectVoice()
-  if (err) {
-    connectError.value = err
-    return
-  }
+  if (disconnectingVoice.value || !voiceConnected.value) return
+  disconnectingVoice.value = true
+
+  // Optimistically reflect voice disconnect in the UI so one click is enough.
   voiceConnected.value = false
   clearSpeaking()
+
+  try {
+    const err = await DisconnectVoice()
+    if (err) {
+      connectError.value = err
+    }
+  } finally {
+    disconnectingVoice.value = false
+  }
 }
 
 async function handleDisconnect(): Promise<void> {
@@ -317,7 +418,8 @@ onMounted(async () => {
 
   EventsOn('connection:lost', (data: { reason: string } | null) => {
     const reason = data?.reason || 'Connection lost'
-    // Remember the voice channel so we can rejoin after reconnect.
+    const hadVoice = voiceConnected.value
+    // Remember the last voice channel so we can rejoin only if voice was active.
     const lastChannel = userChannels.value[myID.value] ?? 0
     connected.value = false
     voiceConnected.value = false
@@ -325,12 +427,19 @@ onMounted(async () => {
     startReconnect(
       async () => {
         connected.value = true
-        voiceConnected.value = true
-        connectError.value = ''
-        // Rejoin the voice channel the user was in before the disconnect.
-        if (lastChannel > 0) {
-          await JoinChannel(lastChannel)
+        // Restore voice only if it was previously active.
+        if (hadVoice && lastChannel > 0) {
+          const err = await ConnectVoice(lastChannel)
+          if (err) {
+            voiceConnected.value = false
+            connectError.value = err
+            return
+          }
+          voiceConnected.value = true
+        } else {
+          voiceConnected.value = false
         }
+        connectError.value = ''
       },
       () => {},
     )
@@ -346,12 +455,30 @@ onMounted(async () => {
   EventsOn('user:joined', (data: UserJoinedEvent) => {
     users.value = [...users.value, { id: data.id, username: data.username }]
     userChannels.value = { ...userChannels.value, [data.id]: 0 }
+    // System message
+    chatMessages.value = [...chatMessages.value, {
+      id: ++chatIdCounter, msgId: 0, senderId: 0, username: '', message: `${data.username} joined the server`,
+      ts: Date.now(), channelId: firstChannelId.value, system: true,
+    }]
   })
 
   EventsOn('user:left', (data: UserLeftEvent) => {
+    const leftUser = users.value.find(u => u.id === data.id)
     users.value = users.value.filter(u => u.id !== data.id)
     const { [data.id]: _, ...rest } = userChannels.value
     userChannels.value = rest
+    // System message
+    if (leftUser) {
+      chatMessages.value = [...chatMessages.value, {
+        id: ++chatIdCounter, msgId: 0, senderId: 0, username: '', message: `${leftUser.username} left the server`,
+        ts: Date.now(), channelId: firstChannelId.value, system: true,
+      }]
+    }
+    // Clean up video state for departed user.
+    if (videoStates.value[data.id]) {
+      const { [data.id]: __, ...vs } = videoStates.value
+      videoStates.value = vs
+    }
   })
 
   EventsOn('user:renamed', (data: { id: number; username: string }) => {
@@ -368,8 +495,8 @@ onMounted(async () => {
     userChannels.value = { ...userChannels.value, [data.user_id]: data.channel_id }
   })
 
-  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; msg_id: number; sender_id?: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string }) => {
-    const channelId = data.channel_id ?? 0
+  EventsOn('chat:message', (data: { username: string; message: string; ts: number; channel_id: number; msg_id: number; sender_id?: number; file_id?: number; file_name?: string; file_size?: number; file_url?: string; mentions?: number[]; reply_to?: number; reply_preview?: { msg_id: number; username: string; message: string; deleted?: boolean } }) => {
+    const channelId = data.channel_id ?? firstChannelId.value
     chatMessages.value = [
       ...chatMessages.value,
       {
@@ -384,8 +511,16 @@ onMounted(async () => {
         fileName: data.file_name,
         fileSize: data.file_size,
         fileUrl: data.file_url,
+        mentions: data.mentions,
+        replyTo: data.reply_to,
+        replyPreview: data.reply_preview,
       },
     ]
+    // Clear typing indicator for the sender
+    if (data.sender_id && typingUsers.value[data.sender_id]) {
+      const { [data.sender_id]: _, ...rest } = typingUsers.value
+      typingUsers.value = rest
+    }
     // Increment unread count if the message is in a channel the user is not viewing.
     if (channelId !== viewedChannelId.value) {
       unreadCounts.value = { ...unreadCounts.value, [channelId]: (unreadCounts.value[channelId] ?? 0) + 1 }
@@ -425,6 +560,84 @@ onMounted(async () => {
     chatMessages.value = updated
   })
 
+  EventsOn('chat:reaction_added', (data: { msg_id: number; emoji: string; id: number }) => {
+    const idx = chatMessages.value.findIndex(m => m.msgId === data.msg_id)
+    if (idx === -1) return
+    const updated = [...chatMessages.value]
+    const msg = { ...updated[idx] }
+    const reactions = [...(msg.reactions ?? [])]
+    const rxIdx = reactions.findIndex(r => r.emoji === data.emoji)
+    if (rxIdx >= 0) {
+      const rx = { ...reactions[rxIdx] }
+      if (!rx.user_ids.includes(data.id)) {
+        rx.user_ids = [...rx.user_ids, data.id]
+        rx.count = rx.user_ids.length
+      }
+      reactions[rxIdx] = rx
+    } else {
+      reactions.push({ emoji: data.emoji, user_ids: [data.id], count: 1 })
+    }
+    msg.reactions = reactions
+    updated[idx] = msg
+    chatMessages.value = updated
+  })
+
+  EventsOn('chat:reaction_removed', (data: { msg_id: number; emoji: string; id: number }) => {
+    const idx = chatMessages.value.findIndex(m => m.msgId === data.msg_id)
+    if (idx === -1) return
+    const updated = [...chatMessages.value]
+    const msg = { ...updated[idx] }
+    let reactions = [...(msg.reactions ?? [])]
+    const rxIdx = reactions.findIndex(r => r.emoji === data.emoji)
+    if (rxIdx >= 0) {
+      const rx = { ...reactions[rxIdx] }
+      rx.user_ids = rx.user_ids.filter(id => id !== data.id)
+      rx.count = rx.user_ids.length
+      if (rx.count === 0) {
+        reactions = reactions.filter((_, i) => i !== rxIdx)
+      } else {
+        reactions[rxIdx] = rx
+      }
+    }
+    msg.reactions = reactions
+    updated[idx] = msg
+    chatMessages.value = updated
+  })
+
+  EventsOn('chat:user_typing', (data: { id: number; username: string; channel_id: number }) => {
+    if (data.id === myID.value) return
+    typingUsers.value = {
+      ...typingUsers.value,
+      [data.id]: { username: data.username, channelId: data.channel_id, expiresAt: Date.now() + 5000 },
+    }
+  })
+
+  EventsOn('chat:message_pinned', (data: { msg_id: number }) => {
+    const idx = chatMessages.value.findIndex(m => m.msgId === data.msg_id)
+    if (idx === -1) return
+    const updated = [...chatMessages.value]
+    updated[idx] = { ...updated[idx], pinned: true }
+    chatMessages.value = updated
+  })
+
+  EventsOn('chat:message_unpinned', (data: { msg_id: number }) => {
+    const idx = chatMessages.value.findIndex(m => m.msgId === data.msg_id)
+    if (idx === -1) return
+    const updated = [...chatMessages.value]
+    updated[idx] = { ...updated[idx], pinned: false }
+    chatMessages.value = updated
+  })
+
+  // Clean up expired typing indicators every second.
+  typingCleanupInterval = setInterval(() => {
+    const now = Date.now()
+    const next: typeof typingUsers.value = {}
+    for (const [id, entry] of Object.entries(typingUsers.value)) {
+      if (entry.expiresAt > now) next[Number(id)] = entry
+    }
+    typingUsers.value = next
+  }, 1000)
+
   EventsOn('server:info', (data: { name: string }) => {
     serverName.value = data.name
   })
@@ -439,6 +652,31 @@ onMounted(async () => {
 
   EventsOn('audio:speaking', (data: SpeakingEvent) => {
     setSpeaking(data.id)
+  })
+
+  EventsOn('video:state', (data: { id: number; video_active: boolean; screen_share: boolean }) => {
+    if (data.video_active) {
+      videoStates.value = { ...videoStates.value, [data.id]: { active: true, screenShare: data.screen_share } }
+    } else {
+      const { [data.id]: _, ...rest } = videoStates.value
+      videoStates.value = rest
+    }
+  })
+
+  EventsOn('video:layers', (data: { id: number; layers: { quality: string; width: number; height: number; bitrate: number }[] }) => {
+    const existing = videoStates.value[data.id]
+    if (existing) {
+      videoStates.value = { ...videoStates.value, [data.id]: { ...existing, layers: data.layers } }
+    }
+  })
+
+  EventsOn('recording:state', (data: { channel_id: number; recording: boolean; started_by: string }) => {
+    if (data.recording) {
+      recordingChannels.value = { ...recordingChannels.value, [data.channel_id]: { recording: true, startedBy: data.started_by } }
+    } else {
+      const { [data.channel_id]: _, ...rest } = recordingChannels.value
+      recordingChannels.value = rest
+    }
   })
 
   EventsOn('connection:kicked', () => {
@@ -459,6 +697,9 @@ onMounted(async () => {
     }
   })
 
+  // Global keyboard shortcuts handler.
+  window.addEventListener('keydown', handleGlobalShortcuts)
+
   // Register PTT key listeners.
   window.addEventListener('keydown', handlePTTKeyDown)
   window.addEventListener('keyup', handlePTTKeyUp)
@@ -472,10 +713,20 @@ onMounted(async () => {
   // AGC, and volume are active even if the user never opens the settings panel.
   await ApplyConfig()
 
+  // Listen for density/system-messages preference changes from settings.
+  window.addEventListener('density-changed', ((e: CustomEvent) => {
+    messageDensity.value = e.detail
+  }) as EventListener)
+  window.addEventListener('system-messages-changed', ((e: CustomEvent) => {
+    showSystemMessages.value = e.detail
+  }) as EventListener)
+
   const cfg = await GetConfig()
   globalUsername.value = cfg.username?.trim() ?? ''
   pttEnabled.value = cfg.ptt_enabled ?? false
   pttKeyCode.value = cfg.ptt_key || 'Backquote'
+  messageDensity.value = cfg.message_density ?? 'default'
+  showSystemMessages.value = cfg.show_system_messages ?? true
 
   // Generate a default username if none is configured.
   if (!globalUsername.value) {
@@ -493,7 +744,7 @@ onMounted(async () => {
     globalUsername.value = auto.username
   }
 
-  if (auto.username && !isLocalDevAddr(auto.addr)) {
+  if (auto.username) {
     await connectToServer(auto.addr, auto.username)
   } else if (startupAddr) {
     if (globalUsername.value) {
@@ -508,16 +759,29 @@ onMounted(async () => {
         })
       }
     }
+  } else if (globalUsername.value) {
+    // Prefer reconnecting to the most recently used server after hot reload.
+    const lastAddr = getLastConnectedAddr()
+    if (lastAddr) {
+      const ok = await connectToServer(lastAddr, globalUsername.value)
+      if (ok) return
+    }
+    if (cfg.servers?.length) {
+      // Fallback: auto-connect to the first saved server.
+      await connectToServer(cfg.servers[0].addr, globalUsername.value)
+    }
   }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', syncRouteFromHash)
+  window.removeEventListener('keydown', handleGlobalShortcuts)
   window.removeEventListener('keydown', handlePTTKeyDown)
   window.removeEventListener('keyup', handlePTTKeyUp)
-  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'file:dropped')
+  EventsOff('connection:lost', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'room:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
   clearTimers()
   cleanupSpeaking()
+  if (typingCleanupInterval) clearInterval(typingCleanupInterval)
 })
 </script>
 
@@ -566,6 +830,11 @@ onBeforeUnmount(() => {
           :user-channels="userChannels"
           :speaking-users="speakingUsers"
           :unread-counts="unreadCounts"
+          :video-states="videoStates"
+          :recording-channels="recordingChannels"
+          :typing-users="typingUsers"
+          :message-density="messageDensity"
+          :show-system-messages="showSystemMessages"
           @connect="handleConnect"
           @activate-channel="handleActivateChannel"
           @rename-global-username="handleRenameGlobalUsername"
@@ -578,14 +847,22 @@ onBeforeUnmount(() => {
           @rename-channel="handleRenameChannel"
           @delete-channel="handleDeleteChannel"
           @move-user="handleMoveUser"
+          @kick-user="handleKickUser"
           @upload-file="handleUploadFile"
           @upload-file-from-path="handleUploadFileFromPath"
           @view-channel="handleViewChannel"
           @edit-message="handleEditMessage"
           @delete-message="handleDeleteMessage"
+          @add-reaction="handleAddReaction"
+          @remove-reaction="handleRemoveReaction"
+          @start-video="handleStartVideo"
+          @stop-video="handleStopVideo"
+          @start-screen-share="handleStartScreenShare"
+          @stop-screen-share="handleStopScreenShare"
         />
       </Transition>
     </div>
+    <KeyboardShortcuts v-if="showShortcutsHelp" @close="showShortcutsHelp = false" />
   </main>
 </template>
 

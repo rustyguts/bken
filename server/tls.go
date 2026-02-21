@@ -12,12 +12,10 @@ import (
 	"log"
 	"math/big"
 	"time"
-
-	"github.com/quic-go/quic-go/http3"
 )
 
-// generateTLSConfig creates a self-signed TLS certificate for the WebTransport server.
-// Returns the tls.Config (configured for HTTP/3) and the SHA-256 fingerprint.
+// generateTLSConfig creates a self-signed TLS certificate for the HTTPS server.
+// Returns the tls.Config and the SHA-256 fingerprint.
 // validity controls how long the certificate is valid for.
 func generateTLSConfig(validity time.Duration) (*tls.Config, string) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -61,9 +59,9 @@ func generateTLSConfig(validity time.Duration) (*tls.Config, string) {
 		Leaf:        cert,
 	}
 
-	tlsConfig := http3.ConfigureTLSConfig(&tls.Config{
+	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
-	})
+	}
 
 	return tlsConfig, fingerprint
 }

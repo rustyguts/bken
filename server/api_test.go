@@ -713,7 +713,7 @@ func TestInviteEndpointWithAddr(t *testing.T) {
 	room.SetServerName("Test Server")
 	api := newTestAPI(t, room)
 
-	req := httptest.NewRequest(http.MethodGet, "/invite?addr=192.168.1.10:4433", nil)
+	req := httptest.NewRequest(http.MethodGet, "/invite?addr=192.168.1.10:8443", nil)
 	rec := httptest.NewRecorder()
 	c := api.echo.NewContext(req, rec)
 
@@ -721,7 +721,7 @@ func TestInviteEndpointWithAddr(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "bken://192.168.1.10:4433") {
+	if !strings.Contains(body, "bken://192.168.1.10:8443") {
 		t.Errorf("body should contain bken:// link, got: %q", body[:minLen(len(body), 400)])
 	}
 }
@@ -884,4 +884,209 @@ func minLen(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// --- Phase 8: Audit Log API tests ---
+
+func TestGetAuditLogEmpty(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleGetAuditLog(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+
+	var entries []store.AuditEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected empty array, got %d entries", len(entries))
+	}
+}
+
+func TestGetAuditLogWithEntries(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	api.store.InsertAuditLog(1, "alice", "ban", "bob", "{}")
+	api.store.InsertAuditLog(1, "alice", "kick", "charlie", "{}")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleGetAuditLog(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var entries []store.AuditEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+}
+
+func TestGetAuditLogFilteredByAction(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	api.store.InsertAuditLog(1, "alice", "ban", "bob", "{}")
+	api.store.InsertAuditLog(1, "alice", "kick", "charlie", "{}")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?action=ban", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleGetAuditLog(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var entries []store.AuditEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected 1 ban entry, got %d", len(entries))
+	}
+}
+
+// --- Phase 8: Ban Management API tests ---
+
+func TestGetBansEmpty(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/bans", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleGetBans(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+
+	var bans []store.Ban
+	if err := json.Unmarshal(rec.Body.Bytes(), &bans); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(bans) != 0 {
+		t.Errorf("expected empty array, got %d bans", len(bans))
+	}
+}
+
+func TestGetBansWithEntries(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	api.store.InsertBan("alice", "1.2.3.4", "spam", "admin", 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/bans", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleGetBans(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var bans []store.Ban
+	if err := json.Unmarshal(rec.Body.Bytes(), &bans); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(bans) != 1 {
+		t.Errorf("expected 1 ban, got %d", len(bans))
+	}
+}
+
+func TestDeleteBanAPI(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	id, _ := api.store.InsertBan("alice", "", "test", "admin", 0)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/bans/"+strconv.FormatInt(id, 10), nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(strconv.FormatInt(id, 10))
+
+	if err := api.handleDeleteBan(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status: got %d, want 204", rec.Code)
+	}
+}
+
+func TestDeleteBanNotFoundAPI(t *testing.T) {
+	api := newTestAPI(t, NewRoom())
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/bans/9999", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9999")
+
+	err := api.handleDeleteBan(c)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %v", err)
+	}
+}
+
+// --- Phase 10: Metrics API tests ---
+
+func TestMetricsEndpoint(t *testing.T) {
+	room := newTestRoom(
+		UserInfo{ID: 1, Username: "alice"},
+	)
+	api := newTestAPI(t, room)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
+	rec := httptest.NewRecorder()
+	c := api.echo.NewContext(req, rec)
+
+	if err := api.handleMetrics(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+
+	var resp MetricsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Status != "ok" {
+		t.Errorf("status: got %q, want %q", resp.Status, "ok")
+	}
+	if resp.Clients != 1 {
+		t.Errorf("clients: got %d, want 1", resp.Clients)
+	}
+}
+
+// --- Route registration for new endpoints ---
+
+func TestRouteRegistrationPhase8And10(t *testing.T) {
+	room := NewRoom()
+	api := newTestAPI(t, room)
+
+	routes := api.echo.Routes()
+	paths := make(map[string]bool)
+	for _, r := range routes {
+		paths[r.Path] = true
+	}
+	for _, want := range []string{"/api/audit", "/api/bans", "/api/bans/:id", "/api/metrics"} {
+		if !paths[want] {
+			t.Errorf("route %q not registered", want)
+		}
+	}
 }

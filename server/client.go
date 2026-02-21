@@ -1,17 +1,16 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/quic-go/webtransport-go"
+	"github.com/gorilla/websocket"
 )
 
 // Circuit breaker constants for datagram fan-out.
@@ -21,12 +20,6 @@ import (
 const (
 	circuitBreakerThreshold     uint32 = 50 // ~1 s of voice at 50 fps
 	circuitBreakerProbeInterval uint32 = 25 // attempt a probe every 25 skips
-)
-
-// NACK retransmission constants.
-const (
-	dgramCacheSize = 128 // per-sender ring buffer slots (~2.5 s at 50 fps)
-	maxNACKSeqs    = 10  // max sequence numbers per NACK request
 )
 
 // sendHealth tracks per-client datagram send success and implements a
@@ -64,65 +57,54 @@ func (h *sendHealth) recordSuccess() bool {
 	return wasTripped
 }
 
-// cachedDatagram is a single entry in the per-sender datagram ring buffer.
-type cachedDatagram struct {
-	seq  uint16
-	data []byte // full datagram copy (header + opus payload)
-	set  bool   // true once this slot has been written at least once
-}
-
-// Client represents a connected voice client.
+// Client represents a connected client.
 type Client struct {
 	ID        uint16
 	Username  string
 	channelID atomic.Int64 // current channel; 0 = not in any channel; accessed atomically
 
-	// session implements DatagramSender; stored as the interface so tests can mock it.
+	// session implements DatagramSender; retained for test-bot voice fan-out and
+	// best-effort compatibility with legacy NACK logic.
 	session DatagramSender
 
 	health sendHealth // per-client circuit breaker for datagram fan-out
 
-	// dgramMu protects the datagram cache. Written by readDatagrams goroutine,
-	// read by processControl (NACK handler). Contention is minimal since
-	// NACKs are infrequent relative to the 50 fps datagram rate.
-	dgramMu    sync.Mutex
-	dgramCache [dgramCacheSize]cachedDatagram
-
 	ctrlMu sync.Mutex
-	ctrl   io.Writer // control stream; nil until the join handshake completes
+	ctrl   io.Writer       // nil when websocket transport is active
+	ws     *websocket.Conn // active websocket for control/signaling
+
 	cancel context.CancelFunc
 	closer io.Closer // closes the underlying connection; nil in unit tests
+
+	// Phase 8: Administration
+	role      string // OWNER/ADMIN/MODERATOR/USER; protected by Room.mu
+	muted     bool   // server-side mute; protected by Room.mu
+	muteExpiry int64 // unix ms when mute expires; 0 = permanent; protected by Room.mu
+	remoteIP  string // client IP for ban checking
+
+	// Phase 10: Rate limiting
+	lastControlMsg time.Time // last control message time for rate limiting
+	controlMsgCount int      // control messages in current second
+	lastChatTime   map[int64]time.Time // last chat time per channel for slow mode
 }
 
-// cacheDatagram stores a copy of the datagram in the per-sender ring buffer,
-// indexed by seq mod dgramCacheSize. Called from the readDatagrams goroutine.
-func (c *Client) cacheDatagram(seq uint16, data []byte) {
-	cp := make([]byte, len(data))
-	copy(cp, data)
-	idx := seq % dgramCacheSize
-	c.dgramMu.Lock()
-	c.dgramCache[idx] = cachedDatagram{seq: seq, data: cp, set: true}
-	c.dgramMu.Unlock()
-}
-
-// getCachedDatagram retrieves a cached datagram by sequence number.
-// Returns nil if the slot doesn't contain the requested sequence.
-func (c *Client) getCachedDatagram(seq uint16) []byte {
-	idx := seq % dgramCacheSize
-	c.dgramMu.Lock()
-	defer c.dgramMu.Unlock()
-	entry := c.dgramCache[idx]
-	if entry.set && entry.seq == seq {
-		return entry.data
-	}
-	return nil
-}
-
-// sendRaw writes a pre-marshaled, newline-terminated JSON message to the control stream.
+// sendRaw writes a pre-marshaled control message to the client.
 // It is safe to call concurrently.
 func (c *Client) sendRaw(data []byte) {
 	c.ctrlMu.Lock()
 	defer c.ctrlMu.Unlock()
+
+	if c.ws != nil {
+		payload := data
+		if n := len(payload); n > 0 && payload[n-1] == '\n' {
+			payload = payload[:n-1]
+		}
+		if err := c.ws.WriteMessage(websocket.TextMessage, payload); err != nil {
+			log.Printf("[client %d] control write error: %v", c.ID, err)
+		}
+		return
+	}
+
 	if c.ctrl != nil {
 		if _, err := c.ctrl.Write(data); err != nil {
 			log.Printf("[client %d] control write error: %v", c.ID, err)
@@ -130,12 +112,7 @@ func (c *Client) sendRaw(data []byte) {
 	}
 }
 
-// sessionCloser adapts *webtransport.Session to io.Closer.
-type sessionCloser struct{ sess *webtransport.Session }
-
-func (s *sessionCloser) Close() error { return s.sess.CloseWithError(0, "") }
-
-// SendControl writes a newline-delimited JSON control message to the client's control stream.
+// SendControl writes a JSON control message to the client's control transport.
 // It is safe to call concurrently.
 func (c *Client) SendControl(msg ControlMsg) {
 	data, err := json.Marshal(msg)
@@ -146,13 +123,13 @@ func (c *Client) SendControl(msg ControlMsg) {
 	c.sendRaw(append(data, '\n'))
 }
 
-// handleClient manages a single WebTransport session from join to disconnect.
-func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
+// handleWebSocketClient manages a single WebSocket client from join to disconnect.
+func handleWebSocketClient(ctx context.Context, conn *websocket.Conn, room *Room) {
 	ctx, cancel := context.WithCancel(ctx)
 	client := &Client{
-		session: sess,
-		cancel:  cancel,
-		closer:  &sessionCloser{sess},
+		ws:     conn,
+		cancel: cancel,
+		closer: conn,
 	}
 
 	defer func() {
@@ -165,27 +142,17 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 				}
 			}
 		}
-		sess.CloseWithError(0, "bye")
+		_ = conn.Close()
 	}()
 
-	// The client is expected to open the control stream first.
-	stream, err := sess.AcceptStream(ctx)
-	if err != nil {
-		log.Printf("[client] accept stream error: %v", err)
-		return
-	}
-	client.ctrl = stream
-
-	// The very first message must be a join.
-	reader := bufio.NewReader(stream)
-	line, err := reader.ReadBytes('\n')
+	_, data, err := conn.ReadMessage()
 	if err != nil {
 		log.Printf("[client] join read error: %v", err)
 		return
 	}
 
 	var joinMsg ControlMsg
-	if err := json.Unmarshal(line, &joinMsg); err != nil || joinMsg.Type != "join" {
+	if err := json.Unmarshal(data, &joinMsg); err != nil || joinMsg.Type != "join" {
 		log.Printf("[client] invalid join message: %v", err)
 		return
 	}
@@ -203,7 +170,7 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 			replaced.cancel()
 		}
 		if replaced.closer != nil {
-			replaced.closer.Close() //nolint:errcheck // best-effort close of replaced duplicate session
+			_ = replaced.closer.Close() //nolint:errcheck // best-effort close of replaced duplicate session
 		}
 		room.BroadcastControl(ControlMsg{Type: "user_left", ID: replacedID}, client.ID)
 		if newOwner, changed := room.TransferOwnership(replacedID); changed {
@@ -213,37 +180,59 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	}
 
 	if room.ClaimOwnership(client.ID) {
+		room.SetClientRole(client.ID, RoleOwner)
 		log.Printf("[client %d] %s claimed room ownership", client.ID, client.Username)
 	}
 
 	// Send the current user list (and server name) to the new client.
-	client.SendControl(ControlMsg{Type: "user_list", Users: room.Clients(), ServerName: room.ServerName(), OwnerID: room.OwnerID(), APIPort: room.APIPort()})
+	welcome := ControlMsg{
+		Type:       "user_list",
+		SelfID:     client.ID,
+		Users:      room.Clients(),
+		ServerName: room.ServerName(),
+		OwnerID:    room.OwnerID(),
+		APIPort:    room.APIPort(),
+	}
+	if iceServers := room.ICEServers(); len(iceServers) > 0 {
+		welcome.ICEServers = iceServers
+	}
+	client.SendControl(welcome)
 
 	// Always send the channel list so the frontend receives the event even if empty.
 	client.SendControl(ControlMsg{Type: "channel_list", Channels: room.GetChannelList()})
 
+	// Send current announcement if one exists.
+	if ann, annUser := room.GetAnnouncement(); ann != "" {
+		client.SendControl(ControlMsg{
+			Type:         "announcement",
+			Announcement: ann,
+			Username:     annUser,
+		})
+	}
+
 	// Notify all other clients that this user joined (channel 0 = not in any channel).
 	room.BroadcastControl(
-		ControlMsg{Type: "user_joined", ID: client.ID, Username: client.Username},
+		ControlMsg{Type: "user_joined", ID: client.ID, Username: client.Username, Role: room.GetClientRole(client.ID)},
 		client.ID,
 	)
 
 	log.Printf("[client %d] %s connected", client.ID, client.Username)
 
-	// Start the datagram relay goroutine.
-	go readDatagrams(ctx, sess, room, client)
-
 	// Process control messages until the client disconnects.
 	for {
-		line, err := reader.ReadBytes('\n')
+		_, data, err := conn.ReadMessage()
 		if err != nil {
-			if err != io.EOF {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				return
+			}
+			if ctx.Err() == nil {
 				log.Printf("[client %d] control read error: %v", client.ID, err)
 			}
 			return
 		}
+
 		var msg ControlMsg
-		if err := json.Unmarshal(line, &msg); err != nil {
+		if err := json.Unmarshal(data, &msg); err != nil {
 			log.Printf("[client %d] control unmarshal error: %v", client.ID, err)
 			continue
 		}
@@ -251,8 +240,28 @@ func handleClient(ctx context.Context, sess *webtransport.Session, room *Room) {
 	}
 }
 
+// parseMentions extracts @DisplayName tokens from the message text and resolves
+// them to user IDs using the current room client list. Returns a deduplicated
+// list of mentioned user IDs.
+func parseMentions(text string, room *Room) []uint16 {
+	if !strings.Contains(text, "@") {
+		return nil
+	}
+	clients := room.Clients()
+	var mentioned []uint16
+	seen := make(map[uint16]bool)
+	// Check longest usernames first to match greedily.
+	for _, u := range clients {
+		token := "@" + u.Username
+		if strings.Contains(text, token) && !seen[u.ID] {
+			seen[u.ID] = true
+			mentioned = append(mentioned, u.ID)
+		}
+	}
+	return mentioned
+}
+
 // processControl handles a single decoded control message from a client.
-// Extracted from the read loop so it can be unit-tested without a real WebTransport session.
 func processControl(msg ControlMsg, client *Client, room *Room) {
 	switch msg.Type {
 	case "ping":
@@ -260,14 +269,16 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 	case "chat":
 		// Relay to all clients (including sender) so everyone sees the message.
 		// Server stamps the authoritative username and timestamp to prevent spoofing.
-		// All chat messages (server-wide and channel-scoped) are broadcast to every
-		// client; the frontend filters by channel_id on the receiving end so users
-		// can read and send messages in any channel without being voice-connected.
 		hasFile := msg.FileID != 0
 		if msg.Message == "" && !hasFile {
 			return
 		}
 		if len(msg.Message) > MaxChatLength {
+			return
+		}
+		// Enforce slow mode.
+		if msg.ChannelID != 0 && !room.CheckSlowMode(client.ID, msg.ChannelID) {
+			client.SendControl(ControlMsg{Type: "error", Error: "slow_mode", ChannelID: msg.ChannelID})
 			return
 		}
 		msgID := room.NextMsgID()
@@ -282,8 +293,20 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			FileName:  msg.FileName,
 			FileSize:  msg.FileSize,
 			MsgID:     msgID,
+			ReplyTo:   msg.ReplyTo,
 		}
-		room.RecordMsgOwner(msgID, client.ID)
+		// Parse @mentions
+		if mentions := parseMentions(msg.Message, room); len(mentions) > 0 {
+			out.Mentions = mentions
+		}
+		// Attach reply preview if replying
+		if msg.ReplyTo != 0 {
+			if preview := room.GetMsgPreview(msg.ReplyTo); preview != nil {
+				out.ReplyPreview = preview
+			}
+		}
+		room.RecordMsg(msgID, client.ID, client.Username, msg.Message, msg.ChannelID)
+		room.BufferMessage(msg.ChannelID, out)
 		room.BroadcastControl(out, 0)
 
 		// Asynchronously fetch a link preview if the message contains a URL.
@@ -322,7 +345,7 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		target.SendControl(ControlMsg{Type: "kicked"})
 		target.cancel()
 		if target.closer != nil {
-			target.closer.Close()
+			_ = target.closer.Close()
 		}
 	case "rename":
 		// Only the room owner may rename the server.
@@ -341,6 +364,11 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		log.Printf("[client %d] %s renamed server to %q", client.ID, client.Username, name)
 	case "join_channel":
 		// Any client may join a channel (including channel 0 to leave all channels).
+		// Enforce the channel user limit (channel 0 = lobby, always allowed).
+		if msg.ChannelID != 0 && !room.CanJoinChannel(msg.ChannelID) {
+			client.SendControl(ControlMsg{Type: "error", Error: "Channel is full"})
+			return
+		}
 		client.channelID.Store(msg.ChannelID)
 		room.BroadcastControl(ControlMsg{
 			Type:      "user_channel",
@@ -399,34 +427,8 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		// Move users who were in the deleted channel back to the lobby.
 		room.MoveChannelUsersToLobby(msg.ChannelID)
 		log.Printf("[client %d] %s deleted channel %d", client.ID, client.Username, msg.ChannelID)
-	case "nack":
-		// Client requests retransmission of missed voice packets from a specific sender.
-		// The server looks up cached datagrams and resends them to the requester only.
-		if msg.ID == 0 || msg.ID == client.ID || len(msg.Seqs) == 0 {
-			return
-		}
-		seqs := msg.Seqs
-		if len(seqs) > maxNACKSeqs {
-			seqs = seqs[:maxNACKSeqs]
-		}
-		sender := room.GetClient(msg.ID)
-		if sender == nil {
-			return
-		}
-		// Only retransmit to clients in the same voice channel as the sender.
-		senderCh := sender.channelID.Load()
-		clientCh := client.channelID.Load()
-		if senderCh == 0 || clientCh != senderCh {
-			return
-		}
-		for _, seq := range seqs {
-			if data := sender.getCachedDatagram(seq); data != nil {
-				client.session.SendDatagram(data) //nolint:errcheck // best-effort retransmit
-			}
-		}
 	case "rename_user":
-		// Any client may rename themselves. The server validates the name and
-		// broadcasts a user_renamed message so other clients update their user list.
+		// Any client may rename themselves.
 		name, err := validateName(msg.Username, MaxNameLength)
 		if err != nil {
 			return
@@ -459,6 +461,7 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		if !ok || ownerID != client.ID {
 			return
 		}
+		room.UpdateMsgContent(msg.MsgID, msg.Message)
 		room.BroadcastControl(ControlMsg{
 			Type:      "message_edited",
 			MsgID:     msg.MsgID,
@@ -479,37 +482,405 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		if ownerID != client.ID && !isRoomOwner {
 			return
 		}
+		room.MarkMsgDeleted(msg.MsgID)
 		room.BroadcastControl(ControlMsg{
 			Type:  "message_deleted",
 			MsgID: msg.MsgID,
 		}, 0)
 		log.Printf("[client %d] %s deleted message %d", client.ID, client.Username, msg.MsgID)
-	}
-}
-
-// readDatagrams relays incoming voice datagrams from one client to all others.
-// It stamps the sender ID into the datagram header before fan-out to prevent
-// spoofing, and caches each datagram for NACK-based retransmission.
-func readDatagrams(ctx context.Context, sess *webtransport.Session, room *Room, client *Client) {
-	for {
-		data, err := sess.ReceiveDatagram(ctx)
-		if err != nil {
-			if ctx.Err() == nil {
-				// Not a clean shutdown — log so operators can see unexpected drops.
-				log.Printf("[client %d] datagram read error: %v", client.ID, err)
-			}
+	case "webrtc_offer", "webrtc_answer", "webrtc_ice":
+		if msg.TargetID == 0 || msg.TargetID == client.ID {
 			return
 		}
-		if len(data) < DatagramHeader || len(data) > MaxDatagramSize {
-			continue // need header; reject oversized packets
+		target := room.GetClient(msg.TargetID)
+		if target == nil {
+			return
 		}
-		// Overwrite the client-supplied sender ID to prevent spoofing.
-		binary.BigEndian.PutUint16(data[:2], client.ID)
+		fwd := ControlMsg{
+			Type:          msg.Type,
+			ID:            client.ID,
+			SDP:           msg.SDP,
+			Candidate:     msg.Candidate,
+			SDPMid:        msg.SDPMid,
+			SDPMLineIndex: msg.SDPMLineIndex,
+		}
+		target.SendControl(fwd)
+	case "video_state":
+		// Broadcast the user's video state to all other clients so they
+		// can update their UI (show/hide video grid tiles, screen share badges).
+		// The server stamps the authoritative sender ID to prevent spoofing.
+		// Include simulcast layers when video is starting.
+		broadcast := ControlMsg{
+			Type:        "video_state",
+			ID:          client.ID,
+			VideoActive: msg.VideoActive,
+			ScreenShare: msg.ScreenShare,
+		}
+		active := msg.VideoActive != nil && *msg.VideoActive
+		screen := msg.ScreenShare != nil && *msg.ScreenShare
+		if active {
+			// Attach default simulcast layers so receivers know what qualities
+			// are available and can request their preferred layer.
+			broadcast.VideoLayers = DefaultVideoLayers()
+			if screen {
+				log.Printf("[client %d] %s started screen share", client.ID, client.Username)
+			} else {
+				log.Printf("[client %d] %s started video", client.ID, client.Username)
+			}
+		} else {
+			log.Printf("[client %d] %s stopped video", client.ID, client.Username)
+		}
+		room.BroadcastControl(broadcast, 0)
 
-		// Cache for NACK retransmission before broadcasting.
-		seq := binary.BigEndian.Uint16(data[2:4])
-		client.cacheDatagram(seq, data)
+	case "set_video_quality":
+		// A receiver requests a specific simulcast layer from a video sender.
+		// The server relays this to the target user so they can adjust their
+		// encoder output or select the appropriate simulcast track.
+		if msg.TargetID == 0 || msg.VideoQuality == "" {
+			return
+		}
+		// Validate quality value.
+		switch msg.VideoQuality {
+		case "high", "medium", "low":
+		default:
+			return
+		}
+		room.SendControlTo(msg.TargetID, ControlMsg{
+			Type:         "set_video_quality",
+			ID:           client.ID,
+			VideoQuality: msg.VideoQuality,
+		})
 
-		room.Broadcast(client.ID, data)
+	case "add_reaction":
+		if msg.MsgID == 0 || msg.Emoji == "" {
+			return
+		}
+		if room.AddReaction(msg.MsgID, client.ID, msg.Emoji) {
+			room.BroadcastControl(ControlMsg{
+				Type:  "reaction_added",
+				MsgID: msg.MsgID,
+				Emoji: msg.Emoji,
+				ID:    client.ID,
+			}, 0)
+		}
+
+	case "remove_reaction":
+		if msg.MsgID == 0 || msg.Emoji == "" {
+			return
+		}
+		if room.RemoveReaction(msg.MsgID, client.ID, msg.Emoji) {
+			room.BroadcastControl(ControlMsg{
+				Type:  "reaction_removed",
+				MsgID: msg.MsgID,
+				Emoji: msg.Emoji,
+				ID:    client.ID,
+			}, 0)
+		}
+
+	case "typing":
+		if msg.ChannelID == 0 {
+			return
+		}
+		room.BroadcastControl(ControlMsg{
+			Type:      "user_typing",
+			ID:        client.ID,
+			ChannelID: msg.ChannelID,
+			Username:  client.Username,
+		}, client.ID)
+
+	case "search_messages":
+		if msg.Query == "" || msg.ChannelID == 0 {
+			return
+		}
+		limit := msg.Limit
+		if limit <= 0 || limit > 50 {
+			limit = 20
+		}
+		results := room.SearchMessages(msg.ChannelID, msg.Query, msg.Before, limit)
+		client.SendControl(ControlMsg{
+			Type:      "search_results",
+			ChannelID: msg.ChannelID,
+			Query:     msg.Query,
+			Results:   results,
+		})
+
+	case "pin_message":
+		if room.OwnerID() != client.ID {
+			return
+		}
+		if msg.MsgID == 0 || msg.ChannelID == 0 {
+			return
+		}
+		if room.PinMessage(msg.MsgID, msg.ChannelID, client.ID) {
+			room.BroadcastControl(ControlMsg{
+				Type:      "message_pinned",
+				MsgID:     msg.MsgID,
+				ChannelID: msg.ChannelID,
+				ID:        client.ID,
+			}, 0)
+		}
+
+	case "unpin_message":
+		if room.OwnerID() != client.ID {
+			return
+		}
+		if msg.MsgID == 0 {
+			return
+		}
+		if room.UnpinMessage(msg.MsgID) {
+			room.BroadcastControl(ControlMsg{
+				Type:  "message_unpinned",
+				MsgID: msg.MsgID,
+			}, 0)
+		}
+
+	case "get_pinned":
+		if msg.ChannelID == 0 {
+			return
+		}
+		pinned := room.GetPinnedMessages(msg.ChannelID)
+		client.SendControl(ControlMsg{
+			Type:       "pinned_list",
+			ChannelID:  msg.ChannelID,
+			PinnedMsgs: pinned,
+		})
+
+	case "get_reactions":
+		if msg.MsgID == 0 {
+			return
+		}
+		reactions := room.GetReactions(msg.MsgID)
+		client.SendControl(ControlMsg{
+			Type:      "reactions_list",
+			MsgID:     msg.MsgID,
+			Reactions: reactions,
+		})
+
+	// Phase 8: Server Administration
+
+	case "ban":
+		// ADMIN+ can ban users. Cannot ban yourself or the owner.
+		if !HasPermission(client.role, "ban") {
+			return
+		}
+		if msg.ID == 0 || msg.ID == client.ID {
+			return
+		}
+		target := room.GetClient(msg.ID)
+		if target == nil {
+			return
+		}
+		// Cannot ban the owner.
+		if room.OwnerID() == msg.ID {
+			return
+		}
+		reason := msg.Reason
+		if reason == "" {
+			reason = "No reason provided"
+		}
+		ip := ""
+		if msg.BanIP {
+			ip = target.remoteIP
+		}
+		room.RecordBan(target.Username, ip, reason, client.Username, msg.Duration)
+		log.Printf("[client %d] %s banned client %d (%s), reason: %s", client.ID, client.Username, msg.ID, target.Username, reason)
+		target.SendControl(ControlMsg{Type: "banned", Reason: reason})
+		target.cancel()
+		if target.closer != nil {
+			_ = target.closer.Close()
+		}
+
+	case "unban":
+		if !HasPermission(client.role, "unban") {
+			return
+		}
+		if msg.BanID == 0 {
+			return
+		}
+		room.RemoveBan(msg.BanID)
+		log.Printf("[client %d] %s removed ban %d", client.ID, client.Username, msg.BanID)
+
+	case "set_role":
+		// Only the owner can set roles.
+		if !HasPermission(client.role, "set_role") {
+			return
+		}
+		if msg.ID == 0 || msg.ID == client.ID {
+			return
+		}
+		role := msg.Role
+		if role != RoleAdmin && role != RoleModerator && role != RoleUser {
+			return
+		}
+		target := room.GetClient(msg.ID)
+		if target == nil {
+			return
+		}
+		room.SetClientRole(msg.ID, role)
+		room.BroadcastControl(ControlMsg{
+			Type: "role_changed",
+			ID:   msg.ID,
+			Role: role,
+		}, 0)
+		log.Printf("[client %d] %s set role of client %d to %s", client.ID, client.Username, msg.ID, role)
+
+	case "announce":
+		if !HasPermission(client.role, "announce") {
+			return
+		}
+		if msg.Announcement == "" || len(msg.Announcement) > MaxChatLength {
+			return
+		}
+		room.SetAnnouncement(msg.Announcement, client.Username)
+		room.BroadcastControl(ControlMsg{
+			Type:         "announcement",
+			Announcement: msg.Announcement,
+			Username:     client.Username,
+		}, 0)
+		log.Printf("[client %d] %s sent announcement", client.ID, client.Username)
+
+	case "set_slow_mode":
+		if !HasPermission(client.role, "set_slow_mode") {
+			return
+		}
+		if msg.ChannelID == 0 {
+			return
+		}
+		seconds := msg.SlowMode
+		if seconds < 0 {
+			seconds = 0
+		}
+		if seconds > 3600 {
+			seconds = 3600
+		}
+		room.SetSlowMode(msg.ChannelID, seconds)
+		room.BroadcastControl(ControlMsg{
+			Type:      "slow_mode_set",
+			ChannelID: msg.ChannelID,
+			SlowMode:  seconds,
+		}, 0)
+		log.Printf("[client %d] %s set slow mode on channel %d to %ds", client.ID, client.Username, msg.ChannelID, seconds)
+
+	case "mute_user":
+		// ADMIN+ can mute users.
+		if !HasPermission(client.role, "mute") {
+			return
+		}
+		if msg.ID == 0 || msg.ID == client.ID {
+			return
+		}
+		target := room.GetClient(msg.ID)
+		if target == nil {
+			return
+		}
+		if room.OwnerID() == msg.ID {
+			return
+		}
+		var expiry int64
+		if msg.Duration > 0 {
+			expiry = time.Now().Add(time.Duration(msg.Duration) * time.Second).UnixMilli()
+		}
+		room.SetClientMute(msg.ID, true, expiry)
+		room.BroadcastControl(ControlMsg{
+			Type:       "user_muted",
+			ID:         msg.ID,
+			Muted:      true,
+			MuteExpiry: expiry,
+		}, 0)
+		log.Printf("[client %d] %s muted client %d (duration=%ds)", client.ID, client.Username, msg.ID, msg.Duration)
+
+	case "unmute_user":
+		if !HasPermission(client.role, "unmute") {
+			return
+		}
+		if msg.ID == 0 {
+			return
+		}
+		room.SetClientMute(msg.ID, false, 0)
+		room.BroadcastControl(ControlMsg{
+			Type:  "user_muted",
+			ID:    msg.ID,
+			Muted: false,
+		}, 0)
+		log.Printf("[client %d] %s unmuted client %d", client.ID, client.Username, msg.ID)
+
+	case "set_channel_limit":
+		// Only the room owner may set channel user limits.
+		if room.OwnerID() != client.ID {
+			return
+		}
+		if msg.ChannelID == 0 {
+			return
+		}
+		maxUsers := msg.MaxUsers
+		if maxUsers < 0 {
+			maxUsers = 0
+		}
+		if maxUsers > 999 {
+			maxUsers = 999
+		}
+		room.SetChannelMaxUsers(msg.ChannelID, maxUsers)
+		room.refreshChannels()
+		log.Printf("[client %d] %s set channel %d max_users to %d", client.ID, client.Username, msg.ChannelID, maxUsers)
+
+	// Phase 7: Server-Side Recording
+	case "start_recording":
+		// Only the room owner may start recording.
+		if room.OwnerID() != client.ID {
+			return
+		}
+		if msg.ChannelID == 0 {
+			return
+		}
+		if err := room.StartRecordingChannel(msg.ChannelID, client.Username); err != nil {
+			client.SendControl(ControlMsg{Type: "error", Error: err.Error()})
+			return
+		}
+		rec := true
+		room.BroadcastToChannel(msg.ChannelID, ControlMsg{
+			Type:      "recording_started",
+			ChannelID: msg.ChannelID,
+			Recording: &rec,
+			Username:  client.Username,
+		})
+		log.Printf("[client %d] %s started recording channel %d", client.ID, client.Username, msg.ChannelID)
+
+	case "stop_recording":
+		// Only the room owner may stop recording.
+		if room.OwnerID() != client.ID {
+			return
+		}
+		if msg.ChannelID == 0 {
+			return
+		}
+		if err := room.StopRecordingChannel(msg.ChannelID); err != nil {
+			client.SendControl(ControlMsg{Type: "error", Error: err.Error()})
+			return
+		}
+		rec := false
+		room.BroadcastToChannel(msg.ChannelID, ControlMsg{
+			Type:      "recording_stopped",
+			ChannelID: msg.ChannelID,
+			Recording: &rec,
+		})
+		log.Printf("[client %d] %s stopped recording channel %d", client.ID, client.Username, msg.ChannelID)
+
+	case "list_recordings":
+		recordings := room.ListRecordings()
+		client.SendControl(ControlMsg{
+			Type:       "recordings_list",
+			Recordings: recordings,
+		})
+
+	// Phase 10: Message Delivery Guarantees
+	case "replay":
+		// Client requests replay of missed messages after reconnect.
+		if msg.ChannelID == 0 {
+			return
+		}
+		messages := room.GetMessagesSince(msg.ChannelID, msg.LastSeq)
+		for _, m := range messages {
+			client.SendControl(m)
+		}
 	}
 }

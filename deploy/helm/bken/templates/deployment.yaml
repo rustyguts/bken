@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bken.fullname" . }}
+  labels:
+    {{- include "bken.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "bken.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bken.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ include "bken.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "-addr"
+            - ":{{ .Values.service.wsPort }}"
+            - "-api-addr"
+            - ":{{ .Values.service.apiPort }}"
+            - "-db"
+            - "{{ .Values.server.dbPath }}"
+            - "-idle-timeout"
+            - "{{ .Values.server.idleTimeout }}"
+            - "-cert-validity"
+            - "{{ .Values.server.certValidity }}"
+            {{- if .Values.turn.enabled }}
+            - "-turn-url"
+            - "{{ .Values.turn.url }}"
+            {{- if .Values.turn.username }}
+            - "-turn-username"
+            - "{{ .Values.turn.username }}"
+            {{- end }}
+            {{- if .Values.turn.credential }}
+            - "-turn-credential"
+            - "{{ .Values.turn.credential }}"
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: ws
+              containerPort: {{ .Values.service.wsPort }}
+              protocol: TCP
+            - name: ws-udp
+              containerPort: {{ .Values.service.wsPort }}
+              protocol: UDP
+            - name: api
+              containerPort: {{ .Values.service.apiPort }}
+              protocol: TCP
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "bken.fullname" . }}-data
+        {{- end }}

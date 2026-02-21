@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,7 +93,7 @@ func (a *App) GetStartupAddr() string {
 func (a *App) GetAutoLogin() AutoLogin {
 	addr := os.Getenv("BKEN_ADDR")
 	if addr == "" {
-		addr = "localhost:4433"
+		addr = "localhost:8443"
 	}
 	return AutoLogin{
 		Username: os.Getenv("BKEN_USERNAME"),
@@ -173,6 +174,32 @@ func (a *App) SetNoiseSuppressionLevel(level int) {
 	a.nc.SetLevel(float32(level) / 100.0)
 }
 
+// SetNotificationVolume sets the notification/soundboard volume (0.0-1.0).
+func (a *App) SetNotificationVolume(vol float64) {
+	a.audio.SetNotificationVolume(float32(vol))
+}
+
+// GetNotificationVolume returns the notification volume (0.0-1.0).
+func (a *App) GetNotificationVolume() float64 {
+	return float64(a.audio.NotificationVolume())
+}
+
+// SetNoiseGate enables or disables the hard noise gate on the capture path.
+func (a *App) SetNoiseGate(enabled bool) {
+	a.audio.SetNoiseGate(enabled)
+}
+
+// SetNoiseGateThreshold sets the noise gate threshold level (0-100).
+func (a *App) SetNoiseGateThreshold(level int) {
+	a.audio.SetNoiseGateThreshold(level)
+}
+
+// GetInputLevel returns the current mic input RMS level (0.0-1.0).
+// Designed to be polled at ~15fps for the input level meter.
+func (a *App) GetInputLevel() float64 {
+	return float64(a.audio.InputLevel())
+}
+
 // StartTest starts the audio loopback test.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartTest() string {
@@ -242,6 +269,11 @@ func (a *App) Connect(addr, username string) string {
 		return err.Error()
 	}
 
+	// Wire per-user volume so audio playback respects individual multipliers.
+	a.audio.UserVolumeFunc = func(senderID uint16) float64 {
+		return a.transport.GetUserVolume(senderID)
+	}
+
 	if err := a.audio.Start(); err != nil {
 		a.transport.Disconnect()
 		return err.Error()
@@ -286,7 +318,7 @@ func (a *App) wireCallbacks() {
 		wailsrt.EventsEmit(a.ctx, "connection:lost", map[string]any{"reason": reason})
 		log.Printf("[app] connection lost: %s", reason)
 	})
-	a.transport.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+	a.transport.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
 		payload := map[string]any{
 			"username":   username,
 			"message":    message,
@@ -301,9 +333,27 @@ func (a *App) wireCallbacks() {
 			payload["file_size"] = fileSize
 			payload["file_url"] = a.fileURL(fileID)
 		}
+		if len(mentions) > 0 {
+			intMentions := make([]int, len(mentions))
+			for i, m := range mentions {
+				intMentions[i] = int(m)
+			}
+			payload["mentions"] = intMentions
+		}
+		if replyTo != 0 {
+			payload["reply_to"] = replyTo
+		}
+		if replyPreview != nil {
+			payload["reply_preview"] = map[string]any{
+				"msg_id":   replyPreview.MsgID,
+				"username": replyPreview.Username,
+				"message":  replyPreview.Message,
+				"deleted":  replyPreview.Deleted,
+			}
+		}
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
-	a.transport.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64) {
+	a.transport.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
 		payload := map[string]any{
 			"username":   username,
 			"message":    message,
@@ -317,6 +367,24 @@ func (a *App) wireCallbacks() {
 			payload["file_name"] = fileName
 			payload["file_size"] = fileSize
 			payload["file_url"] = a.fileURL(fileID)
+		}
+		if len(mentions) > 0 {
+			intMentions := make([]int, len(mentions))
+			for i, m := range mentions {
+				intMentions[i] = int(m)
+			}
+			payload["mentions"] = intMentions
+		}
+		if replyTo != 0 {
+			payload["reply_to"] = replyTo
+		}
+		if replyPreview != nil {
+			payload["reply_preview"] = map[string]any{
+				"msg_id":   replyPreview.MsgID,
+				"username": replyPreview.Username,
+				"message":  replyPreview.Message,
+				"deleted":  replyPreview.Deleted,
+			}
 		}
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
@@ -370,6 +438,65 @@ func (a *App) wireCallbacks() {
 			"msg_id": msgID,
 		})
 	})
+	a.transport.SetOnVideoState(func(userID uint16, active bool, screenShare bool) {
+		wailsrt.EventsEmit(a.ctx, "video:state", map[string]any{
+			"id":           int(userID),
+			"video_active": active,
+			"screen_share": screenShare,
+		})
+	})
+	a.transport.SetOnReactionAdded(func(msgID uint64, emoji string, userID uint16) {
+		wailsrt.EventsEmit(a.ctx, "chat:reaction_added", map[string]any{
+			"msg_id": msgID,
+			"emoji":  emoji,
+			"id":     int(userID),
+		})
+	})
+	a.transport.SetOnReactionRemoved(func(msgID uint64, emoji string, userID uint16) {
+		wailsrt.EventsEmit(a.ctx, "chat:reaction_removed", map[string]any{
+			"msg_id": msgID,
+			"emoji":  emoji,
+			"id":     int(userID),
+		})
+	})
+	a.transport.SetOnUserTyping(func(userID uint16, username string, channelID int64) {
+		wailsrt.EventsEmit(a.ctx, "chat:user_typing", map[string]any{
+			"id":         int(userID),
+			"username":   username,
+			"channel_id": channelID,
+		})
+	})
+	a.transport.SetOnMessagePinned(func(msgID uint64, channelID int64, userID uint16) {
+		wailsrt.EventsEmit(a.ctx, "chat:message_pinned", map[string]any{
+			"msg_id":     msgID,
+			"channel_id": channelID,
+			"id":         int(userID),
+		})
+	})
+	a.transport.SetOnMessageUnpinned(func(msgID uint64) {
+		wailsrt.EventsEmit(a.ctx, "chat:message_unpinned", map[string]any{
+			"msg_id": msgID,
+		})
+	})
+	a.transport.SetOnRecordingState(func(channelID int64, recording bool, startedBy string) {
+		wailsrt.EventsEmit(a.ctx, "recording:state", map[string]any{
+			"channel_id": channelID,
+			"recording":  recording,
+			"started_by": startedBy,
+		})
+	})
+	a.transport.SetOnVideoLayers(func(userID uint16, layers []VideoLayer) {
+		wailsrt.EventsEmit(a.ctx, "video:layers", map[string]any{
+			"id":     int(userID),
+			"layers": layers,
+		})
+	})
+	a.transport.SetOnVideoQualityRequest(func(fromUserID uint16, quality string) {
+		wailsrt.EventsEmit(a.ctx, "video:quality_request", map[string]any{
+			"id":      int(fromUserID),
+			"quality": quality,
+		})
+	})
 	a.audio.OnSpeaking = func() {
 		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
 	}
@@ -392,12 +519,18 @@ func (a *App) Disconnect() {
 }
 
 // DisconnectVoice stops audio capture/playback and moves the user to the
-// lobby (channel 0) but keeps the WebTransport session alive so chat and
+// lobby (channel 0) but keeps the signaling session alive so chat and
 // control messages continue to flow.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DisconnectVoice() string {
 	a.audio.Stop()
 	if err := a.transport.JoinChannel(0); err != nil {
+		// If the control socket is already down, voice is effectively
+		// disconnected from this client's perspective; keep this idempotent.
+		if strings.Contains(err.Error(), "control websocket not connected") {
+			log.Println("[app] disconnect voice: control websocket already closed")
+			return ""
+		}
 		return err.Error()
 	}
 	a.audio.PlayNotification(SoundUserLeft)
@@ -558,6 +691,9 @@ func (a *App) ApplyConfig() {
 	a.audio.SetVAD(cfg.VADEnabled)
 	a.audio.SetVADThreshold(cfg.VADThreshold)
 	a.audio.SetPTTMode(cfg.PTTEnabled)
+	a.audio.SetNoiseGate(cfg.NoiseGateEnabled)
+	a.audio.SetNoiseGateThreshold(cfg.NoiseGateThreshold)
+	a.audio.SetNotificationVolume(float32(cfg.NotificationVolume))
 	a.SetNoiseSuppression(cfg.NoiseEnabled)
 	a.SetNoiseSuppressionLevel(cfg.NoiseLevel)
 	if cfg.InputDeviceID >= 0 {
@@ -599,6 +735,17 @@ func (a *App) GetMutedUsers() []int {
 		out[i] = int(id)
 	}
 	return out
+}
+
+// SetUserVolume sets the local playback volume for a specific remote user.
+// volume is a float64 in [0.0, 2.0] representing 0%-200%.
+func (a *App) SetUserVolume(userID int, volume float64) {
+	a.transport.SetUserVolume(uint16(userID), volume)
+}
+
+// GetUserVolume returns the current local playback volume for a specific remote user.
+func (a *App) GetUserVolume(userID int) float64 {
+	return a.transport.GetUserVolume(uint16(userID))
 }
 
 // RenameUser updates the current user's display name on the server so that
@@ -666,6 +813,33 @@ func (a *App) EditMessage(msgID int, message string) string {
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DeleteMessage(msgID int) string {
 	if err := a.transport.DeleteMessage(uint64(msgID)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// AddReaction adds an emoji reaction to a message.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) AddReaction(msgID int, emoji string) string {
+	if err := a.transport.AddReaction(uint64(msgID), emoji); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// RemoveReaction removes an emoji reaction from a message.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RemoveReaction(msgID int, emoji string) string {
+	if err := a.transport.RemoveReaction(uint64(msgID), emoji); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// SendTyping notifies the server that the user is typing in a channel.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) SendTyping(channelID int) string {
+	if err := a.transport.SendTyping(int64(channelID)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -809,6 +983,42 @@ func (a *App) DeleteChannel(id int) string {
 	return ""
 }
 
+// StartVideo notifies all peers that this user has started video.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) StartVideo() string {
+	if err := a.transport.SendVideoState(true, false); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// StopVideo notifies all peers that this user has stopped video.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) StopVideo() string {
+	if err := a.transport.SendVideoState(false, false); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// StartScreenShare notifies all peers that this user has started screen sharing.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) StartScreenShare() string {
+	if err := a.transport.SendVideoState(true, true); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// StopScreenShare notifies all peers that this user has stopped screen sharing.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) StopScreenShare() string {
+	if err := a.transport.SendVideoState(false, false); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // MoveUserToChannel asks the server to move a user to a different channel.
 // Only succeeds if the caller is the room owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
@@ -855,4 +1065,34 @@ func (a *App) sendLoop() {
 			consecutiveErrors = 0
 		}
 	}
+}
+
+// StartRecording asks the server to start recording voice in a channel.
+// Only the room owner can start recording; the server enforces the check.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) StartRecording(channelID int) string {
+	if err := a.transport.StartRecording(int64(channelID)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// StopRecording asks the server to stop recording voice in a channel.
+// Only the room owner can stop recording; the server enforces the check.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) StopRecording(channelID int) string {
+	if err := a.transport.StopRecording(int64(channelID)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// RequestVideoQuality asks a remote video sender to switch to a different
+// simulcast quality layer. quality must be "high", "medium", or "low".
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RequestVideoQuality(targetUserID int, quality string) string {
+	if err := a.transport.RequestVideoQuality(uint16(targetUserID), quality); err != nil {
+		return err.Error()
+	}
+	return ""
 }

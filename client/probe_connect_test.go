@@ -3,30 +3,32 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"net/http"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/webtransport-go"
+	"github.com/gorilla/websocket"
 )
 
+// TestProbeRemoteWebTransport is retained as a manual connectivity probe,
+// but now targets the websocket signaling endpoint used by the app.
+// Set BKEN_PROBE_ADDR (host:port) to run it.
 func TestProbeRemoteWebTransport(t *testing.T) {
-	target := "10.0.8.85:4443"
+	target := os.Getenv("BKEN_PROBE_ADDR")
+	if target == "" {
+		t.Skip("set BKEN_PROBE_ADDR=host:port to run connectivity probe")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	d := webtransport.Dialer{
+	d := websocket.Dialer{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-		QUICConfig: &quic.Config{
-			EnableDatagrams:                  true,
-			EnableStreamResetPartialDelivery: true,
-		},
 	}
 
-	_, sess, err := d.Dial(ctx, "https://"+target, http.Header{})
+	conn, _, err := d.DialContext(ctx, "wss://"+target+"/ws", nil)
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-	_ = sess.CloseWithError(0, "probe")
+	_ = conn.Close()
 }

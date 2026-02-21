@@ -1,22 +1,20 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"net"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/webtransport-go"
+	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 // mutedSet is a concurrent set of uint16 user IDs.
@@ -37,29 +35,60 @@ func (ms *mutedSet) Slice() []uint16 {
 	return out
 }
 
+// ICEServerInfo describes a STUN or TURN server for WebRTC peer connections.
+type ICEServerInfo struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
 // ControlMsg mirrors the server's control message format.
 type ControlMsg struct {
-	Type       string        `json:"type"`
-	Username   string        `json:"username,omitempty"`
-	ID         uint16        `json:"id,omitempty"`
-	Users      []UserInfo    `json:"users,omitempty"`
-	Ts         int64         `json:"ts,omitempty"`          // ping/pong timestamp (Unix ms)
-	Message    string        `json:"message,omitempty"`     // chat: body text
-	ServerName string        `json:"server_name,omitempty"` // user_list: human-readable server name
-	OwnerID    uint16        `json:"owner_id,omitempty"`    // user_list/owner_changed: current room owner
-	ChannelID  int64         `json:"channel_id,omitempty"`  // join_channel/user_channel: target channel
-	Channels   []ChannelInfo `json:"channels,omitempty"`    // channel_list: full list of channels
-	APIPort    int           `json:"api_port,omitempty"`    // user_list: HTTP API port for file uploads
-	FileID     int64         `json:"file_id,omitempty"`     // chat: uploaded file DB id
-	FileName   string        `json:"file_name,omitempty"`   // chat: original filename
-	FileSize   int64         `json:"file_size,omitempty"`   // chat: file size in bytes
-	MsgID      uint64        `json:"msg_id,omitempty"`      // chat/link_preview: server-assigned message ID
-	LinkURL    string        `json:"link_url,omitempty"`    // link_preview: the URL that was fetched
-	LinkTitle  string        `json:"link_title,omitempty"`  // link_preview: page title
-	LinkDesc   string        `json:"link_desc,omitempty"`   // link_preview: page description
-	LinkImage  string        `json:"link_image,omitempty"`  // link_preview: preview image URL
-	LinkSite   string        `json:"link_site,omitempty"`   // link_preview: site name
-	Seqs       []uint16      `json:"seqs,omitempty"`        // nack: missing sequence numbers for retransmission
+	Type          string          `json:"type"`
+	Username      string          `json:"username,omitempty"`
+	ID            uint16          `json:"id,omitempty"`
+	SelfID        uint16          `json:"self_id,omitempty"`
+	TargetID      uint16          `json:"target_id,omitempty"`
+	Users         []UserInfo      `json:"users,omitempty"`
+	Ts            int64           `json:"ts,omitempty"`              // ping/pong timestamp (Unix ms)
+	Message       string          `json:"message,omitempty"`         // chat: body text
+	ServerName    string          `json:"server_name,omitempty"`     // user_list: human-readable server name
+	OwnerID       uint16          `json:"owner_id,omitempty"`        // user_list/owner_changed: current room owner
+	ChannelID     int64           `json:"channel_id,omitempty"`      // join_channel/user_channel: target channel
+	Channels      []ChannelInfo   `json:"channels,omitempty"`        // channel_list: full list of channels
+	APIPort       int             `json:"api_port,omitempty"`        // user_list: HTTP API port for file uploads
+	ICEServers    []ICEServerInfo `json:"ice_servers,omitempty"`     // user_list: ICE servers for WebRTC
+	FileID        int64           `json:"file_id,omitempty"`         // chat: uploaded file DB id
+	FileName      string          `json:"file_name,omitempty"`       // chat: original filename
+	FileSize      int64           `json:"file_size,omitempty"`       // chat: file size in bytes
+	MsgID         uint64          `json:"msg_id,omitempty"`          // chat/link_preview: server-assigned message ID
+	LinkURL       string          `json:"link_url,omitempty"`        // link_preview: the URL that was fetched
+	LinkTitle     string          `json:"link_title,omitempty"`      // link_preview: page title
+	LinkDesc      string          `json:"link_desc,omitempty"`       // link_preview: page description
+	LinkImage     string          `json:"link_image,omitempty"`      // link_preview: preview image URL
+	LinkSite      string          `json:"link_site,omitempty"`       // link_preview: site name
+	SDP           string          `json:"sdp,omitempty"`             // webrtc_offer/webrtc_answer
+	Candidate     string          `json:"candidate,omitempty"`       // webrtc_ice
+	SDPMid        string          `json:"sdp_mid,omitempty"`         // webrtc_ice
+	SDPMLineIndex *uint16         `json:"sdp_mline_index,omitempty"` // webrtc_ice
+	VideoActive   *bool           `json:"video_active,omitempty"`    // video_state: whether user has video on
+	ScreenShare   *bool           `json:"screen_share,omitempty"`    // video_state: whether this is a screen share
+	Mentions      []uint16        `json:"mentions,omitempty"`        // chat: user IDs mentioned
+	Emoji         string          `json:"emoji,omitempty"`           // add_reaction/remove_reaction: emoji character
+	ReplyTo       uint64          `json:"reply_to,omitempty"`        // chat: message ID being replied to
+	ReplyPreview  *ReplyPreview   `json:"reply_preview,omitempty"`   // chat: preview of replied-to message
+	Pinned        *bool           `json:"pinned,omitempty"`          // message_pinned/message_unpinned
+	Recording     *bool           `json:"recording,omitempty"`       // recording_started/stopped
+	VideoLayers   []VideoLayer    `json:"video_layers,omitempty"`    // video_state: simulcast layers
+	VideoQuality  string          `json:"video_quality,omitempty"`   // set_video_quality: requested layer
+}
+
+// ReplyPreview is a compact preview of the original message in a reply.
+type ReplyPreview struct {
+	MsgID    uint64 `json:"msg_id"`
+	Username string `json:"username"`
+	Message  string `json:"message"`
+	Deleted  bool   `json:"deleted,omitempty"`
 }
 
 // UserInfo describes a connected peer.
@@ -67,24 +96,34 @@ type UserInfo struct {
 	ID        uint16 `json:"id"`
 	Username  string `json:"username"`
 	ChannelID int64  `json:"channel_id,omitempty"` // 0 = not in any channel
+	Role      string `json:"role,omitempty"`       // OWNER/ADMIN/MODERATOR/USER
 }
 
 // ChannelInfo describes a voice channel.
 type ChannelInfo struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	MaxUsers int    `json:"max_users,omitempty"` // 0 = unlimited
+}
+
+// VideoLayer describes a simulcast video layer available from a sender.
+type VideoLayer struct {
+	Quality string `json:"quality"` // "high", "medium", or "low"
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+	Bitrate int    `json:"bitrate"` // kbps
 }
 
 // Metrics holds connection quality metrics shown in the UI.
 type Metrics struct {
 	RTTMs           float64 `json:"rtt_ms"`
-	PacketLoss      float64 `json:"packet_loss"`       // 0.0–1.0
-	JitterMs        float64 `json:"jitter_ms"`         // inter-arrival jitter (smoothed)
-	BitrateKbps     float64 `json:"bitrate_kbps"`      // measured outgoing audio
-	OpusTargetKbps  int     `json:"opus_target_kbps"`  // current encoder target
-	QualityLevel    string  `json:"quality_level"`     // "good", "moderate", or "poor"
-	CaptureDropped  uint64  `json:"capture_dropped"`   // frames dropped on send side since last tick
-	PlaybackDropped uint64  `json:"playback_dropped"`  // frames dropped on recv side since last tick
+	PacketLoss      float64 `json:"packet_loss"`      // 0.0–1.0
+	JitterMs        float64 `json:"jitter_ms"`        // inter-arrival jitter (smoothed)
+	BitrateKbps     float64 `json:"bitrate_kbps"`     // measured outgoing audio
+	OpusTargetKbps  int     `json:"opus_target_kbps"` // current encoder target
+	QualityLevel    string  `json:"quality_level"`    // "good", "moderate", or "poor"
+	CaptureDropped  uint64  `json:"capture_dropped"`  // frames dropped on send side since last tick
+	PlaybackDropped uint64  `json:"playback_dropped"` // frames dropped on recv side since last tick
 }
 
 // qualityLevel classifies connection quality from metrics.
@@ -101,23 +140,27 @@ func qualityLevel(loss, rttMs, jitterMs, dropRate float64) string {
 	return "good"
 }
 
-// Transport manages the WebTransport connection to the server.
+type peerState struct {
+	id      uint16
+	pc      *webrtc.PeerConnection
+	track   *webrtc.TrackLocalStaticSample
+	trackID string
+
+	mu         sync.Mutex
+	pendingICE []webrtc.ICECandidateInit
+}
+
+// Transport manages the websocket signaling channel and WebRTC media peers.
 // It implements the Transporter interface.
 type Transport struct {
-	mu      sync.Mutex
-	session *webtransport.Session
-	cancel  context.CancelFunc
+	mu        sync.Mutex
+	ws        *websocket.Conn
+	cancel    context.CancelFunc
+	myID      uint16
+	myChannel atomic.Int64
 
-	// myID is the server-assigned ID for this client.
-	// Written once in readControl; protected by mu.
-	myID uint16
-
-	// Control stream write serialisation.
+	// Control write serialization.
 	ctrlMu sync.Mutex
-	ctrl   *webtransport.Stream
-
-	// Sequence counter for outgoing datagrams (monotonically increasing).
-	seq atomic.Uint32
 
 	// RTT: smoothed via EWMA (RFC 6298), stored as float64 bits for atomic access.
 	smoothedRTT atomic.Uint64
@@ -145,9 +188,11 @@ type Transport struct {
 	// muted holds the set of remote user IDs whose audio is suppressed locally.
 	muted mutedSet
 
-	// recvCancel cancels the current StartReceiving goroutine (if any).
-	// Protected by mu; set in StartReceiving, called in Disconnect and
-	// before spawning a replacement goroutine.
+	// userVolume stores per-user volume multipliers (uint16 -> float64).
+	// Default (absent) means 1.0. Range is [0.0, 2.0] (0%-200%).
+	userVolume sync.Map
+
+	// recvCancel cancels the current StartReceiving lifecycle (if any).
 	recvCancel context.CancelFunc
 
 	// disconnectReason is set before Disconnect is called to communicate the
@@ -158,13 +203,33 @@ type Transport struct {
 	metricsMu       sync.Mutex
 	lastMetricsTime time.Time
 
-	// serverAddr is the WebTransport address passed to Connect (e.g. "192.168.1.5:4433").
-	// Used to derive the HTTP API base URL from the api_port in user_list.
+	// serverAddr is the normalized host:port passed to Connect.
 	serverAddr string // protected by mu
 
 	// apiBaseURL is the HTTP base URL for the server's REST API (e.g. "http://host:8080").
-	// Set from the api_port field in the user_list welcome message.
+	// Set from the api_port field in user_list.
 	apiBaseURL string // protected by mu
+
+	// playbackCh receives decoded Opus payloads from remote tracks.
+	playbackCh chan<- TaggedAudio
+
+	// userChannels tracks the latest channel for each connected user.
+	userChannels sync.Map // map[uint16]int64
+
+	// iceServers holds ICE configuration received from the server in user_list.
+	iceServers []ICEServerInfo // protected by mu
+
+	// peers holds one RTCPeerConnection per remote user.
+	peers map[uint16]*peerState
+
+	// stats maps for sequence and jitter tracking per sender.
+	statsMu      sync.Mutex
+	lastSeq      map[uint16]uint16
+	hasSeq       map[uint16]bool
+	lastSeen     map[uint16]time.Time
+	lastArrival  map[uint16]time.Time
+	lastSpeaking map[uint16]time.Time
+	pruneCounter int
 
 	// Callbacks — set via setters before calling Connect.
 	cbMu                 sync.RWMutex
@@ -173,8 +238,8 @@ type Transport struct {
 	onUserLeft           func(uint16)
 	onAudioReceived      func(uint16)
 	onDisconnected       func(reason string)
-	onChatMessage        func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
-	onChannelChatMessage func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)
+	onChatMessage        func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)
+	onChannelChatMessage func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)
 	onServerInfo         func(name string)
 	onKicked             func()
 	onOwnerChanged       func(ownerID uint16)
@@ -184,6 +249,15 @@ type Transport struct {
 	onUserRenamed        func(userID uint16, username string)
 	onMessageEdited      func(msgID uint64, message string, ts int64)
 	onMessageDeleted     func(msgID uint64)
+	onVideoState         func(userID uint16, active bool, screenShare bool)
+	onReactionAdded      func(msgID uint64, emoji string, userID uint16)
+	onReactionRemoved    func(msgID uint64, emoji string, userID uint16)
+	onUserTyping         func(userID uint16, username string, channelID int64)
+	onMessagePinned      func(msgID uint64, channelID int64, userID uint16)
+	onMessageUnpinned    func(msgID uint64)
+	onRecordingState     func(channelID int64, recording bool, startedBy string)
+	onVideoLayers        func(userID uint16, layers []VideoLayer)
+	onVideoQualityReq    func(fromUserID uint16, quality string)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -191,7 +265,15 @@ var _ Transporter = (*Transport)(nil)
 
 // NewTransport creates a ready-to-use Transport.
 func NewTransport() *Transport {
-	return &Transport{lastMetricsTime: time.Now()}
+	return &Transport{
+		lastMetricsTime: time.Now(),
+		peers:           make(map[uint16]*peerState),
+		lastSeq:         make(map[uint16]uint16),
+		hasSeq:          make(map[uint16]bool),
+		lastSeen:        make(map[uint16]time.Time),
+		lastArrival:     make(map[uint16]time.Time),
+		lastSpeaking:    make(map[uint16]time.Time),
+	}
 }
 
 // --- Callback setters (satisfy Transporter interface) ---
@@ -226,13 +308,13 @@ func (t *Transport) SetOnDisconnected(fn func(reason string)) {
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
+func (t *Transport) SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)) {
 	t.cbMu.Lock()
 	t.onChatMessage = fn
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64)) {
+func (t *Transport) SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)) {
 	t.cbMu.Lock()
 	t.onChannelChatMessage = fn
 	t.cbMu.Unlock()
@@ -292,6 +374,60 @@ func (t *Transport) SetOnMessageDeleted(fn func(msgID uint64)) {
 	t.cbMu.Unlock()
 }
 
+func (t *Transport) SetOnVideoState(fn func(userID uint16, active bool, screenShare bool)) {
+	t.cbMu.Lock()
+	t.onVideoState = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnReactionAdded(fn func(msgID uint64, emoji string, userID uint16)) {
+	t.cbMu.Lock()
+	t.onReactionAdded = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnReactionRemoved(fn func(msgID uint64, emoji string, userID uint16)) {
+	t.cbMu.Lock()
+	t.onReactionRemoved = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnUserTyping(fn func(userID uint16, username string, channelID int64)) {
+	t.cbMu.Lock()
+	t.onUserTyping = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnMessagePinned(fn func(msgID uint64, channelID int64, userID uint16)) {
+	t.cbMu.Lock()
+	t.onMessagePinned = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnMessageUnpinned(fn func(msgID uint64)) {
+	t.cbMu.Lock()
+	t.onMessageUnpinned = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnRecordingState(fn func(channelID int64, recording bool, startedBy string)) {
+	t.cbMu.Lock()
+	t.onRecordingState = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnVideoLayers(fn func(userID uint16, layers []VideoLayer)) {
+	t.cbMu.Lock()
+	t.onVideoLayers = fn
+	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnVideoQualityRequest(fn func(fromUserID uint16, quality string)) {
+	t.cbMu.Lock()
+	t.onVideoQualityReq = fn
+	t.cbMu.Unlock()
+}
+
 // --- Per-user local muting ---
 
 // MuteUser suppresses incoming audio from the given remote user ID.
@@ -305,6 +441,28 @@ func (t *Transport) IsUserMuted(id uint16) bool { return t.muted.Has(id) }
 
 // MutedUsers returns the IDs of all currently muted remote users.
 func (t *Transport) MutedUsers() []uint16 { return t.muted.Slice() }
+
+// SetUserVolume sets the local playback volume multiplier for a remote user.
+// volume is in [0.0, 2.0] representing 0%-200%. Default (unset) is 1.0.
+func (t *Transport) SetUserVolume(id uint16, volume float64) {
+	if volume < 0 {
+		volume = 0
+	}
+	if volume > 2.0 {
+		volume = 2.0
+	}
+	t.userVolume.Store(id, volume)
+}
+
+// GetUserVolume returns the local playback volume multiplier for a remote user.
+// Returns 1.0 if not explicitly set.
+func (t *Transport) GetUserVolume(id uint16) float64 {
+	v, ok := t.userVolume.Load(id)
+	if !ok {
+		return 1.0
+	}
+	return v.(float64)
+}
 
 // KickUser sends a kick request to the server. Only succeeds if the caller is
 // the room owner; the server enforces the authorisation check.
@@ -354,6 +512,36 @@ func (t *Transport) RenameUser(name string) error {
 	return t.writeCtrl(ControlMsg{Type: "rename_user", Username: name})
 }
 
+// SendVideoState tells the server (and thus all peers) whether we have video
+// active and whether it's a screen share. The server broadcasts a video_state
+// message with our authoritative ID.
+func (t *Transport) SendVideoState(active bool, screenShare bool) error {
+	return t.writeCtrl(ControlMsg{
+		Type:        "video_state",
+		VideoActive: &active,
+		ScreenShare: &screenShare,
+	})
+}
+
+// RequestVideoQuality asks the server to relay a quality request to a video
+// sender. The sender can then adjust their encoder or select a simulcast layer.
+// quality must be "high", "medium", or "low".
+func (t *Transport) RequestVideoQuality(targetID uint16, quality string) error {
+	return t.writeCtrl(ControlMsg{Type: "set_video_quality", TargetID: targetID, VideoQuality: quality})
+}
+
+// StartRecording asks the server to start recording voice in a channel.
+// Only succeeds if the caller is the room owner; the server enforces the check.
+func (t *Transport) StartRecording(channelID int64) error {
+	return t.writeCtrl(ControlMsg{Type: "start_recording", ChannelID: channelID})
+}
+
+// StopRecording asks the server to stop recording voice in a channel.
+// Only succeeds if the caller is the room owner; the server enforces the check.
+func (t *Transport) StopRecording(channelID int64) error {
+	return t.writeCtrl(ControlMsg{Type: "stop_recording", ChannelID: channelID})
+}
+
 // EditMessage asks the server to update a message's text. Only the original
 // sender is allowed to edit; the server enforces the authorisation check.
 func (t *Transport) EditMessage(msgID uint64, message string) error {
@@ -392,9 +580,7 @@ func (t *Transport) SendFileChat(channelID, fileID, fileSize int64, fileName, me
 	})
 }
 
-// SendChannelChat sends a channel-scoped chat message. The server routes it
-// only to users currently in the sender's channel. If the caller is not in a
-// channel, the server falls back to global broadcast.
+// SendChannelChat sends a channel-scoped chat message.
 func (t *Transport) SendChannelChat(channelID int64, message string) error {
 	if err := validateChat(message); err != nil {
 		return err
@@ -408,6 +594,30 @@ func (t *Transport) SendChat(message string) error {
 		return err
 	}
 	return t.writeCtrl(ControlMsg{Type: "chat", Message: message})
+}
+
+// AddReaction adds an emoji reaction to a message.
+func (t *Transport) AddReaction(msgID uint64, emoji string) error {
+	if emoji == "" {
+		return fmt.Errorf("emoji must not be empty")
+	}
+	return t.writeCtrl(ControlMsg{Type: "add_reaction", MsgID: msgID, Emoji: emoji})
+}
+
+// RemoveReaction removes an emoji reaction from a message.
+func (t *Transport) RemoveReaction(msgID uint64, emoji string) error {
+	if emoji == "" {
+		return fmt.Errorf("emoji must not be empty")
+	}
+	return t.writeCtrl(ControlMsg{Type: "remove_reaction", MsgID: msgID, Emoji: emoji})
+}
+
+// SendTyping notifies the server that the user is typing in a channel.
+func (t *Transport) SendTyping(channelID int64) error {
+	if channelID == 0 {
+		return fmt.Errorf("channel_id must not be zero")
+	}
+	return t.writeCtrl(ControlMsg{Type: "typing", ChannelID: channelID})
 }
 
 // validateChat returns an error if the message is empty or too long.
@@ -427,77 +637,73 @@ func (t *Transport) writeCtrl(msg ControlMsg) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	data = append(data, '\n')
 	t.ctrlMu.Lock()
 	defer t.ctrlMu.Unlock()
-	if t.ctrl == nil {
-		return fmt.Errorf("control stream not connected")
+	if t.ws == nil {
+		return fmt.Errorf("control websocket not connected")
 	}
-	_, err = t.ctrl.Write(data)
-	return err
+	_ = t.ws.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := t.ws.WriteMessage(websocket.TextMessage, data); err != nil {
+		return fmt.Errorf("websocket write: %w", err)
+	}
+	return nil
 }
 
 // writeCtrlBestEffort sends a control message without returning errors.
-// Used for non-critical messages (pings) where failure is handled elsewhere.
+// Used for non-critical messages where failure is handled elsewhere.
 func (t *Transport) writeCtrlBestEffort(msg ControlMsg) {
 	if err := t.writeCtrl(msg); err != nil {
 		log.Printf("[transport] best-effort write (%s): %v", msg.Type, err)
 	}
 }
 
-// connectTimeout is the maximum time allowed for the initial WebTransport
-// dial + control stream open + join handshake.
+// connectTimeout is the maximum time allowed for the initial websocket dial + join handshake.
 const connectTimeout = 10 * time.Second
 
-// Connect establishes a WebTransport session and sends the join message.
+// Connect establishes the websocket control/signaling channel and sends join.
 // Callbacks must be registered via Set* methods before calling Connect.
 func (t *Transport) Connect(ctx context.Context, addr, username string) error {
+	normalizedAddr, err := normalizeServerAddr(addr)
+	if err != nil {
+		return err
+	}
+
+	// Defensive cleanup in case a stale session exists.
+	t.Disconnect()
+
 	// Reset per-session state.
 	t.muted.Clear()
+	t.clearUserChannels()
+	t.resetPeerStats()
+
 	t.mu.Lock()
 	t.disconnectReason = ""
-	t.serverAddr = addr
+	t.serverAddr = normalizedAddr
 	t.apiBaseURL = ""
+	t.myID = 0
+	t.myChannel.Store(0)
 	t.mu.Unlock()
 
-	// Apply a dial timeout so the caller isn't blocked indefinitely when the
-	// server is unreachable. The timeout only covers the handshake; once
-	// connected the session-scoped context takes over.
 	dialCtx, dialCancel := context.WithTimeout(ctx, connectTimeout)
 	defer dialCancel()
 
-	ctx, cancel := context.WithCancel(ctx)
+	sessionCtx, cancel := context.WithCancel(ctx)
+
+	d := websocket.Dialer{
+		TLSClientConfig:  &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // self-signed local server cert
+		HandshakeTimeout: connectTimeout,
+	}
+
+	conn, _, err := d.DialContext(dialCtx, "wss://"+normalizedAddr+"/ws", nil)
+	if err != nil {
+		cancel()
+		return err
+	}
+
 	t.mu.Lock()
+	t.ws = conn
 	t.cancel = cancel
 	t.mu.Unlock()
-
-	d := webtransport.Dialer{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec — self-signed server cert
-		QUICConfig: &quic.Config{
-			EnableDatagrams:                  true,
-			EnableStreamResetPartialDelivery: true,
-		},
-	}
-
-	_, sess, err := d.Dial(dialCtx, "https://"+addr, http.Header{})
-	if err != nil {
-		cancel()
-		return err
-	}
-
-	t.mu.Lock()
-	t.session = sess
-	t.mu.Unlock()
-
-	stream, err := sess.OpenStream()
-	if err != nil {
-		cancel()
-		sess.CloseWithError(0, "failed to open control stream")
-		return err
-	}
-	t.ctrlMu.Lock()
-	t.ctrl = stream
-	t.ctrlMu.Unlock()
 
 	// Reset per-session metrics.
 	t.smoothedRTT.Store(0)
@@ -505,35 +711,37 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	t.bytesSent.Store(0)
 	t.lostPackets.Store(0)
 	t.expectedPackets.Store(0)
-	t.lastPongTime.Store(time.Now().UnixNano()) // baseline: treat connection start as a pong
+	t.lastPongTime.Store(time.Now().UnixNano())
 	t.metricsMu.Lock()
 	t.lastMetricsTime = time.Now()
 	t.metricsMu.Unlock()
 
 	if err := t.writeCtrl(ControlMsg{Type: "join", Username: username}); err != nil {
-		cancel()
-		sess.CloseWithError(0, "failed to send join")
+		t.Disconnect()
 		return fmt.Errorf("send join: %w", err)
 	}
 
-	go t.readControl(ctx, stream)
-	go t.pingLoop(ctx)
+	go t.readControl(sessionCtx, conn)
+	go t.pingLoop(sessionCtx)
 
 	return nil
 }
 
-// Disconnect closes the WebTransport session.
+// Disconnect closes the websocket and all peer connections.
 func (t *Transport) Disconnect() {
 	t.ctrlMu.Lock()
-	if t.ctrl != nil {
-		t.ctrl.Close() //nolint:errcheck // best-effort close for fast server-side teardown
-		t.ctrl = nil
-	}
+	ws := t.ws
+	t.ws = nil
 	t.ctrlMu.Unlock()
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	if ws != nil {
+		_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "disconnect"), time.Now().Add(250*time.Millisecond))
+		_ = ws.Close()
+	}
 
+	var peers []*peerState
+
+	t.mu.Lock()
 	if t.recvCancel != nil {
 		t.recvCancel()
 		t.recvCancel = nil
@@ -542,54 +750,99 @@ func (t *Transport) Disconnect() {
 		t.cancel()
 		t.cancel = nil
 	}
-	if t.session != nil {
-		t.session.CloseWithError(0, "disconnect")
-		t.session = nil
+	for _, p := range t.peers {
+		peers = append(peers, p)
 	}
+	t.peers = make(map[uint16]*peerState)
 	t.myID = 0
-}
-
-// dgramPool reuses datagram buffers on the voice send hot path.
-// Each buffer is pre-allocated to the maximum datagram size (4-byte header +
-// 1275-byte max Opus packet). quic-go's SendDatagram copies the data
-// internally, so the buffer can be returned to the pool immediately after
-// the call returns.
-//
-// Stored as *[]byte (not []byte) so the pointer fits in the interface word
-// and Get/Put avoid the per-call allocation from boxing a 3-word slice header.
-var dgramPool = sync.Pool{
-	New: func() any {
-		buf := make([]byte, 4+opusMaxPacketBytes)
-		return &buf
-	},
-}
-
-// SendAudio sends an encoded Opus frame as an unreliable datagram.
-// The datagram header is: [userID:2][seq:2][opus_payload].
-// Buffers are recycled via sync.Pool to avoid per-frame allocations (50/s).
-func (t *Transport) SendAudio(opusData []byte) error {
-	t.mu.Lock()
-	sess := t.session
-	myID := t.myID
+	t.myChannel.Store(0)
+	t.playbackCh = nil
 	t.mu.Unlock()
 
-	if sess == nil {
+	for _, p := range peers {
+		_ = p.pc.Close()
+	}
+
+	t.clearUserChannels()
+	t.resetPeerStats()
+}
+
+func (t *Transport) clearUserChannels() {
+	t.userChannels.Range(func(k, _ any) bool {
+		t.userChannels.Delete(k)
+		return true
+	})
+}
+
+func (t *Transport) resetPeerStats() {
+	t.statsMu.Lock()
+	t.lastSeq = make(map[uint16]uint16)
+	t.hasSeq = make(map[uint16]bool)
+	t.lastSeen = make(map[uint16]time.Time)
+	t.lastArrival = make(map[uint16]time.Time)
+	t.lastSpeaking = make(map[uint16]time.Time)
+	t.pruneCounter = 0
+	t.statsMu.Unlock()
+}
+
+// SendAudio writes an Opus frame to every active WebRTC peer in the same voice channel.
+func (t *Transport) SendAudio(opusData []byte) error {
+	if len(opusData) == 0 {
 		return nil
 	}
 
-	seq := uint16(t.seq.Add(1))
-	dgramLen := 4 + len(opusData)
+	myChannel := t.myChannel.Load()
+	if myChannel == 0 {
+		return nil
+	}
 
-	bp := dgramPool.Get().(*[]byte)
-	dgram := (*bp)[:dgramLen]
-	binary.BigEndian.PutUint16(dgram[0:2], myID)
-	binary.BigEndian.PutUint16(dgram[2:4], seq)
-	copy(dgram[4:], opusData)
+	t.mu.Lock()
+	if len(t.peers) == 0 {
+		t.mu.Unlock()
+		return nil
+	}
+	peers := make([]*peerState, 0, len(t.peers))
+	for _, p := range t.peers {
+		peers = append(peers, p)
+	}
+	t.mu.Unlock()
 
-	t.bytesSent.Add(uint64(dgramLen))
-	err := sess.SendDatagram(dgram)
-	dgramPool.Put(bp)
-	return err
+	var firstErr error
+	for _, p := range peers {
+		if !t.peerInMyChannel(p.id, myChannel) {
+			continue
+		}
+		sample := media.Sample{
+			Data:     append([]byte(nil), opusData...),
+			Duration: 20 * time.Millisecond,
+		}
+		if err := p.track.WriteSample(sample); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		t.bytesSent.Add(uint64(len(opusData)))
+	}
+	return firstErr
+}
+
+func (t *Transport) peerInMyChannel(peerID uint16, myChannel int64) bool {
+	if myChannel == 0 {
+		return false
+	}
+	v, ok := t.userChannels.Load(peerID)
+	if !ok {
+		return false
+	}
+	peerChannel, ok := v.(int64)
+	if !ok {
+		return false
+	}
+	if peerChannel == 0 {
+		return false
+	}
+	return peerChannel == myChannel
 }
 
 // MyID returns the local client's server-assigned user ID (0 before join ack).
@@ -599,149 +852,412 @@ func (t *Transport) MyID() uint16 {
 	return t.myID
 }
 
-// StartReceiving pumps incoming datagrams to playbackCh in a background goroutine.
-// Each TaggedAudio carries the sender ID, sequence number, and raw Opus payload
-// so the audio engine can feed its per-sender jitter buffer.
-// Calling StartReceiving again cancels the previous goroutine before spawning a
-// new one, preventing duplicate readers on the same session.
+// StartReceiving stores the playback channel used by incoming WebRTC tracks.
 func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- TaggedAudio) {
 	t.mu.Lock()
-	// Cancel any existing receive goroutine so we never have two readers.
+	if t.ws == nil {
+		t.mu.Unlock()
+		return
+	}
 	if t.recvCancel != nil {
 		t.recvCancel()
 	}
-	sess := t.session
+	_, cancel := context.WithCancel(ctx)
+	t.recvCancel = cancel
+	t.playbackCh = playbackCh
 	t.mu.Unlock()
-	if sess == nil {
-		return
+}
+
+// buildICEServers converts ICEServerInfo from the server into pion's
+// webrtc.ICEServer slice. Falls back to Google STUN if none were provided.
+// Caller must hold t.mu.
+func (t *Transport) buildICEServers() []webrtc.ICEServer {
+	if len(t.iceServers) == 0 {
+		return []webrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		}
+	}
+	servers := make([]webrtc.ICEServer, 0, len(t.iceServers))
+	for _, s := range t.iceServers {
+		ice := webrtc.ICEServer{URLs: s.URLs}
+		if s.Username != "" {
+			ice.Username = s.Username
+		}
+		if s.Credential != "" {
+			ice.Credential = s.Credential
+		}
+		servers = append(servers, ice)
+	}
+	return servers
+}
+
+func (t *Transport) ensurePeer(remoteID uint16) (*peerState, bool) {
+	if remoteID == 0 {
+		return nil, false
 	}
 
-	rctx, cancel := context.WithCancel(ctx)
 	t.mu.Lock()
-	t.recvCancel = cancel
+	if existing, ok := t.peers[remoteID]; ok {
+		t.mu.Unlock()
+		return existing, false
+	}
+	myID := t.myID
+	iceServers := t.buildICEServers()
 	t.mu.Unlock()
 
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
+		ICEServers: iceServers,
+	})
+	if err != nil {
+		log.Printf("[transport] create peer %d: %v", remoteID, err)
+		return nil, false
+	}
+
+	trackID := fmt.Sprintf("audio-%d-to-%d", myID, remoteID)
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 1},
+		trackID,
+		"bken",
+	)
+	if err != nil {
+		_ = pc.Close()
+		log.Printf("[transport] create local track %d: %v", remoteID, err)
+		return nil, false
+	}
+
+	sender, err := pc.AddTrack(track)
+	if err != nil {
+		_ = pc.Close()
+		log.Printf("[transport] add track %d: %v", remoteID, err)
+		return nil, false
+	}
+
+	// Drain RTCP so interceptors do not back up.
 	go func() {
-		defer cancel()
-		speakTimers := make(map[uint16]time.Time)
-		lastSeq := make(map[uint16]uint16)      // senderID → last received seq
-		hasSeq := make(map[uint16]bool)          // whether lastSeq contains a valid entry
-		lastSeen := make(map[uint16]time.Time)   // senderID → last packet time
-		lastArrival := make(map[uint16]time.Time) // senderID → arrival time of previous packet
-		var pruneCounter int
-
-		const expectedGapMs = 20.0 // one Opus frame = 20 ms
-		const jitterAlpha = 1.0 / 16.0 // RFC 3550 jitter gain
-		const maxNACKGap = 5 // only NACK small gaps; larger = sustained loss, let FEC/PLC handle
-
+		rtcpBuf := make([]byte, 1500)
 		for {
-			data, err := sess.ReceiveDatagram(rctx)
-			if err != nil {
+			if _, _, err := sender.Read(rtcpBuf); err != nil {
 				return
-			}
-
-			userID, seq, opusData, ok := ParseDatagram(data)
-			if !ok {
-				continue
-			}
-
-			// Drop audio from locally muted users before any further processing.
-			if t.muted.Has(userID) {
-				continue
-			}
-
-			now := time.Now()
-			lastSeen[userID] = now
-
-			// Sequence-gap packet loss accounting. Only count forward progress
-			// (diff in [1, 1000)) to avoid corrupting metrics when retransmitted
-			// or reordered packets arrive with older sequence numbers.
-			forwardProgress := false
-			if prev, has := lastSeq[userID]; has && hasSeq[userID] {
-				diff := int(seq) - int(prev)
-				if diff < 0 {
-					diff += 65536 // uint16 wraparound
-				}
-				if diff > 0 && diff < 1000 {
-					forwardProgress = true
-					lastSeq[userID] = seq
-					t.expectedPackets.Add(uint64(diff))
-					if diff > 1 {
-						t.lostPackets.Add(uint64(diff - 1))
-						// NACK missing packets for small gaps. On LAN with
-						// <1ms RTT, retransmissions arrive well within the
-						// jitter buffer window (20ms+), giving 100% recovery
-						// vs the ~80% quality of FEC/PLC.
-						if diff <= maxNACKGap+1 {
-							seqs := make([]uint16, 0, diff-1)
-							for i := 1; i < diff; i++ {
-								seqs = append(seqs, prev+uint16(i))
-							}
-							go t.writeCtrlBestEffort(ControlMsg{Type: "nack", ID: userID, Seqs: seqs})
-						}
-					}
-				}
-				// else: retransmitted/reordered packet — deliver to jitter
-				// buffer without updating lastSeq or loss counters.
-			} else {
-				forwardProgress = true
-				lastSeq[userID] = seq
-				hasSeq[userID] = true
-			}
-
-			// Inter-arrival jitter: only measure on forward-progress packets.
-			// Retransmissions would have artificial inter-arrival times that
-			// inflate the jitter estimate.
-			if forwardProgress {
-				if prev, ok := lastArrival[userID]; ok {
-					gapMs := float64(now.Sub(prev).Microseconds()) / 1000.0
-					if gapMs < 100.0 {
-						d := gapMs - expectedGapMs
-						if d < 0 {
-							d = -d
-						}
-						old := math.Float64frombits(t.smoothedJitter.Load())
-						next := old + jitterAlpha*(d-old)
-						t.smoothedJitter.Store(math.Float64bits(next))
-					}
-				}
-				lastArrival[userID] = now
-			}
-
-			// Speaking notification, throttled per user to ~80 ms.
-			t.cbMu.RLock()
-			onAudio := t.onAudioReceived
-			t.cbMu.RUnlock()
-			if onAudio != nil {
-				if last, ok := speakTimers[userID]; !ok || now.Sub(last) > 80*time.Millisecond {
-					speakTimers[userID] = now
-					onAudio(userID)
-				}
-			}
-
-			// Prune stale entries every ~500 packets (~10 s of audio) to prevent
-			// unbounded map growth from disconnected speakers.
-			pruneCounter++
-			if pruneCounter >= 500 {
-				pruneCounter = 0
-				for id, seen := range lastSeen {
-					if now.Sub(seen) > 30*time.Second {
-						delete(lastSeen, id)
-						delete(lastSeq, id)
-						delete(hasSeq, id)
-						delete(speakTimers, id)
-						delete(lastArrival, id)
-					}
-				}
-			}
-
-			select {
-			case playbackCh <- TaggedAudio{SenderID: userID, Seq: seq, OpusData: opusData}:
-			default:
-				t.playbackDropped.Add(1)
 			}
 		}
 	}()
+
+	peer := &peerState{
+		id:      remoteID,
+		pc:      pc,
+		track:   track,
+		trackID: trackID,
+	}
+
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c == nil {
+			return
+		}
+		ice := c.ToJSON()
+		msg := ControlMsg{Type: "webrtc_ice", TargetID: remoteID, Candidate: ice.Candidate}
+		if ice.SDPMid != nil {
+			msg.SDPMid = *ice.SDPMid
+		}
+		if ice.SDPMLineIndex != nil {
+			idx := uint16(*ice.SDPMLineIndex)
+			msg.SDPMLineIndex = &idx
+		}
+		t.writeCtrlBestEffort(msg)
+	})
+
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		switch state {
+		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
+			t.closePeer(remoteID)
+		}
+	})
+
+	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		if remoteTrack.Codec().MimeType != webrtc.MimeTypeOpus {
+			return
+		}
+		go t.readRemoteTrack(remoteID, remoteTrack)
+	})
+
+	t.mu.Lock()
+	if existing, ok := t.peers[remoteID]; ok {
+		t.mu.Unlock()
+		_ = pc.Close()
+		return existing, false
+	}
+	t.peers[remoteID] = peer
+	t.mu.Unlock()
+
+	return peer, true
+}
+
+func (t *Transport) closePeer(remoteID uint16) {
+	var peer *peerState
+	t.mu.Lock()
+	if p, ok := t.peers[remoteID]; ok {
+		peer = p
+		delete(t.peers, remoteID)
+	}
+	t.mu.Unlock()
+
+	if peer != nil {
+		_ = peer.pc.Close()
+	}
+
+	t.statsMu.Lock()
+	delete(t.lastSeq, remoteID)
+	delete(t.hasSeq, remoteID)
+	delete(t.lastSeen, remoteID)
+	delete(t.lastArrival, remoteID)
+	delete(t.lastSpeaking, remoteID)
+	t.statsMu.Unlock()
+}
+
+func (t *Transport) createAndSendOffer(remoteID uint16) {
+	peer, _ := t.ensurePeer(remoteID)
+	if peer == nil {
+		return
+	}
+
+	offer, err := peer.pc.CreateOffer(nil)
+	if err != nil {
+		log.Printf("[transport] create offer ->%d: %v", remoteID, err)
+		return
+	}
+	if err := peer.pc.SetLocalDescription(offer); err != nil {
+		log.Printf("[transport] set local offer ->%d: %v", remoteID, err)
+		return
+	}
+	t.writeCtrlBestEffort(ControlMsg{Type: "webrtc_offer", TargetID: remoteID, SDP: offer.SDP})
+}
+
+func (t *Transport) handleOffer(senderID uint16, sdp string) {
+	peer, _ := t.ensurePeer(senderID)
+	if peer == nil {
+		return
+	}
+
+	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sdp}
+	if err := peer.pc.SetRemoteDescription(offer); err != nil {
+		log.Printf("[transport] set remote offer <-%d: %v", senderID, err)
+		return
+	}
+	t.flushPendingICE(peer)
+
+	answer, err := peer.pc.CreateAnswer(nil)
+	if err != nil {
+		log.Printf("[transport] create answer ->%d: %v", senderID, err)
+		return
+	}
+	if err := peer.pc.SetLocalDescription(answer); err != nil {
+		log.Printf("[transport] set local answer ->%d: %v", senderID, err)
+		return
+	}
+	t.writeCtrlBestEffort(ControlMsg{Type: "webrtc_answer", TargetID: senderID, SDP: answer.SDP})
+}
+
+func (t *Transport) handleAnswer(senderID uint16, sdp string) {
+	peer, _ := t.ensurePeer(senderID)
+	if peer == nil {
+		return
+	}
+
+	answer := webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}
+	if err := peer.pc.SetRemoteDescription(answer); err != nil {
+		log.Printf("[transport] set remote answer <-%d: %v", senderID, err)
+		return
+	}
+	t.flushPendingICE(peer)
+}
+
+func (t *Transport) handleICE(senderID uint16, cand ControlMsg) {
+	if cand.Candidate == "" {
+		return
+	}
+	peer, _ := t.ensurePeer(senderID)
+	if peer == nil {
+		return
+	}
+
+	init := webrtc.ICECandidateInit{Candidate: cand.Candidate}
+	if cand.SDPMid != "" {
+		mid := cand.SDPMid
+		init.SDPMid = &mid
+	}
+	if cand.SDPMLineIndex != nil {
+		idx := *cand.SDPMLineIndex
+		init.SDPMLineIndex = &idx
+	}
+
+	if peer.pc.RemoteDescription() == nil {
+		peer.mu.Lock()
+		peer.pendingICE = append(peer.pendingICE, init)
+		peer.mu.Unlock()
+		return
+	}
+
+	if err := peer.pc.AddICECandidate(init); err != nil {
+		log.Printf("[transport] add ICE <-%d: %v", senderID, err)
+	}
+}
+
+func (t *Transport) flushPendingICE(peer *peerState) {
+	peer.mu.Lock()
+	pending := peer.pendingICE
+	peer.pendingICE = nil
+	peer.mu.Unlock()
+
+	for _, c := range pending {
+		if err := peer.pc.AddICECandidate(c); err != nil {
+			log.Printf("[transport] add pending ICE <-%d: %v", peer.id, err)
+		}
+	}
+}
+
+func (t *Transport) readRemoteTrack(senderID uint16, tr *webrtc.TrackRemote) {
+	for {
+		pkt, _, err := tr.ReadRTP()
+		if err != nil {
+			return
+		}
+		if len(pkt.Payload) == 0 {
+			continue
+		}
+		t.handleIncomingAudio(senderID, pkt.SequenceNumber, pkt.Payload)
+	}
+}
+
+func (t *Transport) handleIncomingAudio(senderID uint16, seq uint16, payload []byte) {
+	if t.muted.Has(senderID) {
+		return
+	}
+	if !t.canHear(senderID) {
+		return
+	}
+
+	now := time.Now()
+	shouldNotifySpeaking := false
+
+	const expectedGapMs = 20.0
+	const jitterAlpha = 1.0 / 16.0
+
+	t.statsMu.Lock()
+	t.lastSeen[senderID] = now
+
+	forwardProgress := false
+	if prev, has := t.lastSeq[senderID]; has && t.hasSeq[senderID] {
+		diff := int(seq) - int(prev)
+		if diff < 0 {
+			diff += 65536
+		}
+		if diff > 0 && diff < 1000 {
+			forwardProgress = true
+			t.lastSeq[senderID] = seq
+			t.expectedPackets.Add(uint64(diff))
+			if diff > 1 {
+				t.lostPackets.Add(uint64(diff - 1))
+			}
+		}
+	} else {
+		forwardProgress = true
+		t.lastSeq[senderID] = seq
+		t.hasSeq[senderID] = true
+	}
+
+	if forwardProgress {
+		if prevArrival, ok := t.lastArrival[senderID]; ok {
+			gapMs := float64(now.Sub(prevArrival).Microseconds()) / 1000.0
+			if gapMs < 100.0 {
+				d := gapMs - expectedGapMs
+				if d < 0 {
+					d = -d
+				}
+				old := math.Float64frombits(t.smoothedJitter.Load())
+				next := old + jitterAlpha*(d-old)
+				t.smoothedJitter.Store(math.Float64bits(next))
+			}
+		}
+		t.lastArrival[senderID] = now
+	}
+
+	if last, ok := t.lastSpeaking[senderID]; !ok || now.Sub(last) > 80*time.Millisecond {
+		t.lastSpeaking[senderID] = now
+		shouldNotifySpeaking = true
+	}
+
+	t.pruneCounter++
+	if t.pruneCounter >= 500 {
+		t.pruneCounter = 0
+		for id, seen := range t.lastSeen {
+			if now.Sub(seen) > 30*time.Second {
+				delete(t.lastSeen, id)
+				delete(t.lastSeq, id)
+				delete(t.hasSeq, id)
+				delete(t.lastArrival, id)
+				delete(t.lastSpeaking, id)
+			}
+		}
+	}
+
+	t.statsMu.Unlock()
+
+	if shouldNotifySpeaking {
+		t.cbMu.RLock()
+		onAudio := t.onAudioReceived
+		t.cbMu.RUnlock()
+		if onAudio != nil {
+			onAudio(senderID)
+		}
+	}
+
+	frame := append([]byte(nil), payload...)
+	t.mu.Lock()
+	playbackCh := t.playbackCh
+	t.mu.Unlock()
+	if playbackCh == nil {
+		return
+	}
+
+	select {
+	case playbackCh <- TaggedAudio{SenderID: senderID, Seq: seq, OpusData: frame}:
+	default:
+		t.playbackDropped.Add(1)
+	}
+}
+
+func (t *Transport) canHear(peerID uint16) bool {
+	myChannel := t.myChannel.Load()
+	if myChannel == 0 {
+		return false
+	}
+	v, ok := t.userChannels.Load(peerID)
+	if !ok {
+		return false
+	}
+	peerChannel, ok := v.(int64)
+	if !ok {
+		return false
+	}
+	if peerChannel == 0 {
+		return false
+	}
+	return peerChannel == myChannel
+}
+
+func (t *Transport) ensurePeersFromUserList(users []UserInfo) {
+	myID := t.MyID()
+	if myID == 0 {
+		return
+	}
+	for _, u := range users {
+		if u.ID == 0 || u.ID == myID {
+			continue
+		}
+		_, created := t.ensurePeer(u.ID)
+		if created && myID < u.ID {
+			go t.createAndSendOffer(u.ID)
+		}
+	}
 }
 
 // GetMetrics returns current connection quality metrics and resets interval counters.
@@ -779,9 +1295,7 @@ func (t *Transport) GetMetrics() Metrics {
 		JitterMs:        jitterMs,
 		BitrateKbps:     bitrate,
 		PlaybackDropped: playbackDrops,
-		// QualityLevel is set by adaptBitrateLoop after merging drop counters.
-		// When called outside the loop (e.g. polling), use network metrics only.
-		QualityLevel: qualityLevel(loss, rtt, jitterMs, 0),
+		QualityLevel:    qualityLevel(loss, rtt, jitterMs, 0),
 	}
 }
 
@@ -789,8 +1303,7 @@ func (t *Transport) GetMetrics() Metrics {
 // is considered dead and the client disconnects. 3 missed pings at 2 s each.
 const pongTimeout = 6 * time.Second
 
-// pingLoop sends a ping every 2 s for RTT measurement and enforces a pong
-// deadline. If no pong arrives within pongTimeout, the session is closed.
+// pingLoop sends a ping every 2 s for RTT measurement and enforces a pong deadline.
 func (t *Transport) pingLoop(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -803,8 +1316,6 @@ func (t *Transport) pingLoop(ctx context.Context) {
 			t.lastPingTs.Store(ts)
 			t.writeCtrlBestEffort(ControlMsg{Type: "ping", Ts: ts})
 
-			// Check pong deadline. lastPongTime is set to connection-start in
-			// Connect(), so this is only a timeout if the server stops responding.
 			lastPong := t.lastPongTime.Load()
 			if lastPong > 0 && time.Since(time.Unix(0, lastPong)) > pongTimeout {
 				log.Printf("[transport] pong timeout — server unreachable, disconnecting")
@@ -818,14 +1329,16 @@ func (t *Transport) pingLoop(ctx context.Context) {
 	}
 }
 
-// readControl reads newline-delimited JSON control messages from the server.
-// It fires the registered callbacks and updates metrics. When the stream
-// closes (server disconnect), it calls onDisconnected.
-func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream) {
-	scanner := bufio.NewScanner(stream)
-	for scanner.Scan() {
+// readControl reads JSON control messages from the server websocket.
+func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+
 		var msg ControlMsg
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+		if err := json.Unmarshal(data, &msg); err != nil {
 			log.Printf("[transport] invalid control msg: %v", err)
 			continue
 		}
@@ -845,18 +1358,36 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 		onUserRenamed := t.onUserRenamed
 		onMessageEdited := t.onMessageEdited
 		onMessageDeleted := t.onMessageDeleted
+		onVideoState := t.onVideoState
+		onReactionAdded := t.onReactionAdded
+		onReactionRemoved := t.onReactionRemoved
+		onUserTyping := t.onUserTyping
+		onMessagePinned := t.onMessagePinned
+		onMessageUnpinned := t.onMessageUnpinned
+		onRecordingState := t.onRecordingState
+		onVideoLayers := t.onVideoLayers
+		onVideoQualityReq := t.onVideoQualityReq
 		t.cbMu.RUnlock()
 
 		switch msg.Type {
 		case "user_list":
-			// The server appends the joining user last in the list; that entry
-			// carries our assigned ID.
-			if len(msg.Users) > 0 {
-				t.mu.Lock()
-				t.myID = msg.Users[len(msg.Users)-1].ID
-				t.mu.Unlock()
+			selfID := msg.SelfID
+			if selfID == 0 && len(msg.Users) > 0 {
+				selfID = msg.Users[len(msg.Users)-1].ID
 			}
-			// Build the API base URL from the server address host + the advertised API port.
+
+			t.mu.Lock()
+			t.myID = selfID
+			t.mu.Unlock()
+
+			t.clearUserChannels()
+			for _, u := range msg.Users {
+				t.userChannels.Store(u.ID, u.ChannelID)
+				if u.ID == selfID {
+					t.myChannel.Store(u.ChannelID)
+				}
+			}
+
 			if msg.APIPort != 0 {
 				t.mu.Lock()
 				host, _, err := net.SplitHostPort(t.serverAddr)
@@ -866,6 +1397,13 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 				t.apiBaseURL = fmt.Sprintf("http://%s:%d", host, msg.APIPort)
 				t.mu.Unlock()
 			}
+
+			if len(msg.ICEServers) > 0 {
+				t.mu.Lock()
+				t.iceServers = msg.ICEServers
+				t.mu.Unlock()
+			}
+
 			if onUserList != nil {
 				onUserList(msg.Users)
 			}
@@ -875,11 +1413,22 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 			if onOwnerChanged != nil {
 				onOwnerChanged(msg.OwnerID)
 			}
+			t.ensurePeersFromUserList(msg.Users)
 		case "user_joined":
+			t.userChannels.Store(msg.ID, int64(0))
 			if onUserJoined != nil {
 				onUserJoined(msg.ID, msg.Username)
 			}
+			myID := t.MyID()
+			if myID != 0 && msg.ID != 0 && msg.ID != myID {
+				_, created := t.ensurePeer(msg.ID)
+				if created && myID < msg.ID {
+					go t.createAndSendOffer(msg.ID)
+				}
+			}
 		case "user_left":
+			t.userChannels.Delete(msg.ID)
+			t.closePeer(msg.ID)
 			if onUserLeft != nil {
 				onUserLeft(msg.ID)
 			}
@@ -893,18 +1442,18 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 				if old == 0 {
 					next = sample
 				} else {
-					next = 0.125*sample + 0.875*old // EWMA α=0.125 (RFC 6298)
+					next = 0.125*sample + 0.875*old
 				}
 				t.smoothedRTT.Store(math.Float64bits(next))
 			}
 		case "chat":
 			if msg.ChannelID != 0 {
 				if onChannelChat != nil {
-					onChannelChat(msg.MsgID, msg.ID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
+					onChannelChat(msg.MsgID, msg.ID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
 				}
 			} else {
 				if onChat != nil {
-					onChat(msg.MsgID, msg.ID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize)
+					onChat(msg.MsgID, msg.ID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
 				}
 			}
 		case "link_preview":
@@ -928,6 +1477,10 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 				onChannelList(msg.Channels)
 			}
 		case "user_channel":
+			t.userChannels.Store(msg.ID, msg.ChannelID)
+			if msg.ID == t.MyID() {
+				t.myChannel.Store(msg.ChannelID)
+			}
 			if onUserChannel != nil {
 				onUserChannel(msg.ID, msg.ChannelID)
 			}
@@ -943,11 +1496,56 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 			if onMessageDeleted != nil {
 				onMessageDeleted(msg.MsgID)
 			}
+		case "reaction_added":
+			if onReactionAdded != nil {
+				onReactionAdded(msg.MsgID, msg.Emoji, msg.ID)
+			}
+		case "reaction_removed":
+			if onReactionRemoved != nil {
+				onReactionRemoved(msg.MsgID, msg.Emoji, msg.ID)
+			}
+		case "user_typing":
+			if onUserTyping != nil {
+				onUserTyping(msg.ID, msg.Username, msg.ChannelID)
+			}
+		case "message_pinned":
+			if onMessagePinned != nil {
+				onMessagePinned(msg.MsgID, msg.ChannelID, msg.ID)
+			}
+		case "message_unpinned":
+			if onMessageUnpinned != nil {
+				onMessageUnpinned(msg.MsgID)
+			}
+		case "video_state":
+			if onVideoState != nil {
+				active := msg.VideoActive != nil && *msg.VideoActive
+				screen := msg.ScreenShare != nil && *msg.ScreenShare
+				onVideoState(msg.ID, active, screen)
+			}
+			if onVideoLayers != nil && len(msg.VideoLayers) > 0 {
+				onVideoLayers(msg.ID, msg.VideoLayers)
+			}
+		case "set_video_quality":
+			if onVideoQualityReq != nil && msg.VideoQuality != "" {
+				onVideoQualityReq(msg.ID, msg.VideoQuality)
+			}
+		case "recording_started":
+			if onRecordingState != nil {
+				onRecordingState(msg.ChannelID, true, msg.Username)
+			}
+		case "recording_stopped":
+			if onRecordingState != nil {
+				onRecordingState(msg.ChannelID, false, "")
+			}
+		case "webrtc_offer":
+			t.handleOffer(msg.ID, msg.SDP)
+		case "webrtc_answer":
+			t.handleAnswer(msg.ID, msg.SDP)
+		case "webrtc_ice":
+			t.handleICE(msg.ID, msg)
 		}
 	}
 
-	// Determine disconnect reason: if one was set (e.g. by pingLoop), use it;
-	// otherwise default to a generic message.
 	t.mu.Lock()
 	reason := t.disconnectReason
 	t.disconnectReason = ""
@@ -955,6 +1553,8 @@ func (t *Transport) readControl(ctx context.Context, stream *webtransport.Stream
 	if reason == "" {
 		reason = "Connection closed by server"
 	}
+
+	t.Disconnect()
 
 	t.cbMu.RLock()
 	onDisconnected := t.onDisconnected
@@ -970,25 +1570,4 @@ type TaggedAudio struct {
 	SenderID uint16
 	Seq      uint16
 	OpusData []byte
-}
-
-// MarshalDatagram builds a voice datagram. Exported for testing.
-func MarshalDatagram(userID, seq uint16, opus []byte) []byte {
-	dgram := make([]byte, 4+len(opus))
-	binary.BigEndian.PutUint16(dgram[0:2], userID)
-	binary.BigEndian.PutUint16(dgram[2:4], seq)
-	copy(dgram[4:], opus)
-	return dgram
-}
-
-// ParseDatagram parses a voice datagram header. Exported for testing.
-// The returned opus slice aliases data — copy if you need to retain it.
-func ParseDatagram(data []byte) (userID, seq uint16, opus []byte, ok bool) {
-	if len(data) < 4 {
-		return 0, 0, nil, false
-	}
-	userID = binary.BigEndian.Uint16(data[0:2])
-	seq = binary.BigEndian.Uint16(data[2:4])
-	opus = data[4:]
-	return userID, seq, opus, true
 }

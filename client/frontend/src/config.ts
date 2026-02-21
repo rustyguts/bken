@@ -7,8 +7,11 @@ export interface ServerEntry {
   addr: string
 }
 
+export type MessageDensity = 'compact' | 'default' | 'comfortable'
+
 export interface Config {
   theme: string
+  theme_mode?: string
   username: string
   input_device_id: number
   output_device_id: number
@@ -22,7 +25,11 @@ export interface Config {
   vad_threshold: number
   ptt_enabled: boolean
   ptt_key: string
+  noise_gate_enabled: boolean
+  noise_gate_threshold: number
   servers: ServerEntry[]
+  message_density?: MessageDensity
+  show_system_messages?: boolean
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -66,6 +73,32 @@ export function SetVADThreshold(level: number): Promise<void> {
   return bridge()['SetVADThreshold'](level)
 }
 
+// --- Noise Gate bindings ---
+
+export function SetNoiseGate(enabled: boolean): Promise<void> {
+  return bridge()['SetNoiseGate'](enabled)
+}
+
+export function SetNoiseGateThreshold(level: number): Promise<void> {
+  return bridge()['SetNoiseGateThreshold'](level)
+}
+
+// --- Input Level bindings ---
+
+export function GetInputLevel(): Promise<number> {
+  return bridge()['GetInputLevel']()
+}
+
+// --- Notification Volume bindings ---
+
+export function SetNotificationVolume(volume: number): Promise<void> {
+  return bridge()['SetNotificationVolume'](volume)
+}
+
+export function GetNotificationVolume(): Promise<number> {
+  return bridge()['GetNotificationVolume']()
+}
+
 // --- PTT bindings ---
 
 export function SetPTTMode(enabled: boolean): Promise<void> {
@@ -94,6 +127,16 @@ export function GetMutedUsers(): Promise<number[]> {
   return bridge()['GetMutedUsers']()
 }
 
+// --- Per-user volume bindings ---
+
+export function SetUserVolume(userID: number, volume: number): Promise<void> {
+  return bridge()['SetUserVolume'](userID, volume)
+}
+
+export function GetUserVolume(userID: number): Promise<number> {
+  return bridge()['GetUserVolume'](userID)
+}
+
 // --- Chat bindings ---
 
 export function SendChat(message: string): Promise<string> {
@@ -106,6 +149,18 @@ export function EditMessage(msgID: number, message: string): Promise<string> {
 
 export function DeleteMessage(msgID: number): Promise<string> {
   return bridge()['DeleteMessage'](msgID)
+}
+
+export function AddReaction(msgID: number, emoji: string): Promise<string> {
+  return bridge()['AddReaction'](msgID, emoji)
+}
+
+export function RemoveReaction(msgID: number, emoji: string): Promise<string> {
+  return bridge()['RemoveReaction'](msgID, emoji)
+}
+
+export function SendTyping(channelID: number): Promise<string> {
+  return bridge()['SendTyping'](channelID)
 }
 
 // --- Moderation bindings ---
@@ -168,4 +223,38 @@ export function UploadFile(channelID: number): Promise<string> {
 
 export function UploadFileFromPath(channelID: number, path: string): Promise<string> {
   return bridge()['UploadFileFromPath'](channelID, path)
+}
+
+// --- Video bindings ---
+
+export function StartVideo(): Promise<string> {
+  return bridge()['StartVideo']()
+}
+
+export function StopVideo(): Promise<string> {
+  return bridge()['StopVideo']()
+}
+
+export function StartScreenShare(): Promise<string> {
+  return bridge()['StartScreenShare']()
+}
+
+export function StopScreenShare(): Promise<string> {
+  return bridge()['StopScreenShare']()
+}
+
+// --- Recording bindings ---
+
+export function StartRecording(channelID: number): Promise<string> {
+  return bridge()['StartRecording'](channelID)
+}
+
+export function StopRecording(channelID: number): Promise<string> {
+  return bridge()['StopRecording'](channelID)
+}
+
+// --- Video quality bindings ---
+
+export function RequestVideoQuality(targetUserID: number, quality: string): Promise<string> {
+  return bridge()['RequestVideoQuality'](targetUserID, quality)
 }
