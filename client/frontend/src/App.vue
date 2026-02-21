@@ -389,8 +389,11 @@ async function handleDisconnectVoice(): Promise<void> {
     const err = await DisconnectVoice()
     if (err) {
       setActiveError(err)
-      return
     }
+  } finally {
+    // Always clean up local voice state, even if the server call failed.
+    // The Go layer has already stopped audio capture; the user is no longer
+    // transmitting. Keeping the avatar in the channel would be misleading.
     updateState(state => {
       const me = state.myID
       if (me) {
@@ -399,7 +402,6 @@ async function handleDisconnectVoice(): Promise<void> {
     })
     voiceConnected.value = false
     clearSpeaking()
-  } finally {
     disconnectingVoice.value = false
   }
 }

@@ -442,7 +442,7 @@ describe('App', () => {
     expect(go.Disconnect).toHaveBeenCalled()
   })
 
-  it('restores voiceConnected when DisconnectVoice fails', async () => {
+  it('clears voiceConnected even when DisconnectVoice fails', async () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
@@ -456,7 +456,8 @@ describe('App', () => {
     channel.vm.$emit('disconnectVoice')
     await flushPromises()
 
-    expect(channel.props('voiceConnected')).toBe(true)
+    // Voice state must be cleared even on error — audio is already stopped
+    expect(channel.props('voiceConnected')).toBe(false)
     expect(channel.props('connectError')).toContain('control websocket write failed')
   })
 
