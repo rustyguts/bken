@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -146,7 +146,7 @@ func (ae *AudioEngine) ListOutputDevices() []AudioDevice {
 func listDevices(match func(*portaudio.DeviceInfo) bool) []AudioDevice {
 	devices, err := portaudio.Devices()
 	if err != nil {
-		log.Printf("[audio] list devices: %v", err)
+		slog.Error("list audio devices", "err", err)
 		return nil
 	}
 	var out []AudioDevice
@@ -155,6 +155,7 @@ func listDevices(match func(*portaudio.DeviceInfo) bool) []AudioDevice {
 			out = append(out, AudioDevice{ID: i, Name: d.Name})
 		}
 	}
+	slog.Debug("audio devices enumerated", "total", len(devices), "matched", len(out))
 	return out
 }
 
@@ -240,11 +241,12 @@ func (ae *AudioEngine) SetBitrate(kbps int) {
 	ae.mu.Lock()
 	if ae.encoder != nil {
 		if err := ae.encoder.SetBitrate(kbps * 1000); err != nil {
-			log.Printf("[audio] SetBitrate %d kbps: %v", kbps, err)
+			slog.Error("set opus bitrate", "kbps", kbps, "err", err)
 		}
 	}
 	ae.mu.Unlock()
 	ae.currentBitrate.Store(int32(kbps))
+	slog.Debug("bitrate updated", "kbps", kbps)
 }
 
 // CurrentBitrate returns the current Opus encoder target bitrate (kbps).
@@ -265,10 +267,11 @@ func (ae *AudioEngine) SetPacketLoss(lossPercent int) {
 	ae.mu.Lock()
 	if ae.encoder != nil {
 		if err := ae.encoder.SetPacketLossPerc(lossPercent); err != nil {
-			log.Printf("[audio] SetPacketLossPerc %d%%: %v", lossPercent, err)
+			slog.Error("set opus packet loss", "percent", lossPercent, "err", err)
 		}
 	}
 	ae.mu.Unlock()
+	slog.Debug("packet loss updated", "percent", lossPercent)
 }
 
 // Start initializes the Opus codec and starts capture/playback streams.
@@ -369,7 +372,8 @@ func (ae *AudioEngine) Start() error {
 	go func() { defer ae.wg.Done(); ae.captureLoop(captureBuf) }()
 	go func() { defer ae.wg.Done(); ae.playbackLoop(playbackBuf) }()
 
-	log.Printf("[audio] started capture=%s playback=%s", inputDev.Name, outputDev.Name)
+	slog.Debug("audio stream parameters", "sampleRate", sampleRate, "frameSize", FrameSize, "channels", channels)
+	slog.Info("audio engine started", "capture", inputDev.Name, "playback", outputDev.Name)
 	return nil
 }
 
@@ -422,7 +426,7 @@ func (ae *AudioEngine) Stop() {
 		select {
 		case <-ae.PlaybackIn:
 		default:
-			log.Println("[audio] stopped")
+			slog.Info("audio engine stopped")
 			return
 		}
 	}
@@ -467,7 +471,7 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 	for ae.running.Load() {
 		if err := ae.captureStream.Read(); err != nil {
 			if ae.running.Load() {
-				log.Printf("[audio] capture read: %v", err)
+				slog.Error("capture read", "err", err)
 			}
 			return
 		}
@@ -494,7 +498,7 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 
 		n, err := ae.encoder.Encode(pcm, opusBuf)
 		if err != nil {
-			log.Printf("[audio] encode: %v", err)
+			slog.Error("opus encode", "err", err)
 			continue
 		}
 
@@ -562,16 +566,17 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 				if !ok {
 					d, err := opus.NewDecoder(sampleRate, channels)
 					if err != nil {
-						log.Printf("[audio] create decoder for sender %d: %v", senderID, err)
+						slog.Error("create opus decoder", "sender", senderID, "err", err)
 						continue
 					}
 					dec = d
 					decoders[senderID] = dec
+					slog.Debug("created opus decoder for new sender", "sender", senderID)
 				}
 
 				n, err := dec.Decode(tagged.OpusData, pcm)
 				if err != nil {
-					log.Printf("[audio] decode sender %d: %v", senderID, err)
+					slog.Error("opus decode", "sender", senderID, "err", err)
 					continue
 				}
 				lastDecoded[senderID] = time.Now()
@@ -624,7 +629,7 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 
 		if err := ae.playbackStream.Write(); err != nil {
 			if ae.running.Load() {
-				log.Printf("[audio] playback write: %v", err)
+				slog.Error("playback write", "err", err)
 			}
 			return
 		}

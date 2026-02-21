@@ -1607,7 +1607,7 @@ describe('Sidebar - Settings', () => {
     await flush()
 
     // Click avatar to open user menu
-    const avatar = wrapper.find('button[title="TestUser"]')
+    const avatar = wrapper.find('summary[title="TestUser"]')
     await avatar.trigger('click')
     await nextTick()
 
@@ -1637,7 +1637,7 @@ describe('Sidebar - Username Rename', () => {
     await flush()
 
     // Click avatar to open user menu, then click "Rename Username"
-    const avatar = wrapper.find('button[title="OldName"]')
+    const avatar = wrapper.find('summary[title="OldName"]')
     await avatar.trigger('click')
     await nextTick()
     const menuBtns = wrapper.findAll('[data-testid="user-menu"] a')

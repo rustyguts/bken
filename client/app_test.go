@@ -231,6 +231,7 @@ func (m *mockTransport) SetOnMessageUnpinned(fn func(uint64))              { m.o
 func (m *mockTransport) SetOnRecordingState(fn func(int64, bool, string))  { m.onRecordingState = fn }
 func (m *mockTransport) SetOnVideoLayers(fn func(uint16, []VideoLayer))    { m.onVideoLayers = fn }
 func (m *mockTransport) SetOnVideoQualityRequest(fn func(uint16, string))  { m.onVideoQualityReq = fn }
+func (m *mockTransport) SetOnMessageHistory(fn func(int64, []ChatHistoryMessage)) {}
 
 // Chat operations
 func (m *mockTransport) SendChat(message string) error {
@@ -442,6 +443,9 @@ func (m *mockTransport) APIBaseURL() string {
 	defer m.mu.Unlock()
 	return m.apiBaseURLVal
 }
+func (m *mockTransport) RequestChannels() error    { return nil }
+func (m *mockTransport) RequestMessages(_ int64) error { return nil }
+func (m *mockTransport) RequestServerInfo() error  { return nil }
 
 // Verify interface compliance at compile time.
 var _ Transporter = (*mockTransport)(nil)

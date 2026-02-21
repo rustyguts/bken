@@ -145,24 +145,13 @@ async function removeServer(): Promise<void> {
   }
 }
 
-// User menu (positioned above avatar, teleported to body)
-const userMenuOpen = ref(false)
-const avatarContainerEl = ref<HTMLElement | null>(null)
-const userMenuStyle = ref<Record<string, string>>({})
+// User dropdown menu
+const userDropdownEl = ref<HTMLDetailsElement | null>(null)
 
-function toggleUserMenu(): void {
-  if (userMenuOpen.value) {
-    userMenuOpen.value = false
-    return
+function closeUserMenu(): void {
+  if (userDropdownEl.value) {
+    userDropdownEl.value.open = false
   }
-  if (avatarContainerEl.value) {
-    const rect = avatarContainerEl.value.getBoundingClientRect()
-    userMenuStyle.value = {
-      left: rect.right + 4 + 'px',
-      bottom: (window.innerHeight - rect.bottom) + 'px',
-    }
-  }
-  userMenuOpen.value = true
 }
 
 // Username rename modal
@@ -194,7 +183,6 @@ watch(() => props.startupAddr, (addr) => {
 
 function handleGlobalClick(): void {
   closeServerContextMenu()
-  userMenuOpen.value = false
 }
 
 onMounted(async () => {
@@ -210,7 +198,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="h-full min-h-0">
-    <aside class="relative flex flex-col items-center border-r border-base-content/10 bg-base-300 w-[64px] min-w-[64px] max-w-[64px] h-full overflow-x-hidden" @click="closeServerContextMenu()">
+    <aside class="relative flex flex-col items-center border-r border-base-content/10 bg-base-300 w-[64px] min-w-[64px] max-w-[64px] h-full" @click="closeServerContextMenu()">
       <div class="border-b border-base-content/10 h-12 w-full flex items-center justify-center shrink-0">
         <button
           class="btn btn-ghost btn-square btn-sm"
@@ -227,7 +215,7 @@ onBeforeUnmount(() => {
           <div
             v-for="server in servers"
             :key="server.addr"
-            class="avatar placeholder cursor-pointer relative transition-transform hover:scale-105"
+            class="avatar avatar-placeholder cursor-pointer relative transition-transform hover:scale-105"
             :title="`${server.name} (${server.addr})`"
             :aria-label="`Open ${server.name}`"
             @click="selectServer(server.addr)"
@@ -245,18 +233,30 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- User avatar at bottom -->
-      <div ref="avatarContainerEl" class="border-t border-base-content/10 p-2 shrink-0 flex items-center justify-center">
-        <button
-          class="avatar placeholder cursor-pointer hover:ring-2 hover:ring-primary/40 transition-shadow rounded-full"
+      <!-- User avatar + dropdown at bottom -->
+      <details ref="userDropdownEl" class="dropdown dropdown-right dropdown-end border-t border-base-content/10 p-2 shrink-0 flex items-center justify-center">
+        <summary
+          class="avatar avatar-placeholder cursor-pointer hover:ring-2 hover:ring-primary/40 transition-shadow rounded-full list-none"
           :title="globalUsername || 'User menu'"
-          @click="toggleUserMenu"
         >
           <div class="bg-neutral text-neutral-content w-8 rounded-full">
             <span class="text-xs">{{ initials(globalUsername) }}</span>
           </div>
-        </button>
-      </div>
+        </summary>
+        <ul
+          data-testid="user-menu"
+          class="dropdown-content menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 z-50 min-w-[160px]"
+        >
+          <li class="menu-title text-[10px]">{{ globalUsername }}</li>
+          <li><a @click="openRenameModal(); closeUserMenu()">Rename Username</a></li>
+          <li>
+            <a @click="emit('openSettings'); closeUserMenu()">
+              <Settings class="w-3.5 h-3.5" aria-hidden="true" />
+              User Settings
+            </a>
+          </li>
+        </ul>
+      </details>
     </aside>
 
     <!-- Server right-click context menu -->
@@ -269,26 +269,6 @@ onBeforeUnmount(() => {
       >
         <li class="menu-title text-[10px] truncate max-w-[180px]">{{ serverContextMenu.server.name }}</li>
         <li><a class="text-error" @click="removeServer">Remove Server</a></li>
-      </ul>
-    </Teleport>
-
-    <!-- User menu (teleported to body to avoid sidebar overflow clipping) -->
-    <Teleport to="body">
-      <ul
-        v-if="userMenuOpen"
-        data-testid="user-menu"
-        class="menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 fixed z-50 min-w-[160px]"
-        :style="userMenuStyle"
-        @click.stop
-      >
-        <li class="menu-title text-[10px]">{{ globalUsername }}</li>
-        <li><a @click="openRenameModal(); userMenuOpen = false">Rename Username</a></li>
-        <li>
-          <a @click="emit('openSettings'); userMenuOpen = false">
-            <Settings class="w-3.5 h-3.5" aria-hidden="true" />
-            User Settings
-          </a>
-        </li>
       </ul>
     </Teleport>
 

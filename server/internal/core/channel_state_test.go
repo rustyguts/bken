@@ -8,7 +8,7 @@ import (
 )
 
 func TestChannelStateMultiServerSingleVoiceLifecycle(t *testing.T) {
-	r := NewChannelState()
+	r := NewChannelState("")
 	s, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add: %v", err)
@@ -69,7 +69,7 @@ func TestChannelStateMultiServerSingleVoiceLifecycle(t *testing.T) {
 }
 
 func TestChannelStateDisconnectServerOnlyClearsMatchingVoice(t *testing.T) {
-	r := NewChannelState()
+	r := NewChannelState("")
 	s, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add: %v", err)
@@ -108,7 +108,7 @@ func TestChannelStateDisconnectServerOnlyClearsMatchingVoice(t *testing.T) {
 }
 
 func TestChannelStateBroadcastToServerScopesRecipients(t *testing.T) {
-	r := NewChannelState()
+	r := NewChannelState("")
 	alice, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add alice: %v", err)
@@ -143,7 +143,7 @@ func TestChannelStateBroadcastToServerScopesRecipients(t *testing.T) {
 }
 
 func TestChannelStateRemoveClosesChannel(t *testing.T) {
-	r := NewChannelState()
+	r := NewChannelState("")
 	s, _, err := r.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add: %v", err)
@@ -154,6 +154,113 @@ func TestChannelStateRemoveClosesChannel(t *testing.T) {
 	_, ok := <-s.Send
 	if ok {
 		t.Fatal("expected send channel to be closed")
+	}
+}
+
+func TestCreateChannelLifecycle(t *testing.T) {
+	r := NewChannelState("")
+	s, _, err := r.Add("alice", 8)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, _, err := r.ConnectServer(s.UserID, "srv-1"); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	// Create a channel.
+	chs, err := r.CreateChannel("srv-1", "general")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(chs) != 1 || chs[0].Name != "general" {
+		t.Fatalf("unexpected channels after create: %#v", chs)
+	}
+
+	// Create a second channel.
+	chs, err = r.CreateChannel("srv-1", "voice")
+	if err != nil {
+		t.Fatalf("create second: %v", err)
+	}
+	if len(chs) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(chs))
+	}
+
+	// Rename first channel.
+	chs, err = r.RenameChannel("srv-1", chs[0].ID, "lobby")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if chs[0].Name != "lobby" {
+		t.Fatalf("expected renamed to lobby, got %s", chs[0].Name)
+	}
+
+	// Delete first channel.
+	secondID := chs[1].ID
+	chs, err = r.DeleteChannel("srv-1", chs[0].ID)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(chs) != 1 || chs[0].ID != secondID {
+		t.Fatalf("unexpected channels after delete: %#v", chs)
+	}
+}
+
+func TestCreateChannelValidation(t *testing.T) {
+	r := NewChannelState("")
+	if _, err := r.CreateChannel("srv-1", ""); err == nil {
+		t.Fatal("expected error for empty name")
+	}
+	if _, err := r.CreateChannel("", "general"); err == nil {
+		t.Fatal("expected error for empty server_id")
+	}
+}
+
+func TestUserServerSingleConnection(t *testing.T) {
+	r := NewChannelState("")
+	s, _, err := r.Add("alice", 8)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	// No connections → error.
+	if _, err := r.UserServer(s.UserID); err == nil {
+		t.Fatal("expected error when not connected")
+	}
+
+	if _, _, err := r.ConnectServer(s.UserID, "srv-1"); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	sid, err := r.UserServer(s.UserID)
+	if err != nil || sid != "srv-1" {
+		t.Fatalf("expected srv-1, got %q err=%v", sid, err)
+	}
+
+	// Multiple connections → error.
+	if _, _, err := r.ConnectServer(s.UserID, "srv-2"); err != nil {
+		t.Fatalf("connect srv-2: %v", err)
+	}
+	if _, err := r.UserServer(s.UserID); err == nil {
+		t.Fatal("expected error for multiple connections")
+	}
+}
+
+func TestChannelsPerServerIsolation(t *testing.T) {
+	r := NewChannelState("")
+	if _, err := r.CreateChannel("srv-1", "general"); err != nil {
+		t.Fatalf("create on srv-1: %v", err)
+	}
+	if _, err := r.CreateChannel("srv-2", "lobby"); err != nil {
+		t.Fatalf("create on srv-2: %v", err)
+	}
+
+	chs1 := r.Channels("srv-1")
+	chs2 := r.Channels("srv-2")
+	if len(chs1) != 1 || chs1[0].Name != "general" {
+		t.Fatalf("srv-1 channels: %#v", chs1)
+	}
+	if len(chs2) != 1 || chs2[0].Name != "lobby" {
+		t.Fatalf("srv-2 channels: %#v", chs2)
 	}
 }
 

@@ -49,6 +49,7 @@ type Transporter interface {
 	SetOnRecordingState(fn func(channelID int64, recording bool, startedBy string))
 	SetOnVideoLayers(fn func(userID uint16, layers []VideoLayer))
 	SetOnVideoQualityRequest(fn func(fromUserID uint16, quality string))
+	SetOnMessageHistory(fn func(channelID int64, messages []ChatHistoryMessage))
 
 	// Chat.
 	SendChat(message string) error
@@ -78,6 +79,11 @@ type Transporter interface {
 	RenameChannel(id int64, name string) error
 	DeleteChannel(id int64) error
 	MoveUser(userID uint16, channelID int64) error
+
+	// Pull-based state requests.
+	RequestChannels() error
+	RequestMessages(channelID int64) error
+	RequestServerInfo() error
 
 	// Video.
 	SendVideoState(active bool, screenShare bool) error

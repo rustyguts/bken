@@ -62,7 +62,7 @@ onMounted(async () => {
           <div class="grid gap-3">
             <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-3">
               <div class="flex items-center gap-3">
-                <div class="avatar placeholder">
+                <div class="avatar avatar-placeholder">
                   <div class="bg-primary/10 text-primary w-9 rounded-lg">
                     <ShieldCheck class="size-4" aria-hidden="true" />
                   </div>
@@ -83,7 +83,7 @@ onMounted(async () => {
 
             <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-3">
               <div class="flex items-center gap-3">
-                <div class="avatar placeholder">
+                <div class="avatar avatar-placeholder">
                   <div class="bg-primary/10 text-primary w-9 rounded-lg">
                     <Waves class="size-4" aria-hidden="true" />
                   </div>
@@ -104,7 +104,7 @@ onMounted(async () => {
 
             <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-3">
               <div class="flex items-center gap-3">
-                <div class="avatar placeholder">
+                <div class="avatar avatar-placeholder">
                   <div class="bg-primary/10 text-primary w-9 rounded-lg">
                     <Mic2 class="size-4" aria-hidden="true" />
                   </div>

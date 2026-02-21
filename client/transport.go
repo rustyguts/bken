@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"log"
+	"log/slog"
 	"math"
 	"net"
 	"strconv"
@@ -108,6 +108,14 @@ type ChannelInfo struct {
 	MaxUsers int    `json:"max_users,omitempty"` // 0 = unlimited
 }
 
+// ChatHistoryMessage is a single message in a channel's message history.
+type ChatHistoryMessage struct {
+	MsgID    int64  `json:"msg_id"`
+	Username string `json:"username"`
+	Message  string `json:"message"`
+	TS       int64  `json:"ts"`
+}
+
 // VideoLayer describes a simulcast video layer available from a sender.
 type VideoLayer struct {
 	Quality string `json:"quality"` // "high", "medium", or "low"
@@ -139,6 +147,7 @@ type backendUserMsg struct {
 	ServerID  string       `json:"server_id,omitempty"`
 	ChannelID string       `json:"channel_id,omitempty"`
 	Message   string       `json:"message,omitempty"`
+	MsgID     int64        `json:"msg_id,omitempty"`
 	Ts        int64        `json:"ts,omitempty"`
 	Error     string       `json:"error,omitempty"`
 }
@@ -294,6 +303,7 @@ type Transport struct {
 	onRecordingState     func(channelID int64, recording bool, startedBy string)
 	onVideoLayers        func(userID uint16, layers []VideoLayer)
 	onVideoQualityReq    func(fromUserID uint16, quality string)
+	onMessageHistory     func(channelID int64, messages []ChatHistoryMessage)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -468,6 +478,12 @@ func (t *Transport) SetOnVideoQualityRequest(fn func(fromUserID uint16, quality 
 	t.cbMu.Unlock()
 }
 
+func (t *Transport) SetOnMessageHistory(fn func(channelID int64, messages []ChatHistoryMessage)) {
+	t.cbMu.Lock()
+	t.onMessageHistory = fn
+	t.cbMu.Unlock()
+}
+
 // --- Per-user local muting ---
 
 // MuteUser suppresses incoming audio from the given remote user ID.
@@ -587,6 +603,24 @@ func (t *Transport) StartRecording(channelID int64) error {
 // Only succeeds if the caller is the channel owner; the server enforces the check.
 func (t *Transport) StopRecording(channelID int64) error {
 	return t.writeCtrl(ControlMsg{Type: "stop_recording", ChannelID: channelID})
+}
+
+// RequestChannels asks the server to send the channel list for the connected server.
+func (t *Transport) RequestChannels() error {
+	return t.writeJSON(map[string]any{"type": "get_channels"})
+}
+
+// RequestMessages asks the server to send message history for a channel.
+func (t *Transport) RequestMessages(channelID int64) error {
+	return t.writeJSON(map[string]any{
+		"type":       "get_messages",
+		"channel_id": t.wireChannelID(channelID),
+	})
+}
+
+// RequestServerInfo asks the server to send its name and metadata.
+func (t *Transport) RequestServerInfo() error {
+	return t.writeJSON(map[string]any{"type": "get_server_info"})
 }
 
 // EditMessage asks the server to update a message's text. Only the original
@@ -709,7 +743,7 @@ func (t *Transport) writeCtrl(msg ControlMsg) error {
 // Used for non-critical messages where failure is handled elsewhere.
 func (t *Transport) writeCtrlBestEffort(msg ControlMsg) {
 	if err := t.writeCtrl(msg); err != nil {
-		log.Printf("[transport] best-effort write (%s): %v", msg.Type, err)
+		slog.Debug("best-effort write failed", "type", msg.Type, "err", err)
 	}
 }
 
@@ -853,6 +887,7 @@ func dialAddrsForWebsocket(addr string) []string {
 // Connect establishes the websocket control/signaling channel and sends hello.
 // Callbacks must be registered via Set* methods before calling Connect.
 func (t *Transport) Connect(ctx context.Context, addr, username string) error {
+	slog.Debug("connecting", "addr", addr, "username", username)
 	normalizedAddr, err := normalizeServerAddr(addr)
 	if err != nil {
 		return err
@@ -888,6 +923,7 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 
 	var conn *websocket.Conn
 	for _, dialAddr := range dialAddrsForWebsocket(normalizedAddr) {
+		slog.Debug("dialing websocket", "addr", dialAddr)
 		conn, _, err = d.DialContext(dialCtx, "ws://"+dialAddr+"/ws", nil)
 		if err == nil {
 			break
@@ -900,6 +936,7 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 
 	t.mu.Lock()
 	t.ws = conn
+	slog.Debug("websocket connected", "addr", normalizedAddr)
 	t.cancel = cancel
 	t.mu.Unlock()
 
@@ -921,6 +958,7 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 		t.Disconnect()
 		return fmt.Errorf("send hello: %w", err)
 	}
+	slog.Debug("hello sent", "username", username)
 	if err := t.writeJSON(map[string]any{
 		"type":      "connect_server",
 		"server_id": t.backendServerID(),
@@ -937,6 +975,7 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 
 // Disconnect closes the websocket and all peer connections.
 func (t *Transport) Disconnect() {
+	slog.Debug("disconnecting")
 	t.ctrlMu.Lock()
 	ws := t.ws
 	t.ws = nil
@@ -970,6 +1009,7 @@ func (t *Transport) Disconnect() {
 	for _, p := range peers {
 		_ = p.pc.Close()
 	}
+	slog.Debug("peers closed", "count", len(peers))
 
 	t.clearUserChannels()
 	t.resetPeerStats()
@@ -1062,6 +1102,7 @@ func (t *Transport) MyID() uint16 {
 
 // StartReceiving stores the playback channel used by incoming WebRTC tracks.
 func (t *Transport) StartReceiving(ctx context.Context, playbackCh chan<- TaggedAudio) {
+	slog.Debug("start receiving")
 	t.mu.Lock()
 	if t.ws == nil {
 		t.mu.Unlock()
@@ -1117,7 +1158,7 @@ func (t *Transport) ensurePeer(remoteID uint16) (*peerState, bool) {
 		ICEServers: iceServers,
 	})
 	if err != nil {
-		log.Printf("[transport] create peer %d: %v", remoteID, err)
+		slog.Error("create peer", "remote_id", remoteID, "err", err)
 		return nil, false
 	}
 
@@ -1129,14 +1170,14 @@ func (t *Transport) ensurePeer(remoteID uint16) (*peerState, bool) {
 	)
 	if err != nil {
 		_ = pc.Close()
-		log.Printf("[transport] create local track %d: %v", remoteID, err)
+		slog.Error("create local track", "remote_id", remoteID, "err", err)
 		return nil, false
 	}
 
 	sender, err := pc.AddTrack(track)
 	if err != nil {
 		_ = pc.Close()
-		log.Printf("[transport] add track %d: %v", remoteID, err)
+		slog.Error("add track", "remote_id", remoteID, "err", err)
 		return nil, false
 	}
 
@@ -1229,11 +1270,11 @@ func (t *Transport) createAndSendOffer(remoteID uint16) {
 
 	offer, err := peer.pc.CreateOffer(nil)
 	if err != nil {
-		log.Printf("[transport] create offer ->%d: %v", remoteID, err)
+		slog.Error("create offer", "remote_id", remoteID, "err", err)
 		return
 	}
 	if err := peer.pc.SetLocalDescription(offer); err != nil {
-		log.Printf("[transport] set local offer ->%d: %v", remoteID, err)
+		slog.Error("set local offer", "remote_id", remoteID, "err", err)
 		return
 	}
 	t.writeCtrlBestEffort(ControlMsg{Type: "webrtc_offer", TargetID: remoteID, SDP: offer.SDP})
@@ -1247,18 +1288,18 @@ func (t *Transport) handleOffer(senderID uint16, sdp string) {
 
 	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: sdp}
 	if err := peer.pc.SetRemoteDescription(offer); err != nil {
-		log.Printf("[transport] set remote offer <-%d: %v", senderID, err)
+		slog.Error("set remote offer", "sender_id", senderID, "err", err)
 		return
 	}
 	t.flushPendingICE(peer)
 
 	answer, err := peer.pc.CreateAnswer(nil)
 	if err != nil {
-		log.Printf("[transport] create answer ->%d: %v", senderID, err)
+		slog.Error("create answer", "sender_id", senderID, "err", err)
 		return
 	}
 	if err := peer.pc.SetLocalDescription(answer); err != nil {
-		log.Printf("[transport] set local answer ->%d: %v", senderID, err)
+		slog.Error("set local answer", "sender_id", senderID, "err", err)
 		return
 	}
 	t.writeCtrlBestEffort(ControlMsg{Type: "webrtc_answer", TargetID: senderID, SDP: answer.SDP})
@@ -1272,7 +1313,7 @@ func (t *Transport) handleAnswer(senderID uint16, sdp string) {
 
 	answer := webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}
 	if err := peer.pc.SetRemoteDescription(answer); err != nil {
-		log.Printf("[transport] set remote answer <-%d: %v", senderID, err)
+		slog.Error("set remote answer", "sender_id", senderID, "err", err)
 		return
 	}
 	t.flushPendingICE(peer)
@@ -1305,7 +1346,7 @@ func (t *Transport) handleICE(senderID uint16, cand ControlMsg) {
 	}
 
 	if err := peer.pc.AddICECandidate(init); err != nil {
-		log.Printf("[transport] add ICE <-%d: %v", senderID, err)
+		slog.Warn("add ICE candidate failed", "sender_id", senderID, "err", err)
 	}
 }
 
@@ -1317,7 +1358,7 @@ func (t *Transport) flushPendingICE(peer *peerState) {
 
 	for _, c := range pending {
 		if err := peer.pc.AddICECandidate(c); err != nil {
-			log.Printf("[transport] add pending ICE <-%d: %v", peer.id, err)
+			slog.Warn("add pending ICE candidate failed", "peer_id", peer.id, "err", err)
 		}
 	}
 }
@@ -1513,6 +1554,7 @@ const pongTimeout = 6 * time.Second
 
 // pingLoop sends a ping every 2 s for RTT measurement and enforces a pong deadline.
 func (t *Transport) pingLoop(ctx context.Context) {
+	slog.Debug("ping loop started")
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -1526,7 +1568,7 @@ func (t *Transport) pingLoop(ctx context.Context) {
 
 			lastPong := t.lastPongTime.Load()
 			if lastPong > 0 && time.Since(time.Unix(0, lastPong)) > pongTimeout {
-				log.Printf("[transport] pong timeout — server unreachable, disconnecting")
+				slog.Warn("pong timeout, disconnecting")
 				t.mu.Lock()
 				t.disconnectReason = "Server unreachable (ping timeout)"
 				t.mu.Unlock()
@@ -1540,6 +1582,7 @@ func (t *Transport) pingLoop(ctx context.Context) {
 // readControl reads JSON control messages from the server websocket.
 func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 	_ = ctx
+	slog.Debug("read control loop started")
 
 	for {
 		_, data, err := conn.ReadMessage()
@@ -1571,13 +1614,14 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		onRecordingState := t.onRecordingState
 		onVideoLayers := t.onVideoLayers
 		onVideoQualityReq := t.onVideoQualityReq
+		onMessageHistory := t.onMessageHistory
 		t.cbMu.RUnlock()
 
 		var header struct {
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal(data, &header); err != nil {
-			log.Printf("[transport] invalid control msg: %v", err)
+			slog.Error("invalid control message", "err", err)
 			continue
 		}
 
@@ -1585,10 +1629,11 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		case "snapshot":
 			var msg backendSnapshotMsg
 			if err := json.Unmarshal(data, &msg); err != nil {
-				log.Printf("[transport] invalid snapshot msg: %v", err)
+				slog.Error("invalid snapshot message", "err", err)
 				continue
 			}
 
+			slog.Debug("snapshot received", "self_id", msg.SelfID, "users", len(msg.Users))
 			selfID := t.localUserID(msg.SelfID)
 			t.mu.Lock()
 			t.myID = selfID
@@ -1609,16 +1654,13 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 				users = append(users, UserInfo{ID: id, Username: u.Username, ChannelID: channelID})
 			}
 
-			if onChannelList != nil {
-				onChannelList([]ChannelInfo{{ID: 1, Name: "General"}})
-			}
 			if onUserList != nil {
 				onUserList(users)
 			}
 		case "user_joined":
 			var msg backendUserMsg
 			if err := json.Unmarshal(data, &msg); err != nil {
-				log.Printf("[transport] invalid user_joined msg: %v", err)
+				slog.Error("invalid user_joined message", "err", err)
 				continue
 			}
 			if msg.User == nil {
@@ -1639,7 +1681,7 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		case "user_left":
 			var msg backendUserMsg
 			if err := json.Unmarshal(data, &msg); err != nil {
-				log.Printf("[transport] invalid user_left msg: %v", err)
+				slog.Error("invalid user_left message", "err", err)
 				continue
 			}
 			if msg.User == nil {
@@ -1654,7 +1696,7 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		case "user_state":
 			var msg backendUserMsg
 			if err := json.Unmarshal(data, &msg); err != nil {
-				log.Printf("[transport] invalid user_state msg: %v", err)
+				slog.Error("invalid user_state message", "err", err)
 				continue
 			}
 			if msg.User == nil {
@@ -1675,7 +1717,7 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		case "text_message":
 			var msg backendUserMsg
 			if err := json.Unmarshal(data, &msg); err != nil {
-				log.Printf("[transport] invalid text_message msg: %v", err)
+				slog.Error("invalid text_message message", "err", err)
 				continue
 			}
 			if msg.User == nil {
@@ -1686,12 +1728,62 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 			if msg.Ts == 0 {
 				msg.Ts = time.Now().UnixMilli()
 			}
+			msgID := uint64(msg.MsgID)
 			if channelID != 0 {
 				if onChannelChat != nil {
-					onChannelChat(0, id, channelID, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
+					onChannelChat(msgID, id, channelID, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
 				}
 			} else if onChat != nil {
-				onChat(0, id, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
+				onChat(msgID, id, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
+			}
+		case "message_history":
+			var msg struct {
+				ChannelID string `json:"channel_id"`
+				Messages  []struct {
+					MsgID    int64  `json:"msg_id"`
+					Username string `json:"username"`
+					Message  string `json:"message"`
+					TS       int64  `json:"ts"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil {
+				slog.Error("invalid message_history message", "err", err)
+				continue
+			}
+			channelID := t.localChannelID(msg.ChannelID)
+			msgs := make([]ChatHistoryMessage, len(msg.Messages))
+			for i, m := range msg.Messages {
+				msgs[i] = ChatHistoryMessage{
+					MsgID:    m.MsgID,
+					Username: m.Username,
+					Message:  m.Message,
+					TS:       m.TS,
+				}
+			}
+			if onMessageHistory != nil {
+				onMessageHistory(channelID, msgs)
+			}
+		case "channel_list":
+			var msg struct {
+				Channels []ChannelInfo `json:"channels"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil {
+				slog.Error("invalid channel_list message", "err", err)
+				continue
+			}
+			if onChannelList != nil {
+				onChannelList(msg.Channels)
+			}
+		case "server_info":
+			var msg struct {
+				ServerName string `json:"server_name"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil {
+				slog.Error("invalid server_info message", "err", err)
+				continue
+			}
+			if msg.ServerName != "" && onServerInfo != nil {
+				onServerInfo(msg.ServerName)
 			}
 		case "pong":
 			t.lastPongTime.Store(time.Now().UnixNano())
@@ -1710,12 +1802,12 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		case "error":
 			var msg backendUserMsg
 			if err := json.Unmarshal(data, &msg); err == nil && msg.Error != "" {
-				log.Printf("[transport] server error: %s", msg.Error)
+				slog.Warn("server error", "error", msg.Error)
 			}
 		default:
 			var msg ControlMsg
 			if err := json.Unmarshal(data, &msg); err != nil {
-				log.Printf("[transport] invalid legacy control msg: %v", err)
+				slog.Error("invalid legacy control message", "err", err)
 				continue
 			}
 
@@ -1882,6 +1974,8 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 			}
 		}
 	}
+
+	slog.Debug("read control loop exiting")
 
 	t.mu.Lock()
 	reason := t.disconnectReason

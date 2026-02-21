@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare } from './config'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare, RequestChannels, RequestMessages, RequestServerInfo } from './config'
 import type { ServerEntry } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
+import { log } from './logger'
 import ChannelView from './ChannelView.vue'
 import SettingsPage from './SettingsPage.vue'
 import ReconnectBanner from './ReconnectBanner.vue'
@@ -213,20 +214,29 @@ async function connectToServer(addr: string, username: string): Promise<boolean>
     return false
   }
 
+  log.debug('app', 'connectToServer', { addr: targetAddr, username: user })
   const err = await Connect(targetAddr, user)
   if (err) {
+    log.warn('app', 'connect failed', { addr: targetAddr, error: err })
     serverState.value = { ...serverState.value, connectError: err, connected: false }
     return false
   }
 
+  log.info('app', 'connected to server', { addr: targetAddr })
   serverAddr.value = targetAddr
   serverState.value = { ...serverState.value, connected: true, connectError: '' }
   setLastConnectedAddr(targetAddr)
   startupAddrHint.value = ''
+
+  // Pull state from server after connecting.
+  RequestChannels()
+  RequestServerInfo()
+
   return true
 }
 
 async function handleConnect(payload: ConnectPayload): Promise<void> {
+  log.info('app', 'connecting', { addr: payload.addr, username: payload.username })
   await connectToServer(payload.addr, payload.username)
 }
 
@@ -239,6 +249,7 @@ async function handleSelectServer(addr: string): Promise<void> {
 
 async function handleActivateChannel(payload: { addr: string; channelID: number }): Promise<void> {
   if (joiningVoice.value) return
+  log.info('app', 'activating channel', { addr: payload.addr, channelID: payload.channelID })
   joiningVoice.value = true
   try {
     const targetAddr = normaliseAddr(payload.addr)
@@ -346,6 +357,9 @@ function handleViewChannel(channelID: number): void {
       state.unreadCounts = rest
     }
   })
+  if (channelID > 0 && connected.value) {
+    RequestMessages(channelID)
+  }
 }
 
 async function handleUploadFile(channelID: number): Promise<void> {
@@ -384,6 +398,7 @@ async function handleStopScreenShare(): Promise<void> {
 
 async function handleDisconnectVoice(): Promise<void> {
   if (disconnectingVoice.value || !voiceConnected.value) return
+  log.info('app', 'disconnecting voice')
   disconnectingVoice.value = true
   try {
     const err = await DisconnectVoice()
@@ -408,6 +423,7 @@ async function handleDisconnectVoice(): Promise<void> {
 
 async function handleDisconnect(): Promise<void> {
   if (!serverAddr.value) return
+  log.info('app', 'disconnecting', { addr: serverAddr.value })
   await Disconnect()
   voiceConnected.value = false
   clearSpeaking()
@@ -424,16 +440,19 @@ onMounted(async () => {
   window.addEventListener('hashchange', syncRouteFromHash)
 
   EventsOn('server:connected', (_data: { server_addr: string }) => {
+    log.info('event', 'server:connected')
     serverState.value = { ...serverState.value, connected: true }
   })
 
   EventsOn('server:disconnected', (data: { server_addr: string; reason?: string }) => {
+    log.info('event', 'server:disconnected', { reason: data?.reason })
     serverState.value = { ...serverState.value, connected: false, connectError: data?.reason || '' }
     voiceConnected.value = false
     clearSpeaking()
   })
 
   EventsOn('connection:lost', (data: { server_addr: string; reason: string } | null) => {
+    log.warn('event', 'connection:lost', { reason: data?.reason })
     serverState.value = { ...serverState.value, connected: false, connectError: data?.reason || 'Connection lost' }
     voiceConnected.value = false
     clearSpeaking()
@@ -441,6 +460,7 @@ onMounted(async () => {
 
   EventsOn('user:list', (data: any) => {
     const list = Array.isArray(data) ? data as User[] : (data?.users ?? []) as User[]
+    log.debug('event', 'user:list', { count: list.length })
     updateState(state => {
       state.users = list
       const map: Record<number, number> = {}
@@ -454,6 +474,7 @@ onMounted(async () => {
   })
 
   EventsOn('user:joined', (data: any) => {
+    log.debug('event', 'user:joined', { id: data.id, username: data.username })
     updateState(state => {
       state.users = [...state.users, { id: data.id, username: data.username }]
       state.userChannels = { ...state.userChannels, [data.id]: 0 }
@@ -466,6 +487,7 @@ onMounted(async () => {
   })
 
   EventsOn('user:left', (data: any) => {
+    log.debug('event', 'user:left', { id: data.id })
     updateState(state => {
       const leftUser = state.users.find(u => u.id === data.id)
       state.users = state.users.filter(u => u.id !== data.id)
@@ -493,6 +515,7 @@ onMounted(async () => {
 
   EventsOn('channel:list', (data: any) => {
     const list = Array.isArray(data) ? data as Channel[] : (data?.channels ?? []) as Channel[]
+    log.debug('event', 'channel:list', { count: list.length })
     updateState(state => {
       state.channels = list
       if (!list.some(ch => ch.id === state.viewedChannelId)) {
@@ -502,12 +525,14 @@ onMounted(async () => {
   })
 
   EventsOn('channel:user_moved', (data: any) => {
+    log.debug('event', 'channel:user_moved', { user_id: data.user_id, channel_id: data.channel_id })
     updateState(state => {
       state.userChannels = { ...state.userChannels, [data.user_id]: data.channel_id }
     })
   })
 
   EventsOn('chat:message', (data: any) => {
+    log.debug('event', 'chat:message', { username: data.username, channel_id: data.channel_id, msg_id: data.msg_id })
     updateState(state => {
       const fallback = state.channels.length > 0 ? state.channels[0].id : 0
       const channelId = data.channel_id ?? fallback
@@ -533,6 +558,33 @@ onMounted(async () => {
       }
       if (channelId !== state.viewedChannelId) {
         state.unreadCounts = { ...state.unreadCounts, [channelId]: (state.unreadCounts[channelId] ?? 0) + 1 }
+      }
+    })
+  })
+
+  EventsOn('chat:history', (data: any) => {
+    const channelId = data.channel_id ?? 0
+    const msgs = (data.messages ?? []) as Array<{ msg_id: number; username: string; message: string; ts: number }>
+    log.debug('event', 'chat:history', { channel_id: channelId, count: msgs.length })
+    if (msgs.length === 0) return
+    updateState(state => {
+      // Build history messages, skipping any msg_id already present.
+      const existingMsgIds = new Set(state.chatMessages.filter(m => m.msgId > 0).map(m => m.msgId))
+      const newMsgs: ChatMessage[] = []
+      for (const m of msgs) {
+        if (m.msg_id > 0 && existingMsgIds.has(m.msg_id)) continue
+        newMsgs.push({
+          id: ++chatIdCounter,
+          msgId: m.msg_id ?? 0,
+          senderId: 0,
+          username: m.username,
+          message: m.message,
+          ts: m.ts,
+          channelId,
+        })
+      }
+      if (newMsgs.length > 0) {
+        state.chatMessages = [...newMsgs, ...state.chatMessages]
       }
     })
   })
@@ -655,6 +707,7 @@ onMounted(async () => {
   })
 
   EventsOn('server:info', (data: any) => {
+    log.debug('event', 'server:info', { name: data.name })
     updateState(state => { state.serverName = data.name })
   })
 
@@ -663,6 +716,7 @@ onMounted(async () => {
   })
 
   EventsOn('user:me', (data: any) => {
+    log.debug('event', 'user:me', { id: data.id })
     updateState(state => { state.myID = data.id })
   })
 
@@ -671,6 +725,7 @@ onMounted(async () => {
   })
 
   EventsOn('video:state', (data: any) => {
+    log.debug('event', 'video:state', { id: data.id, active: data.video_active, screenShare: data.screen_share })
     updateState(state => {
       if (data.video_active) {
         state.videoStates = { ...state.videoStates, [data.id]: { active: true, screenShare: data.screen_share } }
@@ -690,6 +745,7 @@ onMounted(async () => {
   })
 
   EventsOn('recording:state', (data: any) => {
+    log.debug('event', 'recording:state', { channel_id: data.channel_id, recording: data.recording })
     updateState(state => {
       if (data.recording) {
         state.recordingChannels = { ...state.recordingChannels, [data.channel_id]: { recording: true, startedBy: data.started_by } }
@@ -701,6 +757,7 @@ onMounted(async () => {
   })
 
   EventsOn('connection:kicked', (_data: any) => {
+    log.warn('event', 'connection:kicked')
     serverState.value = { ...serverState.value, connectError: 'Disconnected by server owner', connected: false }
     voiceConnected.value = false
     clearSpeaking()
@@ -781,7 +838,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalShortcuts)
   window.removeEventListener('keydown', handlePTTKeyDown)
   window.removeEventListener('keyup', handlePTTKeyUp)
-  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'channel:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
+  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:history', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'channel:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
   cleanupSpeaking()
   if (typingCleanupInterval) clearInterval(typingCleanupInterval)
 })

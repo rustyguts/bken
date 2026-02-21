@@ -171,7 +171,7 @@ function handleSendMessage(message: string): void {
 </script>
 
 <template>
-  <div class="grid grid-cols-[64px_minmax(220px,280px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 overflow-hidden">
+  <div class="grid grid-cols-[64px_minmax(220px,280px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0">
     <Sidebar
       class="col-start-1 row-start-1 min-h-0"
       :active-server-addr="selectedServerAddr"

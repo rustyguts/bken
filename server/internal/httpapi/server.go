@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,24 +25,61 @@ import (
 type Server struct {
 	echo         *echo.Echo
 	channelState *core.ChannelState
+	store        *store.Store
 	blobs        *blob.Store
 }
 
 // New constructs an Echo app with websocket + REST routes.
-func New(channelState *core.ChannelState, blobs ...*blob.Store) *Server {
+func New(channelState *core.ChannelState, st *store.Store, blobs ...*blob.Store) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 	e.Use(middleware.Recover())
+	e.Use(requestLogger())
 
 	var blobStore *blob.Store
 	if len(blobs) > 0 {
 		blobStore = blobs[0]
 	}
 
-	s := &Server{echo: e, channelState: channelState, blobs: blobStore}
+	s := &Server{echo: e, channelState: channelState, store: st, blobs: blobStore}
 	s.registerRoutes()
 	return s
+}
+
+// requestLogger returns Echo middleware that logs each HTTP request via slog.
+func requestLogger() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			start := time.Now()
+			err := next(c)
+			if err != nil {
+				c.Error(err)
+			}
+
+			req := c.Request()
+			path := req.URL.Path
+
+			// Skip noisy endpoints at debug level.
+			if path == "/ws" || path == "/health" {
+				slog.Debug("http request",
+					"method", req.Method,
+					"path", path,
+					"status", c.Response().Status,
+					"duration_ms", time.Since(start).Milliseconds(),
+				)
+			} else {
+				slog.Info("http request",
+					"method", req.Method,
+					"path", path,
+					"status", c.Response().Status,
+					"duration_ms", time.Since(start).Milliseconds(),
+					"remote", c.RealIP(),
+				)
+			}
+			return nil
+		}
+	}
 }
 
 // Echo exposes the underlying Echo instance for tests.
@@ -58,7 +96,7 @@ func (s *Server) registerRoutes() {
 		s.echo.GET("/api/blobs/:id", s.handleBlobDownload)
 		s.echo.GET("/api/files/:id", s.handleBlobDownload) // Backward-compatible alias.
 	}
-	ws.NewHandler(s.channelState).Register(s.echo)
+	ws.NewHandler(s.channelState, s.store).Register(s.echo)
 }
 
 // Run starts Echo and blocks until ctx cancellation or startup failure.
@@ -77,9 +115,11 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		slog.Info("shutting down http server")
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.echo.Shutdown(shutCtx)
+		slog.Info("http server stopped")
 		return nil
 	}
 }
@@ -138,6 +178,8 @@ func (s *Server) handleBlobUpload(c echo.Context) error {
 	defer src.Close()
 
 	contentType := strings.TrimSpace(fileHeader.Header.Get(echo.HeaderContentType))
+	slog.Debug("blob upload start", "filename", fileHeader.Filename, "content_type", contentType, "size", fileHeader.Size)
+
 	meta, err := s.blobs.Put(c.Request().Context(), blob.PutInput{
 		Kind:         c.FormValue("kind"),
 		OriginalName: fileHeader.Filename,
@@ -145,9 +187,11 @@ func (s *Server) handleBlobUpload(c echo.Context) error {
 		Reader:       src,
 	})
 	if err != nil {
+		slog.Error("blob upload failed", "filename", fileHeader.Filename, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("persist blob: %v", err))
 	}
 
+	slog.Info("blob uploaded", "blob_id", meta.ID, "filename", meta.OriginalName, "size", meta.SizeBytes)
 	return c.JSON(http.StatusCreated, blobUploadResponse{
 		ID:           meta.ID,
 		Kind:         meta.Kind,
@@ -171,12 +215,15 @@ func (s *Server) handleBlobDownload(c echo.Context) error {
 	result, err := s.blobs.Open(c.Request().Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrBlobNotFound) {
+			slog.Debug("blob download not found", "blob_id", id)
 			return echo.NewHTTPError(http.StatusNotFound, "blob not found")
 		}
+		slog.Error("blob download error", "blob_id", id, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("open blob: %v", err))
 	}
 	defer result.File.Close()
 
+	slog.Debug("blob download", "blob_id", id, "size", result.Metadata.SizeBytes)
 	c.Response().Header().Set(echo.HeaderContentType, result.Metadata.ContentType)
 	c.Response().Header().Set(echo.HeaderContentLength, strconv.FormatInt(result.Metadata.SizeBytes, 10))
 	c.Response().Header().Set(

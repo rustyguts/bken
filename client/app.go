@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -77,9 +77,17 @@ func (a *App) requireTransport() (Transporter, error) {
 
 // startup is called when the Wails app starts.
 func (a *App) startup(ctx context.Context) {
+	// Auto-enable debug logging for dev builds.
+	logLevel := slog.LevelInfo
+	if buildCommit == "dev" {
+		logLevel = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+	slog.Info("app starting", "commit", buildCommit, "build_time", buildTime)
+
 	a.ctx = ctx
 	if err := portaudio.Initialize(); err != nil {
-		log.Printf("[app] portaudio init: %v", err)
+		slog.Error("portaudio init failed", "error", err)
 	}
 
 	// Handle files dropped onto elements with --wails-drop-target: drop.
@@ -88,6 +96,7 @@ func (a *App) startup(ctx context.Context) {
 			return
 		}
 		// Emit a frontend event so the Vue layer can pick the channel and upload.
+		slog.Debug("emit file:dropped", "paths", paths)
 		wailsrt.EventsEmit(ctx, "file:dropped", map[string]any{
 			"paths": paths,
 		})
@@ -181,6 +190,7 @@ func (a *App) SetOutputDevice(id int) {
 
 // SetVolume sets playback volume in the range [0.0, 1.0].
 func (a *App) SetVolume(vol float64) {
+	slog.Debug("SetVolume", "volume", vol)
 	a.audio.SetVolume(vol)
 }
 
@@ -251,6 +261,7 @@ func (a *App) StopTest() {
 
 // SetMuted mutes or unmutes the microphone.
 func (a *App) SetMuted(muted bool) {
+	slog.Debug("SetMuted", "muted", muted)
 	a.audio.SetMuted(muted)
 	if muted {
 		a.audio.PlayNotification(SoundMute)
@@ -261,6 +272,7 @@ func (a *App) SetMuted(muted bool) {
 
 // SetDeafened enables or disables audio playback.
 func (a *App) SetDeafened(deafened bool) {
+	slog.Debug("SetDeafened", "deafened", deafened)
 	a.audio.SetDeafened(deafened)
 	if deafened {
 		a.audio.PlayNotification(SoundMute)
@@ -292,6 +304,7 @@ func (a *App) PTTKeyUp() {
 // If connected to a different address, disconnects first.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) Connect(addr, username string) string {
+	slog.Debug("Connect", "addr", addr, "username", username)
 	normalizedAddr, err := a.normalizedAddr(addr)
 	if err != nil {
 		return err.Error()
@@ -334,9 +347,10 @@ func (a *App) Connect(addr, username string) string {
 	a.mu.Unlock()
 
 	if a.ctx != nil {
+		slog.Debug("emit server:connected", "addr", normalizedAddr)
 		wailsrt.EventsEmit(a.ctx, "server:connected", map[string]any{"server_addr": normalizedAddr})
 	}
-	log.Printf("[app] connected control session to %s as %s", normalizedAddr, username)
+	slog.Info("control session connected", "addr", normalizedAddr, "username", username)
 	return ""
 }
 
@@ -359,16 +373,19 @@ func (a *App) wireCallbacks() {
 // its server address.
 func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 	tr.SetOnUserList(func(users []UserInfo) {
+		slog.Debug("emit user:list", "addr", serverAddr)
 		wailsrt.EventsEmit(a.ctx, "user:list", map[string]any{
 			"server_addr": serverAddr,
 			"users":       users,
 		})
+		slog.Debug("emit user:me", "addr", serverAddr, "id", tr.MyID())
 		wailsrt.EventsEmit(a.ctx, "user:me", map[string]any{
 			"server_addr": serverAddr,
 			"id":          int(tr.MyID()),
 		})
 	})
 	tr.SetOnUserJoined(func(id uint16, name string) {
+		slog.Debug("emit user:joined", "addr", serverAddr, "id", id, "username", name)
 		wailsrt.EventsEmit(a.ctx, "user:joined", map[string]any{
 			"server_addr": serverAddr,
 			"id":          id,
@@ -377,6 +394,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		a.audio.PlayNotification(SoundUserJoined)
 	})
 	tr.SetOnUserLeft(func(id uint16) {
+		slog.Debug("emit user:left", "addr", serverAddr, "id", id)
 		wailsrt.EventsEmit(a.ctx, "user:left", map[string]any{
 			"server_addr": serverAddr,
 			"id":          id,
@@ -384,6 +402,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		a.audio.PlayNotification(SoundUserLeft)
 	})
 	tr.SetOnAudioReceived(func(userID uint16) {
+		slog.Debug("emit audio:speaking", "addr", serverAddr, "user_id", userID)
 		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{
 			"server_addr": serverAddr,
 			"id":          int(userID),
@@ -402,15 +421,17 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			a.audio.Stop()
 		}
 
+		slog.Debug("emit connection:lost", "addr", serverAddr, "reason", reason)
 		wailsrt.EventsEmit(a.ctx, "connection:lost", map[string]any{
 			"server_addr": serverAddr,
 			"reason":      reason,
 		})
+		slog.Debug("emit server:disconnected", "addr", serverAddr, "reason", reason)
 		wailsrt.EventsEmit(a.ctx, "server:disconnected", map[string]any{
 			"server_addr": serverAddr,
 			"reason":      reason,
 		})
-		log.Printf("[app] connection lost (%s): %s", serverAddr, reason)
+		slog.Info("connection lost", "addr", serverAddr, "reason", reason)
 	})
 	tr.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
 		payload := map[string]any{
@@ -446,6 +467,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 				"deleted":  replyPreview.Deleted,
 			}
 		}
+		slog.Debug("emit chat:message", "addr", serverAddr, "msg_id", msgID, "sender_id", senderID)
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
 	tr.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
@@ -482,9 +504,11 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 				"deleted":  replyPreview.Deleted,
 			}
 		}
+		slog.Debug("emit chat:message", "addr", serverAddr, "msg_id", msgID, "sender_id", senderID)
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
 	tr.SetOnLinkPreview(func(msgID uint64, channelID int64, url, title, desc, image, siteName string) {
+		slog.Debug("emit chat:link_preview", "addr", serverAddr, "msg_id", msgID)
 		wailsrt.EventsEmit(a.ctx, "chat:link_preview", map[string]any{
 			"server_addr": serverAddr,
 			"msg_id":      msgID,
@@ -497,12 +521,14 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnServerInfo(func(name string) {
+		slog.Debug("emit server:info", "addr", serverAddr, "name", name)
 		wailsrt.EventsEmit(a.ctx, "server:info", map[string]any{
 			"server_addr": serverAddr,
 			"name":        name,
 		})
 	})
 	tr.SetOnOwnerChanged(func(ownerID uint16) {
+		slog.Debug("emit channel:owner", "addr", serverAddr, "owner_id", ownerID)
 		wailsrt.EventsEmit(a.ctx, "channel:owner", map[string]any{
 			"server_addr": serverAddr,
 			"owner_id":    int(ownerID),
@@ -513,18 +539,21 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			a.connected.Store(false)
 			a.audio.Stop()
 		}
+		slog.Debug("emit connection:kicked", "addr", serverAddr)
 		wailsrt.EventsEmit(a.ctx, "connection:kicked", map[string]any{
 			"server_addr": serverAddr,
 		})
-		log.Printf("[app] kicked from server %s", serverAddr)
+		slog.Info("kicked from server", "addr", serverAddr)
 	})
 	tr.SetOnChannelList(func(channels []ChannelInfo) {
+		slog.Debug("emit channel:list", "addr", serverAddr)
 		wailsrt.EventsEmit(a.ctx, "channel:list", map[string]any{
 			"server_addr": serverAddr,
 			"channels":    channels,
 		})
 	})
 	tr.SetOnUserChannel(func(userID uint16, channelID int64) {
+		slog.Debug("emit channel:user_moved", "addr", serverAddr, "user_id", userID, "channel_id", channelID)
 		wailsrt.EventsEmit(a.ctx, "channel:user_moved", map[string]any{
 			"server_addr": serverAddr,
 			"user_id":     int(userID),
@@ -532,6 +561,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnUserRenamed(func(userID uint16, username string) {
+		slog.Debug("emit user:renamed", "addr", serverAddr, "user_id", userID, "username", username)
 		wailsrt.EventsEmit(a.ctx, "user:renamed", map[string]any{
 			"server_addr": serverAddr,
 			"id":          int(userID),
@@ -539,6 +569,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnMessageEdited(func(msgID uint64, message string, ts int64) {
+		slog.Debug("emit chat:message_edited", "addr", serverAddr, "msg_id", msgID)
 		wailsrt.EventsEmit(a.ctx, "chat:message_edited", map[string]any{
 			"server_addr": serverAddr,
 			"msg_id":      msgID,
@@ -547,12 +578,14 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnMessageDeleted(func(msgID uint64) {
+		slog.Debug("emit chat:message_deleted", "addr", serverAddr, "msg_id", msgID)
 		wailsrt.EventsEmit(a.ctx, "chat:message_deleted", map[string]any{
 			"server_addr": serverAddr,
 			"msg_id":      msgID,
 		})
 	})
 	tr.SetOnVideoState(func(userID uint16, active bool, screenShare bool) {
+		slog.Debug("emit video:state", "addr", serverAddr, "user_id", userID, "active", active, "screen_share", screenShare)
 		wailsrt.EventsEmit(a.ctx, "video:state", map[string]any{
 			"server_addr":  serverAddr,
 			"id":           int(userID),
@@ -561,6 +594,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnReactionAdded(func(msgID uint64, emoji string, userID uint16) {
+		slog.Debug("emit chat:reaction_added", "addr", serverAddr, "msg_id", msgID, "emoji", emoji, "user_id", userID)
 		wailsrt.EventsEmit(a.ctx, "chat:reaction_added", map[string]any{
 			"server_addr": serverAddr,
 			"msg_id":      msgID,
@@ -569,6 +603,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnReactionRemoved(func(msgID uint64, emoji string, userID uint16) {
+		slog.Debug("emit chat:reaction_removed", "addr", serverAddr, "msg_id", msgID, "emoji", emoji, "user_id", userID)
 		wailsrt.EventsEmit(a.ctx, "chat:reaction_removed", map[string]any{
 			"server_addr": serverAddr,
 			"msg_id":      msgID,
@@ -577,6 +612,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnUserTyping(func(userID uint16, username string, channelID int64) {
+		slog.Debug("emit chat:user_typing", "addr", serverAddr, "user_id", userID, "channel_id", channelID)
 		wailsrt.EventsEmit(a.ctx, "chat:user_typing", map[string]any{
 			"server_addr": serverAddr,
 			"id":          int(userID),
@@ -585,6 +621,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnMessagePinned(func(msgID uint64, channelID int64, userID uint16) {
+		slog.Debug("emit chat:message_pinned", "addr", serverAddr, "msg_id", msgID, "channel_id", channelID)
 		wailsrt.EventsEmit(a.ctx, "chat:message_pinned", map[string]any{
 			"server_addr": serverAddr,
 			"msg_id":      msgID,
@@ -593,12 +630,14 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnMessageUnpinned(func(msgID uint64) {
+		slog.Debug("emit chat:message_unpinned", "addr", serverAddr, "msg_id", msgID)
 		wailsrt.EventsEmit(a.ctx, "chat:message_unpinned", map[string]any{
 			"server_addr": serverAddr,
 			"msg_id":      msgID,
 		})
 	})
 	tr.SetOnRecordingState(func(channelID int64, recording bool, startedBy string) {
+		slog.Debug("emit recording:state", "addr", serverAddr, "channel_id", channelID, "recording", recording)
 		wailsrt.EventsEmit(a.ctx, "recording:state", map[string]any{
 			"server_addr": serverAddr,
 			"channel_id":  channelID,
@@ -607,6 +646,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnVideoLayers(func(userID uint16, layers []VideoLayer) {
+		slog.Debug("emit video:layers", "addr", serverAddr, "user_id", userID)
 		wailsrt.EventsEmit(a.ctx, "video:layers", map[string]any{
 			"server_addr": serverAddr,
 			"id":          int(userID),
@@ -614,10 +654,19 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 	})
 	tr.SetOnVideoQualityRequest(func(fromUserID uint16, quality string) {
+		slog.Debug("emit video:quality_request", "addr", serverAddr, "from_user_id", fromUserID, "quality", quality)
 		wailsrt.EventsEmit(a.ctx, "video:quality_request", map[string]any{
 			"server_addr": serverAddr,
 			"id":          int(fromUserID),
 			"quality":     quality,
+		})
+	})
+	tr.SetOnMessageHistory(func(channelID int64, messages []ChatHistoryMessage) {
+		slog.Debug("emit chat:history", "addr", serverAddr, "channel_id", channelID)
+		wailsrt.EventsEmit(a.ctx, "chat:history", map[string]any{
+			"server_addr": serverAddr,
+			"channel_id":  channelID,
+			"messages":    messages,
 		})
 	})
 	a.audio.OnSpeaking = func() {
@@ -628,6 +677,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		if currentTr == nil {
 			return
 		}
+		slog.Debug("emit audio:speaking", "addr", currentAddr, "id", currentTr.MyID())
 		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{
 			"server_addr": currentAddr,
 			"id":          int(currentTr.MyID()),
@@ -637,6 +687,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 
 // Disconnect tears down the voice and control session.
 func (a *App) Disconnect() {
+	slog.Debug("Disconnect")
 	if a.connected.Load() {
 		_ = a.DisconnectVoice()
 	}
@@ -655,7 +706,7 @@ func (a *App) Disconnect() {
 	a.metricsMu.Lock()
 	a.cachedMetrics = Metrics{}
 	a.metricsMu.Unlock()
-	log.Println("[app] disconnected")
+	slog.Info("disconnected")
 }
 
 // DisconnectVoice stops audio capture/playback and moves the user to the
@@ -663,6 +714,7 @@ func (a *App) Disconnect() {
 // control messages continue to flow.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DisconnectVoice() string {
+	slog.Debug("DisconnectVoice")
 	a.mu.RLock()
 	tr := a.transport
 	addr := a.serverAddr
@@ -691,6 +743,7 @@ func (a *App) DisconnectVoice() string {
 	// round-trip broadcast.
 	if a.ctx != nil {
 		myID := tr.MyID()
+		slog.Debug("emit channel:user_moved for voice disconnect", "addr", addr, "user_id", myID)
 		wailsrt.EventsEmit(a.ctx, "channel:user_moved", map[string]any{
 			"server_addr": addr,
 			"user_id":     int(myID),
@@ -699,7 +752,7 @@ func (a *App) DisconnectVoice() string {
 	}
 
 	a.audio.PlayNotification(SoundDisconnect)
-	log.Printf("[app] disconnected voice from %s (control session still active)", addr)
+	slog.Info("voice disconnected", "addr", addr, "control_active", true)
 	return serverErr
 }
 
@@ -707,6 +760,7 @@ func (a *App) DisconnectVoice() string {
 // Call this after DisconnectVoice to rejoin voice in a channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) ConnectVoice(channelID int) string {
+	slog.Debug("ConnectVoice", "channel_id", channelID)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -737,7 +791,7 @@ func (a *App) ConnectVoice(channelID int) string {
 	a.mu.RLock()
 	addr := a.serverAddr
 	a.mu.RUnlock()
-	log.Printf("[app] connected voice on %s channel %d", addr, channelID)
+	slog.Info("voice connected", "addr", addr, "channel_id", channelID)
 	return ""
 }
 
@@ -786,6 +840,7 @@ func (a *App) adaptBitrateLoop(done <-chan struct{}) {
 			a.cachedMetrics = m
 			a.metricsMu.Unlock()
 
+			slog.Debug("emit voice:quality")
 			wailsrt.EventsEmit(a.ctx, "voice:quality", m)
 		}
 	}
@@ -820,7 +875,7 @@ func (a *App) ApplyConfig() {
 // SaveConfig persists the given user config to disk.
 func (a *App) SaveConfig(cfg Config) {
 	if err := SaveConfig(cfg); err != nil {
-		log.Printf("[app] save config: %v", err)
+		slog.Error("save config failed", "error", err)
 	}
 }
 
@@ -886,6 +941,7 @@ func (a *App) GetUserVolume(userID int) float64 {
 // user_renamed broadcast.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RenameUser(name string) string {
+	slog.Debug("RenameUser", "name", name)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -914,6 +970,7 @@ func (a *App) RenameServer(name string) string {
 // caller is the channel owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) KickUser(id int) string {
+	slog.Debug("KickUser", "user_id", id)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -928,6 +985,7 @@ func (a *App) KickUser(id int) string {
 // Pass id=0 to leave all channels (return to lobby).
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) JoinChannel(id int) string {
+	slog.Debug("JoinChannel", "channel_id", id)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -941,6 +999,7 @@ func (a *App) JoinChannel(id int) string {
 // SendChannelChat sends a channel-scoped chat message to all users in that channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendChannelChat(channelID int, message string) string {
+	slog.Debug("SendChannelChat", "channel_id", channelID, "length", len(message))
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -955,6 +1014,7 @@ func (a *App) SendChannelChat(channelID int, message string) string {
 // Only the original sender is allowed to edit; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) EditMessage(msgID int, message string) string {
+	slog.Debug("EditMessage", "msg_id", msgID, "length", len(message))
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -969,6 +1029,7 @@ func (a *App) EditMessage(msgID int, message string) string {
 // The original sender and the channel owner are allowed to delete.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DeleteMessage(msgID int) string {
+	slog.Debug("DeleteMessage", "msg_id", msgID)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -982,6 +1043,7 @@ func (a *App) DeleteMessage(msgID int) string {
 // AddReaction adds an emoji reaction to a message.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) AddReaction(msgID int, emoji string) string {
+	slog.Debug("AddReaction", "msg_id", msgID, "emoji", emoji)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -995,6 +1057,7 @@ func (a *App) AddReaction(msgID int, emoji string) string {
 // RemoveReaction removes an emoji reaction from a message.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RemoveReaction(msgID int, emoji string) string {
+	slog.Debug("RemoveReaction", "msg_id", msgID, "emoji", emoji)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1021,6 +1084,7 @@ func (a *App) SendTyping(channelID int) string {
 // SendChat sends a chat message to the server for fan-out to all participants.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendChat(message string) string {
+	slog.Debug("SendChat", "length", len(message))
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1152,6 +1216,7 @@ func (a *App) uploadFilePath(channelID int64, path string) string {
 // CreateChannel asks the server to create a new channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) CreateChannel(name string) string {
+	slog.Debug("CreateChannel", "name", name)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1165,6 +1230,7 @@ func (a *App) CreateChannel(name string) string {
 // RenameChannel asks the server to rename a channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RenameChannel(id int, name string) string {
+	slog.Debug("RenameChannel", "channel_id", id, "name", name)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1178,6 +1244,7 @@ func (a *App) RenameChannel(id int, name string) string {
 // DeleteChannel asks the server to delete a channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DeleteChannel(id int) string {
+	slog.Debug("DeleteChannel", "channel_id", id)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1188,9 +1255,49 @@ func (a *App) DeleteChannel(id int) string {
 	return ""
 }
 
+// RequestChannels asks the server to send the channel list.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RequestChannels() string {
+	tr, err := a.requireTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.RequestChannels(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// RequestMessages asks the server to send message history for a channel.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RequestMessages(channelID int) string {
+	tr, err := a.requireTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.RequestMessages(int64(channelID)); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// RequestServerInfo asks the server to send its name and metadata.
+// Returns an error message string or "" on success (Wails JS binding convention).
+func (a *App) RequestServerInfo() string {
+	tr, err := a.requireTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.RequestServerInfo(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // StartVideo notifies all peers that this user has started video.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartVideo() string {
+	slog.Debug("StartVideo")
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1204,6 +1311,7 @@ func (a *App) StartVideo() string {
 // StopVideo notifies all peers that this user has stopped video.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StopVideo() string {
+	slog.Debug("StopVideo")
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1217,6 +1325,7 @@ func (a *App) StopVideo() string {
 // StartScreenShare notifies all peers that this user has started screen sharing.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartScreenShare() string {
+	slog.Debug("StartScreenShare")
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1230,6 +1339,7 @@ func (a *App) StartScreenShare() string {
 // StopScreenShare notifies all peers that this user has stopped screen sharing.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StopScreenShare() string {
+	slog.Debug("StopScreenShare")
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1244,6 +1354,7 @@ func (a *App) StopScreenShare() string {
 // Only succeeds if the caller is the channel owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) MoveUserToChannel(userID int, channelID int) string {
+	slog.Debug("MoveUserToChannel", "user_id", userID, "channel_id", channelID)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1285,12 +1396,12 @@ func (a *App) sendLoop() {
 			if err := tr.SendAudio(data); err != nil {
 				consecutiveErrors++
 				if consecutiveErrors == 1 {
-					log.Printf("[app] send audio error: %v", err)
+					slog.Error("send audio error", "error", err)
 				} else if consecutiveErrors%10 == 0 {
-					log.Printf("[app] send audio: %d consecutive errors", consecutiveErrors)
+					slog.Error("send audio consecutive errors", "count", consecutiveErrors)
 				}
 				if consecutiveErrors >= sendFailureThreshold {
-					log.Printf("[app] send audio: %d consecutive errors, disconnecting voice", consecutiveErrors)
+					slog.Error("send audio failure threshold reached, disconnecting voice", "count", consecutiveErrors)
 					_ = a.DisconnectVoice()
 					return
 				}
@@ -1305,6 +1416,7 @@ func (a *App) sendLoop() {
 // Only the channel owner can start recording; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartRecording(channelID int) string {
+	slog.Debug("StartRecording", "channel_id", channelID)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()
@@ -1319,6 +1431,7 @@ func (a *App) StartRecording(channelID int) string {
 // Only the channel owner can stop recording; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StopRecording(channelID int) string {
+	slog.Debug("StopRecording", "channel_id", channelID)
 	tr, err := a.requireTransport()
 	if err != nil {
 		return err.Error()

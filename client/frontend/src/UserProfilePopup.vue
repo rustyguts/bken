@@ -75,7 +75,7 @@ function handleClickOutside(e: MouseEvent): void {
         <div class="card-body">
           <!-- Header -->
           <div class="flex items-center gap-3">
-            <div class="avatar placeholder">
+            <div class="avatar avatar-placeholder">
               <div class="bg-neutral text-neutral-content w-10 rounded-full">
                 <span class="text-sm">{{ initials(user.username) }}</span>
               </div>

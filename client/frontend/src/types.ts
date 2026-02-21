@@ -31,14 +31,6 @@ export interface SpeakingEvent {
   id: number
 }
 
-/** A timestamped entry in the event log. */
-export interface LogEvent {
-  id: number
-  time: string
-  text: string
-  type: 'join' | 'leave' | 'info'
-}
-
 /** Connection parameters submitted from the server browser form. */
 export interface ConnectPayload {
   username: string

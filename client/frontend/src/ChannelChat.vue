@@ -495,7 +495,7 @@ function renderMessage(msg: ChatMessage): string {
         >
           <!-- Avatar (hidden in compact density) -->
           <div v-if="density !== 'compact'" class="chat-image">
-            <div class="avatar placeholder">
+            <div class="avatar avatar-placeholder">
               <div class="bg-neutral text-neutral-content rounded-full" :class="density === 'comfortable' ? 'w-10' : 'w-8'">
                 <span class="text-xs">{{ initials(msg.username) }}</span>
               </div>

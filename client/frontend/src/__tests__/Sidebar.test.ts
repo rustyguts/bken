@@ -61,7 +61,7 @@ describe('Sidebar', () => {
   it('renders user avatar at bottom with initials', async () => {
     const w = mount(Sidebar, { props: baseProps, ...mountOpts })
     await flushPromises()
-    const avatar = w.find('button[title="TestUser"]')
+    const avatar = w.find('summary[title="TestUser"]')
     expect(avatar.exists()).toBe(true)
     expect(avatar.text()).toBe('T')
   })
@@ -69,7 +69,7 @@ describe('Sidebar', () => {
   it('shows user menu with Rename Username and User Settings when avatar clicked', async () => {
     const w = mount(Sidebar, { props: baseProps, ...mountOpts })
     await flushPromises()
-    const avatar = w.find('button[title="TestUser"]')
+    const avatar = w.find('summary[title="TestUser"]')
     await avatar.trigger('click')
     await nextTick()
     const menu = w.find('[data-testid="user-menu"]')
@@ -81,7 +81,7 @@ describe('Sidebar', () => {
   it('emits openSettings when User Settings is clicked', async () => {
     const w = mount(Sidebar, { props: baseProps, ...mountOpts })
     await flushPromises()
-    const avatar = w.find('button[title="TestUser"]')
+    const avatar = w.find('summary[title="TestUser"]')
     await avatar.trigger('click')
     await nextTick()
     const menuBtns = w.findAll('[data-testid="user-menu"] a')
@@ -94,7 +94,7 @@ describe('Sidebar', () => {
   it('opens rename modal when Rename Username is clicked', async () => {
     const w = mount(Sidebar, { props: baseProps, ...mountOpts })
     await flushPromises()
-    const avatar = w.find('button[title="TestUser"]')
+    const avatar = w.find('summary[title="TestUser"]')
     await avatar.trigger('click')
     await nextTick()
     const menuBtns = w.findAll('[data-testid="user-menu"] a')
@@ -108,7 +108,7 @@ describe('Sidebar', () => {
   it('emits renameUsername when rename modal is confirmed', async () => {
     const w = mount(Sidebar, { props: baseProps, ...mountOpts })
     await flushPromises()
-    const avatar = w.find('button[title="TestUser"]')
+    const avatar = w.find('summary[title="TestUser"]')
     await avatar.trigger('click')
     await nextTick()
     const menuBtns = w.findAll('[data-testid="user-menu"] a')
@@ -132,7 +132,7 @@ describe('Sidebar', () => {
   it('does not emit renameUsername when name is unchanged', async () => {
     const w = mount(Sidebar, { props: baseProps, ...mountOpts })
     await flushPromises()
-    const avatar = w.find('button[title="TestUser"]')
+    const avatar = w.find('summary[title="TestUser"]')
     await avatar.trigger('click')
     await nextTick()
     const menuBtns = w.findAll('[data-testid="user-menu"] a')
@@ -152,7 +152,7 @@ describe('Sidebar', () => {
   it('closes rename modal when Cancel is clicked', async () => {
     const w = mount(Sidebar, { props: baseProps, ...mountOpts })
     await flushPromises()
-    const avatar = w.find('button[title="TestUser"]')
+    const avatar = w.find('summary[title="TestUser"]')
     await avatar.trigger('click')
     await nextTick()
     const menuBtns = w.findAll('[data-testid="user-menu"] a')

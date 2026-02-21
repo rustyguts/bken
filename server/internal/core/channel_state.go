@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -32,14 +33,29 @@ type userState struct {
 // Users may connect to multiple servers simultaneously, but each user has at
 // most one global voice connection at any time.
 type ChannelState struct {
-	mu     sync.RWMutex
-	users  map[string]*userState
-	nextID atomic.Uint64
+	mu         sync.RWMutex
+	users      map[string]*userState
+	nextID     atomic.Uint64
+	channels   map[string][]protocol.Channel // serverID → channels
+	nextChID   atomic.Int64
+	serverName string
 }
 
-// NewChannelState returns an empty channel state.
-func NewChannelState() *ChannelState {
-	return &ChannelState{users: make(map[string]*userState)}
+// NewChannelState returns an empty channel state with the given server name.
+func NewChannelState(serverName string) *ChannelState {
+	if serverName == "" {
+		serverName = "bken server"
+	}
+	return &ChannelState{
+		users:      make(map[string]*userState),
+		channels:   make(map[string][]protocol.Channel),
+		serverName: serverName,
+	}
+}
+
+// ServerName returns the configured server display name.
+func (r *ChannelState) ServerName() string {
+	return r.serverName
 }
 
 // Add registers a new user session and returns the session plus full snapshot.
@@ -63,8 +79,10 @@ func (r *ChannelState) Add(username string, sendBuf int) (*Session, []protocol.U
 	r.mu.Lock()
 	r.users[id] = u
 	snapshot := r.snapshotLocked()
+	count := len(r.users)
 	r.mu.Unlock()
 
+	slog.Info("user added", "user_id", id, "username", username, "total_users", count)
 	return &Session{UserID: id, Send: u.send}, snapshot, nil
 }
 
@@ -77,8 +95,11 @@ func (r *ChannelState) Remove(userID string) (protocol.User, bool) {
 	if !ok {
 		return protocol.User{}, false
 	}
+	hadVoice := u.voice != nil
 	delete(r.users, userID)
 	close(u.send)
+
+	slog.Info("user removed", "user_id", userID, "username", u.username, "had_voice", hadVoice, "remaining_users", len(r.users))
 	return toProtocolUser(u), true
 }
 
@@ -133,6 +154,8 @@ func (r *ChannelState) ConnectServer(userID, serverID string) (protocol.User, bo
 	}
 	_, existed := u.connected[serverID]
 	u.connected[serverID] = struct{}{}
+
+	slog.Debug("server connected", "user_id", userID, "server_id", serverID, "new", !existed)
 	return toProtocolUser(u), !existed, nil
 }
 
@@ -163,6 +186,7 @@ func (r *ChannelState) DisconnectServer(userID, serverID string) (protocol.User,
 		u.voice = nil
 	}
 
+	slog.Debug("server disconnected", "user_id", userID, "server_id", serverID, "voice_cleared", oldVoice != nil)
 	return toProtocolUser(u), true, oldVoice, nil
 }
 
@@ -192,6 +216,8 @@ func (r *ChannelState) JoinVoice(userID, serverID, channelID string) (protocol.U
 		oldVoice = &v
 	}
 	u.voice = &protocol.VoiceState{ServerID: serverID, ChannelID: channelID}
+
+	slog.Info("voice joined", "user_id", userID, "server_id", serverID, "channel_id", channelID, "prev_server", oldVoice)
 	return toProtocolUser(u), oldVoice, nil
 }
 
@@ -209,6 +235,8 @@ func (r *ChannelState) DisconnectVoice(userID string) (protocol.User, *protocol.
 	}
 	v := *u.voice
 	u.voice = nil
+
+	slog.Info("voice disconnected", "user_id", userID, "was_server", v.ServerID, "was_channel", v.ChannelID)
 	return toProtocolUser(u), &v, true
 }
 
@@ -225,6 +253,101 @@ func (r *ChannelState) CanSendText(userID, serverID string) bool {
 	return connected
 }
 
+// CreateChannel adds a named channel to a server and returns the updated list.
+func (r *ChannelState) CreateChannel(serverID, name string) ([]protocol.Channel, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("channel name is required")
+	}
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return nil, fmt.Errorf("server_id is required")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	id := r.nextChID.Add(1)
+	r.channels[serverID] = append(r.channels[serverID], protocol.Channel{ID: id, Name: name})
+	out := make([]protocol.Channel, len(r.channels[serverID]))
+	copy(out, r.channels[serverID])
+
+	slog.Info("channel created", "server_id", serverID, "channel_id", id, "name", name, "total_channels", len(out))
+	return out, nil
+}
+
+// RenameChannel renames a channel and returns the updated list.
+func (r *ChannelState) RenameChannel(serverID string, channelID int64, name string) ([]protocol.Channel, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("channel name is required")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	chs := r.channels[serverID]
+	for i := range chs {
+		if chs[i].ID == channelID {
+			chs[i].Name = name
+			out := make([]protocol.Channel, len(chs))
+			copy(out, chs)
+			slog.Debug("channel renamed", "server_id", serverID, "channel_id", channelID, "new_name", name)
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("channel not found")
+}
+
+// DeleteChannel removes a channel and returns the updated list.
+func (r *ChannelState) DeleteChannel(serverID string, channelID int64) ([]protocol.Channel, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	chs := r.channels[serverID]
+	for i := range chs {
+		if chs[i].ID == channelID {
+			r.channels[serverID] = append(chs[:i], chs[i+1:]...)
+			out := make([]protocol.Channel, len(r.channels[serverID]))
+			copy(out, r.channels[serverID])
+			slog.Info("channel deleted", "server_id", serverID, "channel_id", channelID, "remaining_channels", len(out))
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("channel not found")
+}
+
+// Channels returns the channel list for a server.
+func (r *ChannelState) Channels(serverID string) []protocol.Channel {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]protocol.Channel, len(r.channels[serverID]))
+	copy(out, r.channels[serverID])
+	return out
+}
+
+// UserServer returns the single server a user is connected to, or an error
+// if the user is connected to zero or multiple servers.
+func (r *ChannelState) UserServer(userID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	u, ok := r.users[userID]
+	if !ok {
+		return "", fmt.Errorf("user not found")
+	}
+	if len(u.connected) == 0 {
+		return "", fmt.Errorf("user is not connected to any server")
+	}
+	if len(u.connected) > 1 {
+		return "", fmt.Errorf("ambiguous: user is connected to multiple servers")
+	}
+	for sid := range u.connected {
+		return sid, nil
+	}
+	return "", fmt.Errorf("unreachable")
+}
+
 // Broadcast sends a message to all connected users except exceptUserID.
 func (r *ChannelState) Broadcast(msg protocol.Message, exceptUserID string) {
 	r.mu.RLock()
@@ -237,9 +360,13 @@ func (r *ChannelState) Broadcast(msg protocol.Message, exceptUserID string) {
 	}
 	r.mu.RUnlock()
 
+	sent := 0
 	for _, ch := range targets {
-		trySend(ch, msg)
+		if trySend(ch, msg) {
+			sent++
+		}
 	}
+	slog.Debug("broadcast", "type", msg.Type, "recipients", sent, "total", len(targets))
 }
 
 // BroadcastToServer sends a message to users connected to serverID.
@@ -262,9 +389,13 @@ func (r *ChannelState) BroadcastToServer(serverID string, msg protocol.Message, 
 	}
 	r.mu.RUnlock()
 
+	sent := 0
 	for _, ch := range targets {
-		trySend(ch, msg)
+		if trySend(ch, msg) {
+			sent++
+		}
 	}
+	slog.Debug("broadcast_to_server", "type", msg.Type, "server_id", serverID, "recipients", sent, "total", len(targets))
 }
 
 // SendTo sends one message to one user.
@@ -308,6 +439,7 @@ func trySend(ch chan protocol.Message, msg protocol.Message) (ok bool) {
 	case ch <- msg:
 		return true
 	case <-time.After(SendTimeout):
+		slog.Debug("trySend timeout", "type", msg.Type)
 		return false
 	}
 }

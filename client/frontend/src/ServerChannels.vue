@@ -495,7 +495,7 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
               @click.stop="openProfilePopup($event, user)"
               @contextmenu="openUserContextMenu($event, user, channel.id)"
             >
-              <div class="avatar placeholder">
+              <div class="avatar avatar-placeholder">
                 <div
                   class="w-5 rounded-full text-[9px] transition-all duration-150"
                   :class="speakingUsers.has(user.id) ? 'bg-success/20 ring-1 ring-success/50' : 'bg-neutral text-neutral-content'"

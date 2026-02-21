@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,7 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	slog.Info("sqlite store opened", "path", path)
 	return st, nil
 }
 
@@ -80,11 +82,23 @@ CREATE TABLE IF NOT EXISTS blobs (
 	created_at_unix_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_blobs_created_at ON blobs(created_at_unix_ms);
+
+CREATE TABLE IF NOT EXISTS messages (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	server_id TEXT NOT NULL,
+	channel_id TEXT NOT NULL,
+	user_id TEXT NOT NULL,
+	username TEXT NOT NULL,
+	message TEXT NOT NULL,
+	ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(server_id, channel_id, ts);
 `
 
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("run sqlite migrations: %w", err)
 	}
+	slog.Debug("sqlite migrations applied")
 	return nil
 }
 
@@ -131,7 +145,65 @@ INSERT INTO blobs (
 	if err != nil {
 		return fmt.Errorf("insert blob metadata: %w", err)
 	}
+	slog.Debug("blob metadata created", "blob_id", meta.ID, "size", meta.SizeBytes)
 	return nil
+}
+
+// MessageRow is a persisted chat message.
+type MessageRow struct {
+	ID        int64
+	ServerID  string
+	ChannelID string
+	UserID    string
+	Username  string
+	Message   string
+	TS        int64
+}
+
+// InsertMessage persists a chat message and returns the assigned ID.
+func (s *Store) InsertMessage(ctx context.Context, serverID, channelID, userID, username, message string, ts int64) (int64, error) {
+	const q = `INSERT INTO messages (server_id, channel_id, user_id, username, message, ts) VALUES (?, ?, ?, ?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, q, serverID, channelID, userID, username, message, ts)
+	if err != nil {
+		return 0, fmt.Errorf("insert message: %w", err)
+	}
+	id, _ := result.LastInsertId()
+	slog.Debug("message persisted", "msg_id", id, "server_id", serverID, "channel_id", channelID, "user_id", userID)
+	return id, nil
+}
+
+// GetMessages returns the most recent messages for a channel, ordered oldest first.
+func (s *Store) GetMessages(ctx context.Context, serverID, channelID string, limit int) ([]MessageRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	const q = `
+SELECT id, server_id, channel_id, user_id, username, message, ts
+FROM messages
+WHERE server_id = ? AND channel_id = ?
+ORDER BY ts DESC, id DESC
+LIMIT ?
+`
+	rows, err := s.db.QueryContext(ctx, q, serverID, channelID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query messages: %w", err)
+	}
+	defer rows.Close()
+
+	var msgs []MessageRow
+	for rows.Next() {
+		var m MessageRow
+		if err := rows.Scan(&m.ID, &m.ServerID, &m.ChannelID, &m.UserID, &m.Username, &m.Message, &m.TS); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		msgs = append(msgs, m)
+	}
+	// Reverse to oldest-first order.
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	slog.Debug("messages loaded", "server_id", serverID, "channel_id", channelID, "count", len(msgs))
+	return msgs, rows.Err()
 }
 
 // BlobByID returns blob metadata by UUID.
@@ -162,11 +234,13 @@ WHERE id = ?
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			slog.Debug("blob not found", "blob_id", id)
 			return BlobMetadata{}, ErrBlobNotFound
 		}
 		return BlobMetadata{}, fmt.Errorf("query blob metadata: %w", err)
 	}
 
 	meta.CreatedAt = time.UnixMilli(createdAtUnixM).UTC()
+	slog.Debug("blob loaded", "blob_id", id, "size", meta.SizeBytes)
 	return meta, nil
 }

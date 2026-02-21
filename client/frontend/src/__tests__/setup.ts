@@ -229,6 +229,9 @@ const goApp: Record<string, any> = {
   StartRecording: vi.fn().mockResolvedValue(''),
   StopRecording: vi.fn().mockResolvedValue(''),
   RequestVideoQuality: vi.fn().mockResolvedValue(''),
+  RequestChannels: vi.fn().mockResolvedValue(''),
+  RequestMessages: vi.fn().mockResolvedValue(''),
+  RequestServerInfo: vi.fn().mockResolvedValue(''),
 }
 
 ;(window as any).go = {

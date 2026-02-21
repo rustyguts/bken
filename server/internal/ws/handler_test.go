@@ -58,7 +58,7 @@ func TestDisconnectVoiceBroadcastClearsAvatar(t *testing.T) {
 	})
 }
 
-func TestTextOnAnotherServerWhileVoiceConnectedElsewhere(t *testing.T) {
+func TestCreateChannelBroadcastsChannelList(t *testing.T) {
 	_, baseURL := startTestServer(t)
 
 	alice, _ := connectClient(t, baseURL, "alice")
@@ -66,35 +66,56 @@ func TestTextOnAnotherServerWhileVoiceConnectedElsewhere(t *testing.T) {
 	bob, _ := connectClient(t, baseURL, "bob")
 	defer bob.Close()
 
+	// Both connect to the same server.
 	writeMsg(t, alice, protocol.Message{Type: protocol.TypeConnectServer, ServerID: "srv-1"})
-	writeMsg(t, alice, protocol.Message{Type: protocol.TypeConnectServer, ServerID: "srv-2"})
-	writeMsg(t, bob, protocol.Message{Type: protocol.TypeConnectServer, ServerID: "srv-2"})
-
-	writeMsg(t, alice, protocol.Message{Type: protocol.TypeJoinVoice, ServerID: "srv-1", ChannelID: "voice-a"})
-
-	writeMsg(t, alice, protocol.Message{
-		Type:      protocol.TypeSendText,
-		ServerID:  "srv-2",
-		ChannelID: "text-b",
-		Message:   "hello from srv-1 voice",
+	readUntil(t, alice, func(m protocol.Message) bool {
+		return m.Type == protocol.TypeUserState
+	})
+	writeMsg(t, bob, protocol.Message{Type: protocol.TypeConnectServer, ServerID: "srv-1"})
+	readUntil(t, bob, func(m protocol.Message) bool {
+		return m.Type == protocol.TypeUserState
 	})
 
-	readUntil(t, bob, func(m protocol.Message) bool {
-		return m.Type == protocol.TypeTextMessage &&
-			m.ServerID == "srv-2" &&
-			m.ChannelID == "text-b" &&
-			m.Message == "hello from srv-1 voice" &&
-			m.User != nil &&
-			m.User.Username == "alice"
+	// Alice creates a channel.
+	writeMsg(t, alice, protocol.Message{Type: protocol.TypeCreateChannel, Message: "general"})
+
+	// Both should receive the channel_list.
+	aliceList := readUntil(t, alice, func(m protocol.Message) bool {
+		return m.Type == protocol.TypeChannelList
+	})
+	bobList := readUntil(t, bob, func(m protocol.Message) bool {
+		return m.Type == protocol.TypeChannelList
+	})
+
+	if len(aliceList.Channels) != 1 || aliceList.Channels[0].Name != "general" {
+		t.Fatalf("alice channels: %#v", aliceList.Channels)
+	}
+	if len(bobList.Channels) != 1 || bobList.Channels[0].Name != "general" {
+		t.Fatalf("bob channels: %#v", bobList.Channels)
+	}
+}
+
+func TestCreateChannelRequiresServerConnection(t *testing.T) {
+	_, baseURL := startTestServer(t)
+
+	alice, _ := connectClient(t, baseURL, "alice")
+	defer alice.Close()
+
+	// Try to create a channel without connecting to any server.
+	writeMsg(t, alice, protocol.Message{Type: protocol.TypeCreateChannel, Message: "general"})
+
+	// Should receive an error.
+	readUntil(t, alice, func(m protocol.Message) bool {
+		return m.Type == protocol.TypeError && m.Error != ""
 	})
 }
 
 func startTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 
-	channelState := core.NewChannelState()
+	channelState := core.NewChannelState("")
 	e := echo.New()
-	NewHandler(channelState).Register(e)
+	NewHandler(channelState, nil).Register(e)
 	httpServer := httptest.NewServer(e)
 	t.Cleanup(httpServer.Close)
 

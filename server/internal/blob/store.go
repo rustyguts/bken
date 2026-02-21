@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,7 @@ func NewStore(rootDir string, meta *store.Store) (*Store, error) {
 	if err := os.MkdirAll(rootDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create blob directory: %w", err)
 	}
+	slog.Debug("blob store initialized", "dir", rootDir)
 	return &Store{rootDir: rootDir, meta: meta}, nil
 }
 
@@ -110,6 +112,7 @@ func (s *Store) Put(ctx context.Context, input PutInput) (store.BlobMetadata, er
 		return store.BlobMetadata{}, fmt.Errorf("persist blob metadata: %w", err)
 	}
 
+	slog.Info("blob stored", "blob_id", id, "name", originalName, "size", size, "content_type", contentType)
 	return meta, nil
 }
 
@@ -123,9 +126,11 @@ func (s *Store) Open(ctx context.Context, id string) (OpenResult, error) {
 	path := filepath.Join(s.rootDir, meta.DiskName)
 	f, err := os.Open(path)
 	if err != nil {
+		slog.Error("blob file open failed", "blob_id", id, "path", path, "err", err)
 		return OpenResult{}, fmt.Errorf("open blob file: %w", err)
 	}
 
+	slog.Debug("blob opened", "blob_id", id, "size", meta.SizeBytes)
 	return OpenResult{Metadata: meta, File: f}, nil
 }
 

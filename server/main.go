@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,15 +22,27 @@ func main() {
 	addr := flag.String("addr", ":8080", "Echo listen address")
 	dbPath := flag.String("db", "bken.db", "SQLite database path")
 	blobsDir := flag.String("blobs-dir", "", "Blob directory path (defaults to <db-dir>/blobs)")
+	serverName := flag.String("name", "bken server", "Server display name")
+	debug := flag.Bool("debug", false, "Enable debug logging (auto-enabled for dev builds)")
 	flag.Parse()
+
+	// Auto-enable debug logging for dev builds; override with -debug flag.
+	level := slog.LevelInfo
+	if *debug || strings.Contains(Version, "dev") {
+		level = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+
+	slog.Info("starting server", "version", Version, "addr", *addr, "db", *dbPath)
 
 	sqliteStore, err := store.Open(*dbPath)
 	if err != nil {
-		log.Fatalf("[server] open sqlite store: %v", err)
+		slog.Error("open sqlite store", "err", err)
+		os.Exit(1)
 	}
 	defer func() {
 		if closeErr := sqliteStore.Close(); closeErr != nil {
-			log.Printf("[server] close sqlite store: %v", closeErr)
+			slog.Error("close sqlite store", "err", closeErr)
 		}
 	}()
 
@@ -38,13 +50,18 @@ func main() {
 	if blobRoot == "" {
 		blobRoot = filepath.Join(filepath.Dir(*dbPath), "blobs")
 	}
+	slog.Debug("blob store", "dir", blobRoot)
+
 	blobStore, err := blob.NewStore(blobRoot, sqliteStore)
 	if err != nil {
-		log.Fatalf("[server] initialize blob store: %v", err)
+		slog.Error("initialize blob store", "err", err)
+		os.Exit(1)
 	}
 
-	channelState := core.NewChannelState()
-	server := httpapi.New(channelState, blobStore)
+	channelState := core.NewChannelState(*serverName)
+	slog.Debug("channel state initialized", "server_name", *serverName)
+
+	server := httpapi.New(channelState, sqliteStore, blobStore)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -53,11 +70,14 @@ func main() {
 	signal.Notify(sigCh, os.Interrupt)
 	go func() {
 		<-sigCh
+		slog.Info("received interrupt, shutting down")
 		cancel()
 	}()
 
-	log.Printf("[server] listening on %s", *addr)
+	slog.Info("listening", "addr", *addr)
 	if err := server.Run(ctx, *addr); err != nil {
-		log.Fatalf("[server] error: %v", err)
+		slog.Error("server error", "err", err)
+		os.Exit(1)
 	}
+	slog.Info("server stopped")
 }

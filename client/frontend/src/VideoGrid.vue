@@ -75,7 +75,7 @@ async function setQuality(userId: number, quality: string): Promise<void> {
         class="relative bg-base-200 rounded-lg overflow-hidden aspect-video flex items-center justify-center cursor-pointer"
         @dblclick="handleDoubleClick(spotlightId)"
       >
-        <div class="avatar placeholder">
+        <div class="avatar avatar-placeholder">
           <div class="bg-neutral text-neutral-content w-16 rounded-full">
             <span class="text-2xl">{{ initials(users.find(u => u.id === spotlightId)?.username ?? '?') }}</span>
           </div>
@@ -119,7 +119,7 @@ async function setQuality(userId: number, quality: string): Promise<void> {
         @dblclick="handleDoubleClick(user.id)"
         @contextmenu.prevent="emit('spotlight', user.id)"
       >
-        <div class="avatar placeholder">
+        <div class="avatar avatar-placeholder">
           <div class="bg-neutral text-neutral-content w-12 rounded-full">
             <span class="text-xl">{{ initials(user.username) }}</span>
           </div>

@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthAndState(t *testing.T) {
-	channelState := core.NewChannelState()
+	channelState := core.NewChannelState("")
 	session, _, err := channelState.Add("alice", 8)
 	if err != nil {
 		t.Fatalf("add user: %v", err)
@@ -22,7 +22,7 @@ func TestHealthAndState(t *testing.T) {
 		t.Fatalf("join voice: %v", err)
 	}
 
-	api := New(channelState)
+	api := New(channelState, nil)
 	ts := httptest.NewServer(api.Echo())
 	defer ts.Close()
 

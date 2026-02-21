@@ -35,7 +35,7 @@ func TestBlobUploadAndDownload(t *testing.T) {
 		t.Fatalf("create blob store: %v", err)
 	}
 
-	api := New(core.NewChannelState(), blobStore)
+	api := New(core.NewChannelState(""), st, blobStore)
 	ts := httptest.NewServer(api.Echo())
 	t.Cleanup(ts.Close)
 

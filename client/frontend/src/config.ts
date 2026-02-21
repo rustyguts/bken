@@ -258,3 +258,17 @@ export function RequestVideoQuality(targetUserID: number, quality: string): Prom
   return bridge()['RequestVideoQuality'](targetUserID, quality)
 }
 
+// --- Pull-based state request bindings ---
+
+export function RequestChannels(): Promise<string> {
+  return bridge()['RequestChannels']()
+}
+
+export function RequestMessages(channelID: number): Promise<string> {
+  return bridge()['RequestMessages'](channelID)
+}
+
+export function RequestServerInfo(): Promise<string> {
+  return bridge()['RequestServerInfo']()
+}
+

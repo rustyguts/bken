@@ -101,7 +101,7 @@ watch(() => props.connectError, (msg) => {
   <div class="hero h-full bg-base-100">
     <div class="hero-content flex-col">
       <div class="text-center space-y-2">
-        <div class="avatar placeholder">
+        <div class="avatar avatar-placeholder">
           <div class="bg-primary/10 text-primary w-16 rounded-2xl">
             <Server class="w-8 h-8" aria-hidden="true" />
           </div>
@@ -119,7 +119,7 @@ watch(() => props.connectError, (msg) => {
               :key="server.addr"
             >
               <a class="flex items-center gap-3" @click="connectToServer(server.addr)">
-                <div class="avatar placeholder">
+                <div class="avatar avatar-placeholder">
                   <div class="bg-neutral text-neutral-content w-6 rounded-full">
                     <span class="text-[9px]">{{ initials(server.name) }}</span>
                   </div>
