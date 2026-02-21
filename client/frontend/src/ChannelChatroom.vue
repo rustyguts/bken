@@ -180,14 +180,7 @@ function scrollToMessage(msgId: number): void {
 function send(): void {
   const text = input.value.trim()
   if (!text || !props.connected) return
-  // Prepend reply context as a special format the Go layer can parse
-  if (replyingTo.value) {
-    // The send event will be augmented on the Go side; for now we emit normally
-    // The server-side will use the reply_to field from the transport layer
-    emit('send', text)
-  } else {
-    emit('send', text)
-  }
+  emit('send', text)
   input.value = ''
   mentionActive.value = false
   replyingTo.value = null

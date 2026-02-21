@@ -6,6 +6,7 @@ import ServerChannels from './ServerChannels.vue'
 import UserControls from './UserControls.vue'
 import ChannelChatroom from './ChannelChatroom.vue'
 import VideoGrid from './VideoGrid.vue'
+import { BKEN_SCHEME } from './constants'
 import type { User, ChatMessage, Channel, ConnectPayload, VideoState } from './types'
 
 const props = defineProps<{
@@ -94,7 +95,7 @@ watch(() => props.connectedAddr, (addr) => {
 
 watch(() => props.startupAddr, (addr) => {
   if (!selectedServerAddr.value && addr) {
-    selectedServerAddr.value = addr.startsWith('bken://') ? addr.slice('bken://'.length) : addr
+    selectedServerAddr.value = addr.startsWith(BKEN_SCHEME) ? addr.slice(BKEN_SCHEME.length) : addr
   }
 }, { immediate: true })
 

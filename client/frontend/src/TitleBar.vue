@@ -2,6 +2,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 import { RenameServer } from './config'
+import { BKEN_SCHEME } from './constants'
 import { Check, Pencil, Link, Minus, Square, X } from 'lucide-vue-next'
 
 const props = defineProps<{ serverName?: string; isOwner?: boolean; serverAddr?: string }>()
@@ -10,13 +11,14 @@ const editing = ref(false)
 const draft = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const copied = ref(false)
+const COPY_FEEDBACK_MS = 2000
 
 async function copyInvite(): Promise<void> {
   if (!props.serverAddr) return
-  const link = `bken://${props.serverAddr}`
+  const link = `${BKEN_SCHEME}${props.serverAddr}`
   await navigator.clipboard.writeText(link)
   copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
+  setTimeout(() => { copied.value = false }, COPY_FEEDBACK_MS)
 }
 
 function startEdit(): void {

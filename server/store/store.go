@@ -557,7 +557,7 @@ func (s *Store) GetChannelSlowMode(channelID int64) (int, error) {
 }
 
 // ---------------------------------------------------------------------------
-// SQLite optimization (Phase 10)
+// SQLite optimization
 // ---------------------------------------------------------------------------
 
 // Optimize runs PRAGMA optimize for SQLite query planner statistics.

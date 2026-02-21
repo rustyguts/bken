@@ -11,7 +11,7 @@ func TestRecordingLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	stopped := make(chan struct{}, 1)
 
-	rec, err := StartRecording(1, "alice", dir, func() {
+	rec, err := StartRecording(1, "alice", dir, "recordings", func() {
 		stopped <- struct{}{}
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestRecordingLifecycle(t *testing.T) {
 func TestRecordingFeedAfterStop(t *testing.T) {
 	dir := t.TempDir()
 
-	rec, err := StartRecording(1, "bob", dir, nil)
+	rec, err := StartRecording(1, "bob", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestRecordingFeedAfterStop(t *testing.T) {
 func TestRecordingStopIdempotent(t *testing.T) {
 	dir := t.TempDir()
 
-	rec, err := StartRecording(1, "charlie", dir, nil)
+	rec, err := StartRecording(1, "charlie", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestRecordingStopIdempotent(t *testing.T) {
 func TestRecordingEmptyDatagram(t *testing.T) {
 	dir := t.TempDir()
 
-	rec, err := StartRecording(1, "dave", dir, nil)
+	rec, err := StartRecording(1, "dave", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestRecordingEmptyDatagram(t *testing.T) {
 func TestRecordingOGGFileHeaders(t *testing.T) {
 	dir := t.TempDir()
 
-	rec, err := StartRecording(1, "eve", dir, nil)
+	rec, err := StartRecording(1, "eve", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestRecordingMaxDuration(t *testing.T) {
 
 	// We cannot really wait 2 hours, but we can verify the timer is set.
 	dir := t.TempDir()
-	rec, err := StartRecording(1, "alice", dir, nil)
+	rec, err := StartRecording(1, "alice", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestGetRecordingFilePath(t *testing.T) {
 
 func TestRecordingInfoFields(t *testing.T) {
 	dir := t.TempDir()
-	rec, err := StartRecording(42, "testuser", dir, nil)
+	rec, err := StartRecording(42, "testuser", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestOGGCRCTableLength(t *testing.T) {
 func TestRecordingTimestampReasonable(t *testing.T) {
 	dir := t.TempDir()
 	before := time.Now().UnixMilli()
-	rec, err := StartRecording(1, "alice", dir, nil)
+	rec, err := StartRecording(1, "alice", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}

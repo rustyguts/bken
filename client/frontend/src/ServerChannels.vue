@@ -3,6 +3,7 @@ import { computed, ref, nextTick } from 'vue'
 import type { Channel, User } from './types'
 import UserProfilePopup from './UserProfilePopup.vue'
 import { SetUserVolume, GetUserVolume, StartRecording, StopRecording, RenameServer } from './config'
+import { BKEN_SCHEME } from './constants'
 import { Volume2, Plus, ArrowLeft, Settings, Check, Square, Circle } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -42,7 +43,7 @@ function hostFromAddr(raw?: string): string {
   if (!raw) return ''
   let s = raw.trim().toLowerCase()
   if (!s) return ''
-  if (s.startsWith('bken://')) s = s.slice('bken://'.length)
+  if (s.startsWith(BKEN_SCHEME)) s = s.slice(BKEN_SCHEME.length)
   const slash = s.indexOf('/')
   if (slash >= 0) s = s.slice(0, slash)
   if (s.startsWith('[')) {

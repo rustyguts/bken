@@ -857,7 +857,7 @@ func TestChannelCountAfterSetChannels(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: Administration tests
+// Administration tests
 // ---------------------------------------------------------------------------
 
 func TestSetClientRole(t *testing.T) {
@@ -1084,7 +1084,7 @@ func TestClientsIncludesRoleAndMuted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: HasPermission tests
+// HasPermission tests
 // ---------------------------------------------------------------------------
 
 func TestHasPermission(t *testing.T) {
@@ -1113,7 +1113,7 @@ func TestHasPermission(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 10: Performance & Reliability tests
+// Performance & Reliability tests
 // ---------------------------------------------------------------------------
 
 func TestCanConnect(t *testing.T) {

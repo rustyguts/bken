@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-// Recording constants.
-const (
-	maxRecordingDuration = 2 * time.Hour
-	recordingsDir        = "recordings"
-)
-
 // RecordingInfo holds metadata about a completed or in-progress recording.
 type RecordingInfo struct {
 	ID        string `json:"id"`
@@ -50,9 +44,10 @@ type ChannelRecorder struct {
 
 // StartRecording begins recording a channel's audio to disk.
 // dataDir is the base data directory (e.g. "." or "/data").
+// recDir is the subdirectory name within dataDir for recordings.
 // stopFn is called if the max duration is reached.
-func StartRecording(channelID int64, startedBy, dataDir string, stopFn func()) (*ChannelRecorder, error) {
-	dir := filepath.Join(dataDir, recordingsDir)
+func StartRecording(channelID int64, startedBy, dataDir, recDir string, stopFn func()) (*ChannelRecorder, error) {
+	dir := filepath.Join(dataDir, recDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create recordings dir: %w", err)
 	}

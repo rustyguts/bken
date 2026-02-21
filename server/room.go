@@ -17,14 +17,6 @@ type DatagramSender interface {
 	SendDatagram([]byte) error
 }
 
-// maxMsgOwners is the maximum number of message→sender mappings to retain.
-// Once exceeded, the oldest entries are evicted. 10 000 messages ≈ a few hours
-// of active chat, which is more than enough for an ephemeral in-memory server.
-const maxMsgOwners = 10000
-
-// maxPinnedPerChannel is the maximum number of pinned messages per channel.
-const maxPinnedPerChannel = 25
-
 // storedMsg holds a message in memory for search, reply preview, and pin support.
 type storedMsg struct {
 	MsgID     uint64
@@ -48,9 +40,6 @@ type pinnedEntry struct {
 	ChannelID int64
 	PinnedBy  uint16
 }
-
-// maxMsgBuffer is the max messages buffered per channel for replay on reconnect.
-const maxMsgBuffer = 500
 
 // Room holds all connected clients and handles voice datagram fan-out.
 type Room struct {
@@ -86,7 +75,7 @@ type Room struct {
 	onDeleteChannel   func(id int64) error
 	onRefreshChannels func() ([]ChannelInfo, error)
 
-	// Phase 8: Administration
+	// Administration
 	onAuditLog     func(actorID int, actorName, action, target, details string) // audit log callback
 	onBan          func(pubkey, ip, reason, bannedBy string, durationS int)     // ban callback
 	onUnban        func(banID int64)                                             // unban callback
@@ -94,7 +83,7 @@ type Room struct {
 	announceUser   string                                                        // who posted the announcement; protected by mu
 	slowModes      map[int64]int                                                 // channelID -> cooldown seconds; protected by mu
 
-	// Phase 10: Performance & Reliability
+	// Performance & Reliability
 	maxConnections int                 // max concurrent connections (0=unlimited)
 	perIPLimit     int                 // max connections per IP (0=unlimited)
 	ipConnections  map[string]int      // IP -> current connection count; protected by mu
@@ -102,10 +91,11 @@ type Room struct {
 	channelSeqs    map[int64]uint64    // channel -> last sequence number; protected by mu
 	msgBuffer      map[int64][]ControlMsg // channel -> recent messages for replay; protected by mu
 
-	// Phase 7: Server-side recording
-	recordings map[int64]*ChannelRecorder // channelID -> active recorder; protected by mu
-	doneRecs   []RecordingInfo            // completed recordings; protected by mu
-	dataDir    string                     // base data directory for recording files
+	// Server-side recording
+	recordings    map[int64]*ChannelRecorder // channelID -> active recorder; protected by mu
+	doneRecs      []RecordingInfo            // completed recordings; protected by mu
+	dataDir       string                     // base data directory for recording files
+	recordingsDir string                     // subdirectory name for recordings; default "recordings"
 
 	// Metrics (reset on each Stats call).
 	totalDatagrams   atomic.Uint64
@@ -124,6 +114,7 @@ func NewRoom() *Room {
 		channelSeqs:   make(map[int64]uint64),
 		msgBuffer:     make(map[int64][]ControlMsg),
 		recordings:    make(map[int64]*ChannelRecorder),
+		recordingsDir: "recordings",
 	}
 }
 
@@ -139,6 +130,20 @@ func (r *Room) DataDir() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.dataDir
+}
+
+// SetRecordingsDir sets the subdirectory name used for storing recordings.
+func (r *Room) SetRecordingsDir(dir string) {
+	r.mu.Lock()
+	r.recordingsDir = dir
+	r.mu.Unlock()
+}
+
+// RecordingsDir returns the configured recordings subdirectory name.
+func (r *Room) RecordingsDir() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.recordingsDir
 }
 
 // SetServerName updates the human-readable server name sent to connecting clients.
@@ -874,7 +879,7 @@ func (r *Room) Stats() (datagrams, bytes, skipped uint64, clients int) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: Server Administration
+// Server Administration
 // ---------------------------------------------------------------------------
 
 // SetOnAuditLog registers a callback for audit log persistence.
@@ -1060,7 +1065,7 @@ func (r *Room) CheckSlowMode(clientID uint16, channelID int64) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 10: Performance & Reliability
+// Performance & Reliability
 // ---------------------------------------------------------------------------
 
 // SetMaxConnections sets the maximum number of concurrent connections.
@@ -1193,7 +1198,7 @@ func (r *Room) IsBroadcastMuted(senderID uint16) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 7: Voice Channel User Limit
+// Voice Channel User Limit
 // ---------------------------------------------------------------------------
 
 // SetChannelMaxUsers sets the maximum user limit for a channel.
@@ -1259,7 +1264,7 @@ func (r *Room) CanJoinChannel(channelID int64) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 7: Server-Side Recording
+// Server-Side Recording
 // ---------------------------------------------------------------------------
 
 // StartRecordingChannel begins recording voice for a channel.
@@ -1274,9 +1279,10 @@ func (r *Room) StartRecordingChannel(channelID int64, startedBy string) error {
 	if dataDir == "" {
 		dataDir = "."
 	}
+	recDir := r.recordingsDir
 	r.mu.Unlock()
 
-	rec, err := StartRecording(channelID, startedBy, dataDir, func() {
+	rec, err := StartRecording(channelID, startedBy, dataDir, recDir, func() {
 		// Auto-stop callback: remove from active recordings and broadcast.
 		r.mu.Lock()
 		if active, ok := r.recordings[channelID]; ok {
@@ -1354,8 +1360,9 @@ func (r *Room) GetRecordingFilePath(filename string) string {
 	if dataDir == "" {
 		dataDir = "."
 	}
+	recDir := r.recordingsDir
 	r.mu.RUnlock()
-	return filepath.Join(dataDir, recordingsDir, filename)
+	return filepath.Join(dataDir, recDir, filename)
 }
 
 // StopAllRecordings stops all active recordings. Called during shutdown.

@@ -4,6 +4,9 @@ import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { GetMetrics } from '../wailsjs/go/main/App'
 import { ChevronDown } from 'lucide-vue-next'
 
+const METRICS_POLL_MS = 5000
+const LOSS_WARN_THRESHOLD = 0.05
+
 interface QualityMetrics {
   rtt_ms: number
   packet_loss: number
@@ -69,7 +72,7 @@ onMounted(() => {
         playback_dropped: metrics.playback_dropped ?? 0,
       }
     }
-  }, 5000)
+  }, METRICS_POLL_MS)
 })
 
 onBeforeUnmount(() => {
@@ -99,7 +102,7 @@ onBeforeUnmount(() => {
       </span>
       <span
         title="Packet loss"
-        :class="m.packet_loss > 0.05 ? 'text-error' : 'opacity-50'"
+        :class="m.packet_loss > LOSS_WARN_THRESHOLD ? 'text-error' : 'opacity-50'"
       >
         {{ (m.packet_loss * 100).toFixed(0) }}%
       </span>
@@ -124,7 +127,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="flex justify-between">
           <span class="opacity-50">Packet Loss</span>
-          <span :class="m.packet_loss > 0.05 ? 'text-error' : ''">{{ (m.packet_loss * 100).toFixed(1) }}%</span>
+          <span :class="m.packet_loss > LOSS_WARN_THRESHOLD ? 'text-error' : ''">{{ (m.packet_loss * 100).toFixed(1) }}%</span>
         </div>
         <div class="flex justify-between">
           <span class="opacity-50">Jitter</span>

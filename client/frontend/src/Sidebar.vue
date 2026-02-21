@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { GetConfig, SaveConfig } from './config'
 import type { ServerEntry } from './config'
+import { BKEN_SCHEME } from './constants'
 import type { ConnectPayload } from './types'
 import { Server } from 'lucide-vue-next'
 
@@ -29,7 +30,7 @@ const servers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:8443' 
 
 function normalizeAddr(raw: string): string {
   let addr = raw.trim()
-  if (addr.startsWith('bken://')) addr = addr.slice('bken://'.length)
+  if (addr.startsWith(BKEN_SCHEME)) addr = addr.slice(BKEN_SCHEME.length)
   return addr
 }
 

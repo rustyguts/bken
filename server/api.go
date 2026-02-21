@@ -64,16 +64,12 @@ func (s *APIServer) registerRoutes() {
 	s.echo.GET("/invite", s.handleInvite)
 	s.echo.POST("/api/upload", s.handleUpload)
 	s.echo.GET("/api/files/:id", s.handleGetFile)
-	// Phase 8: Server Administration
 	s.echo.GET("/api/audit", s.handleGetAuditLog)
 	s.echo.GET("/api/bans", s.handleGetBans)
 	s.echo.DELETE("/api/bans/:id", s.handleDeleteBan)
-	// Phase 7: Recordings
 	s.echo.GET("/api/recordings", s.handleListRecordings)
 	s.echo.GET("/api/recordings/:filename", s.handleDownloadRecording)
-	// Phase 10: Performance metrics
 	s.echo.GET("/api/metrics", s.handleMetrics)
-	// Phase 11: Version endpoint
 	s.echo.GET("/api/version", s.handleVersion)
 }
 
@@ -407,7 +403,7 @@ func (s *APIServer) refreshChannels() {
 	s.room.SetChannels(convertChannels(chs))
 }
 
-// --- Phase 8: Audit Log API ---
+// --- Audit Log API ---
 
 func (s *APIServer) handleGetAuditLog(c echo.Context) error {
 	action := c.QueryParam("action")
@@ -427,7 +423,7 @@ func (s *APIServer) handleGetAuditLog(c echo.Context) error {
 	return c.JSON(http.StatusOK, entries)
 }
 
-// --- Phase 8: Ban Management API ---
+// --- Ban Management API ---
 
 func (s *APIServer) handleGetBans(c echo.Context) error {
 	bans, err := s.store.GetBans()
@@ -454,7 +450,7 @@ func (s *APIServer) handleDeleteBan(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// --- Phase 7: Recordings API ---
+// --- Recordings API ---
 
 func (s *APIServer) handleListRecordings(c echo.Context) error {
 	recordings := s.room.ListRecordings()
@@ -480,7 +476,7 @@ func (s *APIServer) handleDownloadRecording(c echo.Context) error {
 	return c.File(path)
 }
 
-// --- Phase 10: Metrics endpoint ---
+// --- Metrics endpoint ---
 
 // MetricsResponse includes runtime metrics for health monitoring.
 type MetricsResponse struct {

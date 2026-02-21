@@ -886,7 +886,7 @@ func minLen(a, b int) int {
 	return b
 }
 
-// --- Phase 8: Audit Log API tests ---
+// --- Audit Log API tests ---
 
 func TestGetAuditLogEmpty(t *testing.T) {
 	api := newTestAPI(t, NewRoom())
@@ -957,7 +957,7 @@ func TestGetAuditLogFilteredByAction(t *testing.T) {
 	}
 }
 
-// --- Phase 8: Ban Management API tests ---
+// --- Ban Management API tests ---
 
 func TestGetBansEmpty(t *testing.T) {
 	api := newTestAPI(t, NewRoom())
@@ -1042,7 +1042,7 @@ func TestDeleteBanNotFoundAPI(t *testing.T) {
 	}
 }
 
-// --- Phase 10: Metrics API tests ---
+// --- Metrics API tests ---
 
 func TestMetricsEndpoint(t *testing.T) {
 	room := newTestRoom(

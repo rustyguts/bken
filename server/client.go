@@ -13,15 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Circuit breaker constants for datagram fan-out.
-// After circuitBreakerThreshold consecutive SendDatagram failures, the breaker
-// opens and skips that client in Broadcast.  Every circuitBreakerProbeInterval
-// skipped sends, it lets one datagram through to probe for recovery.
-const (
-	circuitBreakerThreshold     uint32 = 50 // ~1 s of voice at 50 fps
-	circuitBreakerProbeInterval uint32 = 25 // attempt a probe every 25 skips
-)
-
 // sendHealth tracks per-client datagram send success and implements a
 // lightweight circuit breaker so the server stops wasting effort on
 // unreachable peers.
@@ -76,13 +67,13 @@ type Client struct {
 	cancel context.CancelFunc
 	closer io.Closer // closes the underlying connection; nil in unit tests
 
-	// Phase 8: Administration
+	// Administration
 	role      string // OWNER/ADMIN/MODERATOR/USER; protected by Room.mu
 	muted     bool   // server-side mute; protected by Room.mu
 	muteExpiry int64 // unix ms when mute expires; 0 = permanent; protected by Room.mu
 	remoteIP  string // client IP for ban checking
 
-	// Phase 10: Rate limiting
+	// Rate limiting
 	lastControlMsg time.Time // last control message time for rate limiting
 	controlMsgCount int      // control messages in current second
 	lastChatTime   map[int64]time.Time // last chat time per channel for slow mode
@@ -656,8 +647,6 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			Reactions: reactions,
 		})
 
-	// Phase 8: Server Administration
-
 	case "ban":
 		// ADMIN+ can ban users. Cannot ban yourself or the owner.
 		if !HasPermission(client.role, "ban") {
@@ -823,7 +812,6 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 		room.refreshChannels()
 		log.Printf("[client %d] %s set channel %d max_users to %d", client.ID, client.Username, msg.ChannelID, maxUsers)
 
-	// Phase 7: Server-Side Recording
 	case "start_recording":
 		// Only the room owner may start recording.
 		if room.OwnerID() != client.ID {
@@ -872,7 +860,6 @@ func processControl(msg ControlMsg, client *Client, room *Room) {
 			Recordings: recordings,
 		})
 
-	// Phase 10: Message Delivery Guarantees
 	case "replay":
 		// Client requests replay of missed messages after reconnect.
 		if msg.ChannelID == 0 {

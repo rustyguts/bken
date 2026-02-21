@@ -10,10 +10,10 @@ import TitleBar from './TitleBar.vue'
 import KeyboardShortcuts from './KeyboardShortcuts.vue'
 import { useReconnect } from './composables/useReconnect'
 import { useSpeakingUsers } from './composables/useSpeakingUsers'
+import { BKEN_SCHEME, LAST_CONNECTED_ADDR_KEY } from './constants'
 import type { User, UserJoinedEvent, UserLeftEvent, ConnectPayload, ChatMessage, Channel, SpeakingEvent, VideoState, ReactionInfo } from './types'
 
 type AppRoute = 'room' | 'settings'
-const LAST_CONNECTED_ADDR_KEY = 'bken:last-connected-addr'
 
 const connected = ref(false)
 const voiceConnected = ref(false)
@@ -166,7 +166,7 @@ function normaliseUsername(name: string): string {
 
 function normaliseAddr(addr: string): string {
   const cleaned = addr.trim()
-  return cleaned.startsWith('bken://') ? cleaned.slice('bken://'.length) : cleaned
+  return cleaned.startsWith(BKEN_SCHEME) ? cleaned.slice(BKEN_SCHEME.length) : cleaned
 }
 
 function getLastConnectedAddr(): string {

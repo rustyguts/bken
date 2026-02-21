@@ -1,5 +1,6 @@
 import { ref, onBeforeUnmount } from 'vue'
 import { GetConfig, SaveConfig } from '../config'
+import { THEME_STORAGE_KEY } from '../constants'
 
 const THEMES = [
   // Light
@@ -65,7 +66,7 @@ let mediaHandler: ((e: MediaQueryListEvent) => void) | null = null
 
 function applyToDOM(theme: string): void {
   document.documentElement.setAttribute('data-theme', theme)
-  localStorage.setItem('bken-theme', theme)
+  localStorage.setItem(THEME_STORAGE_KEY, theme)
 }
 
 /** Listen for OS-level theme changes when in system mode. */
@@ -116,8 +117,12 @@ async function applyTheme(theme: string): Promise<void> {
   themeMode.value = theme
   currentTheme.value = theme
   applyToDOM(theme)
-  const cfg = await GetConfig()
-  await SaveConfig({ ...cfg, theme })
+  try {
+    const cfg = await GetConfig()
+    await SaveConfig({ ...cfg, theme })
+  } catch (err) {
+    console.error('Failed to save theme config:', err)
+  }
 }
 
 /** Set theme mode to 'system' to follow OS preference. */
@@ -127,8 +132,12 @@ async function setSystemMode(): Promise<void> {
   currentTheme.value = resolved
   applyToDOM(resolved)
   startSystemListener()
-  const cfg = await GetConfig()
-  await SaveConfig({ ...cfg, theme: resolved })
+  try {
+    const cfg = await GetConfig()
+    await SaveConfig({ ...cfg, theme: resolved })
+  } catch (err) {
+    console.error('Failed to save theme config:', err)
+  }
 }
 
 export function useTheme() {

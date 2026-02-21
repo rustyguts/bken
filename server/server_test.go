@@ -29,7 +29,10 @@ func startTestServer(t *testing.T) (string, context.CancelFunc) {
 func startTestServerWithRoom(t *testing.T, room *Room) (string, context.CancelFunc) {
 	t.Helper()
 
-	tlsConfig, _ := generateTLSConfig(24 * time.Hour)
+	tlsConfig, _, err := generateTLSConfig(24*time.Hour, "")
+	if err != nil {
+		t.Fatalf("generateTLSConfig: %v", err)
+	}
 
 	port := getFreePort(t)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)

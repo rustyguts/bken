@@ -29,6 +29,10 @@ func main() {
 	idleTimeout := flag.Duration("idle-timeout", 30*time.Second, "HTTP idle timeout")
 	certValidity := flag.Duration("cert-validity", 24*time.Hour, "self-signed TLS certificate validity")
 	testUser := flag.String("test-user", "", "name for a virtual test bot that emits a 440 Hz tone (empty to disable)")
+	maxConnections := flag.Int("max-connections", 500, "maximum total WebSocket connections")
+	perIPLimit := flag.Int("per-ip-limit", 10, "maximum connections per IP address")
+	rateLimit := flag.Int("rate-limit", 50, "maximum control messages per second per client")
+	recDir := flag.String("recordings-dir", "recordings", "subdirectory name for voice recordings (relative to -db directory)")
 	turnURL := flag.String("turn-url", "", "TURN server URL (e.g. turn:turn.example.com:3478)")
 	turnUsername := flag.String("turn-username", "", "TURN server username")
 	turnCredential := flag.String("turn-credential", "", "TURN server credential")
@@ -42,11 +46,21 @@ func main() {
 	defer st.Close()
 	seedDefaults(st)
 
-	tlsConfig, fingerprint := generateTLSConfig(*certValidity)
+	// Extract the hostname from the listen address for the TLS certificate.
+	tlsHostname := ""
+	if host, _, err := net.SplitHostPort(*addr); err == nil && host != "" {
+		tlsHostname = host
+	}
+
+	tlsConfig, fingerprint, err := generateTLSConfig(*certValidity, tlsHostname)
+	if err != nil {
+		log.Fatalf("[server] %v", err)
+	}
 	log.Printf("[server] TLS certificate fingerprint: %s", fingerprint)
 
 	room := NewRoom()
 	room.SetDataDir(filepath.Dir(*dbPath))
+	room.SetRecordingsDir(*recDir)
 
 	// Configure ICE servers (STUN + optional TURN) for WebRTC peer connections.
 	iceServers := []ICEServerInfo{
@@ -98,7 +112,7 @@ func main() {
 		room.SetChannels(convertChannels(chs))
 	}
 
-	// Phase 8: Wire audit log and ban callbacks to the store.
+	// Wire audit log and ban callbacks to the store.
 	room.SetOnAuditLog(func(actorID int, actorName, action, target, details string) {
 		if err := st.InsertAuditLog(actorID, actorName, action, target, details); err != nil {
 			log.Printf("[audit] insert: %v", err)
@@ -115,10 +129,10 @@ func main() {
 		}
 	})
 
-	// Phase 10: Connection limits.
-	room.SetMaxConnections(500)
-	room.SetPerIPLimit(10)
-	room.SetControlRateLimit(50) // max 50 control messages/second per client
+	// Connection limits.
+	room.SetMaxConnections(*maxConnections)
+	room.SetPerIPLimit(*perIPLimit)
+	room.SetControlRateLimit(*rateLimit)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

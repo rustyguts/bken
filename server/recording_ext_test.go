@@ -115,7 +115,7 @@ func TestRecordingConcurrentFeedAndStop(t *testing.T) {
 func TestRecordingOGGFileValidity(t *testing.T) {
 	dir := t.TempDir()
 
-	rec, err := StartRecording(1, "alice", dir, nil)
+	rec, err := StartRecording(1, "alice", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestListRecordingsEmpty(t *testing.T) {
 
 func TestRecordingInfoInProgress(t *testing.T) {
 	dir := t.TempDir()
-	rec, err := StartRecording(1, "alice", dir, nil)
+	rec, err := StartRecording(1, "alice", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestProcessControlStopRecordingBroadcasts(t *testing.T) {
 
 func TestRecordingLargeDatagram(t *testing.T) {
 	dir := t.TempDir()
-	rec, err := StartRecording(1, "alice", dir, nil)
+	rec, err := StartRecording(1, "alice", dir, "recordings", nil)
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}

@@ -287,7 +287,7 @@ func TestGetFileNotFound(t *testing.T) {
 	}
 }
 
-// --- Phase 8: Audit Log tests ---
+// --- Audit Log tests ---
 
 func TestInsertAndGetAuditLog(t *testing.T) {
 	s := newMemStore(t)
@@ -351,7 +351,7 @@ func TestAuditLogAutoPurge(t *testing.T) {
 	}
 }
 
-// --- Phase 8: Ban Management tests ---
+// --- Ban Management tests ---
 
 func TestInsertAndGetBans(t *testing.T) {
 	s := newMemStore(t)
@@ -449,7 +449,7 @@ func TestIsUserBanned(t *testing.T) {
 	}
 }
 
-// --- Phase 8: User Roles tests ---
+// --- User Roles tests ---
 
 func TestSetAndGetUserRole(t *testing.T) {
 	s := newMemStore(t)
@@ -485,7 +485,7 @@ func TestSetAndGetUserRole(t *testing.T) {
 	}
 }
 
-// --- Phase 8: Announcements tests ---
+// --- Announcements tests ---
 
 func TestInsertAndGetAnnouncement(t *testing.T) {
 	s := newMemStore(t)
@@ -531,7 +531,7 @@ func TestGetLatestAnnouncementReturnsNewest(t *testing.T) {
 	}
 }
 
-// --- Phase 8: Slow Mode tests ---
+// --- Slow Mode tests ---
 
 func TestSetAndGetChannelSlowMode(t *testing.T) {
 	s := newMemStore(t)
@@ -566,7 +566,7 @@ func TestSetChannelSlowModeNotFound(t *testing.T) {
 	}
 }
 
-// --- Phase 10: Optimize ---
+// --- Optimize ---
 
 func TestOptimize(t *testing.T) {
 	s := newMemStore(t)

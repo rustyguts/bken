@@ -78,7 +78,7 @@ type ControlMsg struct {
 	EmojiURL      string          `json:"emoji_url,omitempty"`       // custom_emoji: URL for custom emoji image
 	CustomEmojis  []CustomEmoji   `json:"custom_emojis,omitempty"`   // custom_emoji_list: all custom emojis
 
-	// Phase 8: Server Administration
+	// Server Administration
 	Reason       string `json:"reason,omitempty"`        // ban/kick: ban reason
 	Duration     int    `json:"duration,omitempty"`       // ban/mute: duration in seconds (0=permanent)
 	BanIP        bool   `json:"ban_ip,omitempty"`         // ban: also ban the IP address
@@ -90,15 +90,15 @@ type ControlMsg struct {
 	MuteExpiry   int64  `json:"mute_expiry,omitempty"`    // user_muted: when mute expires (unix ms, 0=permanent)
 	MaxUsers     int    `json:"max_users,omitempty"`      // set_channel_limit/create_channel: user limit (0=unlimited)
 
-	// Phase 7: Recording
+	// Recording
 	Recording  *bool           `json:"recording,omitempty"`   // recording_started/stopped: recording state
 	Recordings []RecordingInfo `json:"recordings,omitempty"`  // list_recordings response
 
-	// Phase 7: Simulcast / Video Quality
+	// Simulcast / Video Quality
 	VideoLayers  []VideoLayer `json:"video_layers,omitempty"`  // video_state: available simulcast layers
 	VideoQuality string       `json:"video_quality,omitempty"` // set_video_quality: requested layer ("high","medium","low")
 
-	// Phase 10: Performance & Reliability
+	// Performance & Reliability
 	SeqNum  uint64 `json:"seq_num,omitempty"`  // message delivery: sequence number per channel
 	LastSeq uint64 `json:"last_seq,omitempty"` // reconnect: last known sequence number
 	Error   string `json:"error,omitempty"`    // error responses

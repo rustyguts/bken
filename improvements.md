@@ -12,8 +12,8 @@ Concrete refactoring, simplification, and optimization tasks. Roughly prioritise
 - [ ] **Typed message dispatch** — instead of a raw `ControlMsg` with 100+ optional fields, define typed sub-structs per message category (e.g. `ChatPayload`, `ChannelPayload`, `WebRTCPayload`). Unmarshal into the correct type after reading the `type` field.
 - [ ] **Extract `room.go` eviction helpers** — the bounded-map eviction pattern (trim slice, delete from map) appears 4+ times across `RecordMsg`, `RecordMsgOwner`, `InsertAuditLog`, `InsertBan`. Extract as a generic `evictOldest(keys *[]K, m map[K]V, limit int)` helper.
 - [ ] **Replace parallel map+slice pattern** — `msgOwners`/`msgOwnerKeys` and `msgStore`/`msgStoreKeys` use parallel data structures for insertion-order tracking. Replace with a proper ordered map or a ring buffer to eliminate sync bugs.
-- [ ] **Expose hardcoded limits as CLI flags** — `maxConnections` (500), `perIPLimit` (10), and `controlRateLimit` (50) are wired in `main.go` but not exposed as `-max-connections`, `-per-ip-limit`, `-rate-limit` flags. Same for `maxMsgBuffer` (500) and `maxPinnedPerChannel` (25).
-- [ ] **Expose recording directory as a flag** — `recordingsDir = "recordings"` is hardcoded in `recording.go`. Add a `-recordings-dir` flag to `main.go` alongside `-db`.
+- [x] **Expose hardcoded limits as CLI flags** — `maxConnections` (500), `perIPLimit` (10), and `controlRateLimit` (50) are wired in `main.go` but not exposed as `-max-connections`, `-per-ip-limit`, `-rate-limit` flags. Same for `maxMsgBuffer` (500) and `maxPinnedPerChannel` (25).
+- [x] **Expose recording directory as a flag** — `recordingsDir = "recordings"` is hardcoded in `recording.go`. Add a `-recordings-dir` flag to `main.go` alongside `-db`.
 
 ### Performance
 
@@ -23,7 +23,7 @@ Concrete refactoring, simplification, and optimization tasks. Roughly prioritise
 
 ### Error Handling
 
-- [ ] **`tls.go`: replace `log.Fatalf` with returned errors** — `ecdsa.GenerateKey()` and `x509.CreateCertificate()` failures call `log.Fatalf`, bypassing any shutdown logic. Return errors to `main.go` for clean handling.
+- [x] **`tls.go`: replace `log.Fatalf` with returned errors** — `ecdsa.GenerateKey()` and `x509.CreateCertificate()` failures call `log.Fatalf`, bypassing any shutdown logic. Return errors to `main.go` for clean handling.
 - [ ] **`processControl()`: validate message before acting** — several handlers (e.g. `edit_message`, `create_channel`, `rename_channel`) access fields from `ControlMsg` without checking if the required fields are non-zero/non-empty first.
 - [ ] **`recording.go`: propagate file creation errors** — if `os.Create()` fails, the function returns silently. Surface the error to the caller so the `recording_start` acknowledgement can include a failure status.
 - [ ] **`api.go`: distinguish "not found" from DB error** — `GetSetting()` returns `(value, bool, error)` but several API handlers collapse the `bool` and `error` paths into the same response branch.
@@ -31,12 +31,12 @@ Concrete refactoring, simplification, and optimization tasks. Roughly prioritise
 
 ### Code Quality
 
-- [ ] **Named constants for magic numbers** — extract to a `const` block in `protocol.go` or a new `limits.go`: `circuitBreakerThreshold = 50`, `circuitBreakerProbeInterval = 25`, `maxRecordingDuration = 2h`, `maxMsgOwners = 10000`, `maxPinnedPerChannel = 25`.
+- [x] **Named constants for magic numbers** — extract to a `const` block in `protocol.go` or a new `limits.go`: `circuitBreakerThreshold = 50`, `circuitBreakerProbeInterval = 25`, `maxRecordingDuration = 2h`, `maxMsgOwners = 10000`, `maxPinnedPerChannel = 25`.
 - [ ] **`ControlMsg` field count** — the struct has 100+ fields. Add a doc comment grouping fields by message type so it's clear which fields are used for which type, or generate a table in `protocol.go`.
 - [ ] **`store.go`: consistent "not found" return** — `GetSetting()` returns `(string, bool, error)` but `GetFile()` returns `(*FileRecord, error)` where `error` doubles as not-found. Pick one convention.
-- [ ] **`tls.go`: configurable Common Name and SANs** — CN is hardcoded as `"bken"` and `DNSNames` only includes `"localhost"`. Accept the listen hostname and populate SANs accordingly.
+- [x] **`tls.go`: configurable Common Name and SANs** — CN is hardcoded as `"bken"` and `DNSNames` only includes `"localhost"`. Accept the listen hostname and populate SANs accordingly.
 - [ ] **`api.go` invite page** — the HTML for `/invite` is an inline string (lines ~265–273). Extract to a template file or embed via `//go:embed`.
-- [ ] **Remove phase comments** — comments like `// Phase 8:`, `// Phase 10:` are development notes that have leaked into production code. Clean them up.
+- [x] **Remove phase comments** — comments like `// Phase 8:`, `// Phase 10:` are development notes that have leaked into production code. Clean them up.
 
 ### Testing
 
@@ -87,14 +87,14 @@ Concrete refactoring, simplification, and optimization tasks. Roughly prioritise
   - `useChat.ts` — message store, chat ID counter, file uploads
   - `useTypingIndicators.ts` — typing state and cleanup interval
   - `useKeyboardShortcuts.ts` — PTT and global shortcut handlers
-- [ ] **Centralise localStorage/config keys** — `'bken:last-connected-addr'` (App.vue), `'bken-theme'` (useTheme.ts), and the `servers` config key are scattered magic strings. Export from a single `constants.ts`.
-- [ ] **Centralise `bken://` protocol prefix** — appears in App.vue, TitleBar.vue, Room.vue, and Sidebar.vue. Define `BKEN_SCHEME = 'bken://'` in `constants.ts`.
+- [x] **Centralise localStorage/config keys** — `'bken:last-connected-addr'` (App.vue), `'bken-theme'` (useTheme.ts), and the `servers` config key are scattered magic strings. Export from a single `constants.ts`.
+- [x] **Centralise `bken://` protocol prefix** — appears in App.vue, TitleBar.vue, Room.vue, and Sidebar.vue. Define `BKEN_SCHEME = 'bken://'` in `constants.ts`.
 - [ ] **Extract "fetch-update-save" config pattern** — the pattern `const cfg = await GetConfig(); await SaveConfig({...cfg, key: value})` repeats in every settings component and composable. Create a `patchConfig(patch: Partial<Config>): Promise<void>` helper in `config.ts`.
 
 ### Component Complexity
 
 - [ ] **`ChannelChatroom.vue`: collapse density variants** — the three density modes (comfortable / default / compact) repeat the same action-button row and file attachment block. Extract a `<MessageRow>` component with a `density` prop to eliminate the triplication.
-- [ ] **`ChannelChatroom.vue`: fix `send()` no-op branch** — the `replyingTo` branch and the else branch both emit `emit('send', text)` with no difference. Remove the dead branch.
+- [x] **`ChannelChatroom.vue`: fix `send()` no-op branch** — the `replyingTo` branch and the else branch both emit `emit('send', text)` with no difference. Remove the dead branch.
 - [ ] **`ServerChannels.vue`: extract drag-drop logic** — the drag-reorder handlers (`handleDragStart`, `handleDragOver`, `handleDrop`) are 60+ lines in the template setup. Extract to a `useDragSort(list, onReorder)` composable.
 
 ### Type Safety
@@ -106,19 +106,19 @@ Concrete refactoring, simplification, and optimization tasks. Roughly prioritise
 
 ### Dead Code
 
-- [ ] **Delete `ServerBrowser.vue`** — the file exists but is not imported anywhere. Remove it.
-- [ ] **`RequestVideoQuality()` in `config.ts`** — the function is defined but never called. Remove or implement the call site.
+- [x] **Delete `ServerBrowser.vue`** — the file exists but is not imported anywhere. Remove it.
+- [x] **`RequestVideoQuality()` in `config.ts`** — the function is defined but never called. Remove or implement the call site. *(Verified: actually used in VideoGrid.vue — no removal needed.)*
 - [ ] **`chatIdCounter` reuse** — the counter is never reset between reconnects. Either reset it on disconnect or use a UUID per message to avoid stale IDs.
 
 ### Performance
 
-- [ ] **`useTheme.ts`: await `SaveConfig()`** — `SaveConfig()` is called without `await`, so failures are silently swallowed. Await the call and surface errors.
-- [ ] **`MetricsBar.vue`: extract poll threshold constants** — the 5-second poll interval and 5% packet loss threshold are inline magic numbers. Extract as `const METRICS_POLL_MS = 5000` and `const LOSS_WARN_THRESHOLD = 0.05`.
+- [x] **`useTheme.ts`: await `SaveConfig()`** — `SaveConfig()` is called without `await`, so failures are silently swallowed. Await the call and surface errors.
+- [x] **`MetricsBar.vue`: extract poll threshold constants** — the 5-second poll interval and 5% packet loss threshold are inline magic numbers. Extract as `const METRICS_POLL_MS = 5000` and `const LOSS_WARN_THRESHOLD = 0.05`.
 - [ ] **Debounce drag reorder saves** — `ServerChannels.vue` saves the channel order to config on every drop. If someone drags multiple channels quickly, this fires repeatedly. Debounce the save by ~300ms.
 
 ### UX & Consistency
 
 - [ ] **`UserControls.vue` username `maxlength`** — hardcoded as `maxlength="32"` in the template. Should derive from the same `MaxNameLength` constant (50 bytes) used by the server, or at minimum be defined as a constant.
-- [ ] **`TitleBar.vue` copy-link timeout** — `setTimeout(..., 2000)` for the copy confirmation is a magic number. Define `const COPY_FEEDBACK_MS = 2000`.
+- [x] **`TitleBar.vue` copy-link timeout** — `setTimeout(..., 2000)` for the copy confirmation is a magic number. Define `const COPY_FEEDBACK_MS = 2000`.
 - [ ] **`SettingsPage.vue`: add error boundary** — dynamically imported settings sub-components have no fallback if the component fails to load. Add an `<ErrorBoundary>` or a `:error` slot.
 - [ ] **Typing indicator `expiresAt` cleanup** — the 1-second interval in `App.vue` to prune expired typing entries runs even when no one is connected. Start/stop the interval based on connection state.

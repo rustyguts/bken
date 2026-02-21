@@ -1499,7 +1499,7 @@ func TestProcessControlVideoStateSpoofedIDReplaced(t *testing.T) {
 	}
 }
 
-// --- Phase 7: Simulcast / Video Quality tests ---
+// --- Simulcast / Video Quality tests ---
 
 func TestProcessControlVideoStateIncludesLayers(t *testing.T) {
 	room := NewRoom()

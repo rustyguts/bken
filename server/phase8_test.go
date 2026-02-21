@@ -27,7 +27,7 @@ func newOwnerClient(t *testing.T, username string, room *Room) (*Client, *bytes.
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: ban
+// ban
 // ---------------------------------------------------------------------------
 
 func TestProcessControlBanByAdmin(t *testing.T) {
@@ -203,7 +203,7 @@ func TestProcessControlBanZeroID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: unban
+// unban
 // ---------------------------------------------------------------------------
 
 func TestProcessControlUnbanByAdmin(t *testing.T) {
@@ -256,7 +256,7 @@ func TestProcessControlUnbanZeroBanID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: set_role
+// set_role
 // ---------------------------------------------------------------------------
 
 func TestProcessControlSetRoleByOwner(t *testing.T) {
@@ -401,7 +401,7 @@ func TestProcessControlSetRoleAllValidRoles(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: announce
+// announce
 // ---------------------------------------------------------------------------
 
 func TestProcessControlAnnounceByOwner(t *testing.T) {
@@ -491,7 +491,7 @@ func TestProcessControlAnnounceOverwritesPrevious(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: set_slow_mode
+// set_slow_mode
 // ---------------------------------------------------------------------------
 
 func TestProcessControlSetSlowModeByOwner(t *testing.T) {
@@ -593,7 +593,7 @@ func TestProcessControlSetSlowModeRemove(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: mute_user
+// mute_user
 // ---------------------------------------------------------------------------
 
 func TestProcessControlMuteByAdmin(t *testing.T) {
@@ -741,7 +741,7 @@ func TestProcessControlMuteAlreadyMutedUserOverwrites(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: unmute_user
+// unmute_user
 // ---------------------------------------------------------------------------
 
 func TestProcessControlUnmuteByAdmin(t *testing.T) {
@@ -798,7 +798,7 @@ func TestProcessControlUnmuteZeroID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 10: replay
+// replay
 // ---------------------------------------------------------------------------
 
 func TestProcessControlReplay(t *testing.T) {
@@ -907,7 +907,7 @@ func TestProcessControlReplayDifferentChannels(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: kick is owner-only (moderator and admin cannot kick)
+// kick is owner-only (moderator and admin cannot kick)
 // ---------------------------------------------------------------------------
 
 func TestProcessControlKickByModeratorRejected(t *testing.T) {
@@ -952,7 +952,7 @@ func TestProcessControlKickByAdminRejected(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: Integration: muted user voice is blocked but chat is NOT
+// Integration: muted user voice is blocked but chat is NOT
 // ---------------------------------------------------------------------------
 
 func TestMutedUserChatStillAllowed(t *testing.T) {

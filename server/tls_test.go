@@ -8,7 +8,10 @@ import (
 
 func TestGenerateTLSConfigReturnsValidCert(t *testing.T) {
 	validity := 2 * time.Hour
-	tlsCfg, fingerprint := generateTLSConfig(validity)
+	tlsCfg, fingerprint, err := generateTLSConfig(validity, "")
+	if err != nil {
+		t.Fatalf("generateTLSConfig: %v", err)
+	}
 
 	if tlsCfg == nil {
 		t.Fatal("expected non-nil tls.Config")
@@ -45,15 +48,24 @@ func TestGenerateTLSConfigReturnsValidCert(t *testing.T) {
 }
 
 func TestGenerateTLSConfigUniqueCerts(t *testing.T) {
-	_, fp1 := generateTLSConfig(time.Hour)
-	_, fp2 := generateTLSConfig(time.Hour)
+	_, fp1, err := generateTLSConfig(time.Hour, "")
+	if err != nil {
+		t.Fatalf("generateTLSConfig: %v", err)
+	}
+	_, fp2, err := generateTLSConfig(time.Hour, "")
+	if err != nil {
+		t.Fatalf("generateTLSConfig: %v", err)
+	}
 	if fp1 == fp2 {
 		t.Error("two calls should produce different certificates")
 	}
 }
 
 func TestGenerateTLSConfigSelfSigned(t *testing.T) {
-	tlsCfg, _ := generateTLSConfig(time.Hour)
+	tlsCfg, _, err := generateTLSConfig(time.Hour, "")
+	if err != nil {
+		t.Fatalf("generateTLSConfig: %v", err)
+	}
 	leaf := tlsCfg.Certificates[0].Leaf
 
 	// The cert should be self-signed (issuer == subject).
@@ -76,11 +88,48 @@ func TestGenerateTLSConfigSelfSigned(t *testing.T) {
 	// Verify against itself.
 	pool := x509.NewCertPool()
 	pool.AddCert(leaf)
-	_, err := leaf.Verify(x509.VerifyOptions{
+	_, err = leaf.Verify(x509.VerifyOptions{
 		DNSName: "localhost",
 		Roots:   pool,
 	})
 	if err != nil {
 		t.Errorf("self-verification failed: %v", err)
+	}
+}
+
+func TestGenerateTLSConfigCustomHostname(t *testing.T) {
+	tlsCfg, _, err := generateTLSConfig(time.Hour, "myhost.local")
+	if err != nil {
+		t.Fatalf("generateTLSConfig: %v", err)
+	}
+	leaf := tlsCfg.Certificates[0].Leaf
+
+	// CN should be the provided hostname.
+	if leaf.Subject.CommonName != "myhost.local" {
+		t.Errorf("CN: got %q, want %q", leaf.Subject.CommonName, "myhost.local")
+	}
+
+	// SANs should include both localhost and the custom hostname.
+	wantSANs := map[string]bool{"localhost": false, "myhost.local": false}
+	for _, name := range leaf.DNSNames {
+		if _, ok := wantSANs[name]; ok {
+			wantSANs[name] = true
+		}
+	}
+	for name, found := range wantSANs {
+		if !found {
+			t.Errorf("expected %q in DNS names, got %v", name, leaf.DNSNames)
+		}
+	}
+
+	// Verify against the custom hostname.
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	_, err = leaf.Verify(x509.VerifyOptions{
+		DNSName: "myhost.local",
+		Roots:   pool,
+	})
+	if err != nil {
+		t.Errorf("verification against custom hostname failed: %v", err)
 	}
 }
