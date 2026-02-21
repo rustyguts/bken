@@ -15,6 +15,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - name: Run tests
         run: go test ./...
         working-directory: server
@@ -27,6 +28,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: client/go.mod
+          cache-dependency-path: client/go.sum
       - name: Install native dependencies
         run: |
           sudo apt-get update
@@ -65,6 +67,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - name: Build
         run: CGO_ENABLED=0 go build -o server .
         working-directory: server
@@ -104,6 +107,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: client/go.mod
+          cache-dependency-path: client/go.sum
 
       - uses: oven-sh/setup-bun@v2
 
@@ -143,6 +147,8 @@ jobs:
         run: |
           echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
           echo "PKG_CONFIG_PATH=C:/msys64/mingw64/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG=C:/msys64/mingw64/bin/pkg-config.exe" >> "$GITHUB_ENV"
+          echo "CC=C:/msys64/mingw64/bin/gcc.exe" >> "$GITHUB_ENV"
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
