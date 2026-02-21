@@ -415,14 +415,34 @@ describe('App', () => {
     expect(go.Connect).toHaveBeenCalledWith('localhost:4433', 'Alice')
   })
 
-  it('calls Disconnect when Room emits disconnect', async () => {
+  it('calls DisconnectServer when Room emits disconnect', async () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
     const room = w.findComponent({ name: 'Room' })
+    room.vm.$emit('connect', { username: 'Alice', addr: 'localhost:4433' })
+    await flushPromises()
     room.vm.$emit('disconnect')
     await flushPromises()
-    expect(go.Disconnect).toHaveBeenCalled()
+    expect(go.DisconnectServer).toHaveBeenCalledWith('localhost:4433')
+  })
+
+  it('restores voiceConnected when DisconnectVoice fails', async () => {
+    const go = getGoMock()
+    const w = mount(App)
+    await flushPromises()
+    const room = w.findComponent({ name: 'Room' })
+
+    room.vm.$emit('activateChannel', { addr: 'localhost:8443', channelID: 1 })
+    await flushPromises()
+    expect(room.props('voiceConnected')).toBe(true)
+
+    go.DisconnectVoice.mockResolvedValueOnce('control websocket write failed')
+    room.vm.$emit('disconnectVoice')
+    await flushPromises()
+
+    expect(room.props('voiceConnected')).toBe(true)
+    expect(room.props('connectError')).toContain('control websocket write failed')
   })
 
   it('handles sendChat event', async () => {

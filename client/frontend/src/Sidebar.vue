@@ -9,6 +9,7 @@ import { Server } from 'lucide-vue-next'
 const props = defineProps<{
   activeServerAddr: string
   connectedAddr: string
+  connectedAddrs?: string[]
   connectError: string
   startupAddr: string
   globalUsername: string
@@ -95,6 +96,14 @@ function serverButtonStyle(name: string, active: boolean): Record<string, string
 
 function selectServer(addr: string): void {
   emit('selectServer', normalizeAddr(addr))
+}
+
+function isServerConnected(addr: string): boolean {
+  const normalized = normalizeAddr(addr)
+  if (props.connectedAddrs && props.connectedAddrs.length > 0) {
+    return props.connectedAddrs.map(normalizeAddr).includes(normalized)
+  }
+  return normalizeAddr(props.connectedAddr) === normalized
 }
 
 async function connectToNewServer(): Promise<void> {
@@ -220,7 +229,7 @@ onBeforeUnmount(() => {
           >
             {{ initials(server.name) }}
             <span
-              v-if="normalizeAddr(server.addr) === normalizeAddr(connectedAddr)"
+              v-if="isServerConnected(server.addr)"
               class="absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full bg-success border border-base-100"
               aria-hidden="true"
             />

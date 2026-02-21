@@ -14,6 +14,7 @@ const props = defineProps<{
   voiceConnected: boolean
   reconnecting: boolean
   connectedAddr: string
+  connectedAddrs?: string[]
   connectError: string
   startupAddr: string
   globalUsername: string
@@ -36,6 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   connect: [payload: ConnectPayload]
+  selectServer: [addr: string]
   activateChannel: [payload: { addr: string; channelID: number }]
   renameGlobalUsername: [username: string]
   openSettings: []
@@ -127,11 +129,7 @@ function handleSelectChannel(channelID: number): void {
 function handleSelectServer(addr: string): void {
   selectedServerAddr.value = addr
   selectedChannelId.value = 0
-
-  // Opening another server from the sidebar should not keep the current server connection active.
-  if (props.connected && props.connectedAddr !== addr) {
-    emit('disconnect')
-  }
+  emit('selectServer', addr)
 }
 
 function handleVideoToggle(): void {
@@ -179,6 +177,7 @@ function handleSendMessage(message: string): void {
       class="room-sidebar"
       :active-server-addr="selectedServerAddr"
       :connected-addr="connectedAddr"
+      :connected-addrs="connectedAddrs"
       :connect-error="connectError"
       :startup-addr="startupAddr"
       :global-username="globalUsername"

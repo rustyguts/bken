@@ -125,7 +125,8 @@ function confirmRename(): void {
       <button
         class="btn btn-error btn-sm btn-ghost"
         :disabled="!voiceConnected"
-        title="Leave Voice Channel"
+        title="DisconnectVoice"
+        aria-label="DisconnectVoice"
         @click="emit('leave-voice')"
       >
         <LogOut class="w-4 h-4" aria-hidden="true" />

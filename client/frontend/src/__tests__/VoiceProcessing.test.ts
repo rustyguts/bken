@@ -9,11 +9,11 @@ describe('VoiceProcessing', () => {
     expect(w.exists()).toBe(true)
   })
 
-  it('renders WebRTC voice processing heading', async () => {
+  it('renders WebRTC built-in processing heading', async () => {
     const w = mount(VoiceProcessing)
     await flushPromises()
-    expect(w.text()).toContain('WebRTC Voice Processing')
-    expect(w.text()).toContain('Clean Mic Preset')
+    expect(w.text()).toContain('WebRTC Built-ins')
+    expect(w.text()).toContain('Native Voice Processing')
   })
 
   it('renders only the three processing toggles', async () => {

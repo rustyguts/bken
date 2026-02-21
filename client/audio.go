@@ -7,10 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"client/internal/aec"
-	"client/internal/agc"
-	"client/internal/jitter"
-
 	"github.com/gordonklaus/portaudio"
 	"gopkg.in/hraban/opus.v2"
 )
@@ -21,8 +17,8 @@ const (
 	FrameSize   = 960 // 20ms @ 48kHz — exported so other packages can reference it
 	opusBitrate = 32000
 
-	captureChannelBuf  = 30 // ~600ms @ 50 fps — low latency; drops if consumer falls behind
-	playbackChannelBuf = 30 // ~600ms @ 50 fps — low latency; silence fills gaps
+	captureChannelBuf  = 30   // ~600ms @ 50 fps — low latency; drops if consumer falls behind
+	playbackChannelBuf = 30   // ~600ms @ 50 fps — low latency; silence fills gaps
 	opusMaxPacketBytes = 1275 // RFC 6716 max Opus packet size
 )
 
@@ -83,21 +79,17 @@ type AudioEngine struct {
 	notifCh    chan []float32
 	notifScale atomic.Uint32 // float32 bits: notification volume scale (default 1.0)
 
-	aecProc    *aec.AEC
-	aecEnabled atomic.Bool
-
-	agcProc    *agc.AGC
-	agcEnabled atomic.Bool
+	echoCancellationEnabled atomic.Bool
+	autoGainControlEnabled  atomic.Bool
 	noiseSuppressionEnabled atomic.Bool
 
 	running        atomic.Bool
 	testMode       atomic.Bool
 	muted          atomic.Bool
 	deafened       atomic.Bool
-	pttMode        atomic.Bool // true = push-to-talk controls transmit
-	pttActive      atomic.Bool // true = PTT key is held, mic is hot
+	pttMode        atomic.Bool  // true = push-to-talk controls transmit
+	pttActive      atomic.Bool  // true = PTT key is held, mic is hot
 	currentBitrate atomic.Int32 // kbps; set in Start() and updated by SetBitrate()
-	jitterDepth    atomic.Int32 // target jitter buffer depth; 0 means use default
 
 	// Dropped frame counters: incremented when CaptureOut / PlaybackIn channels
 	// are full and a frame is silently discarded. Read and reset by DroppedFrames().
@@ -123,14 +115,15 @@ func NewAudioEngine() *AudioEngine {
 		inputDeviceID:  -1,
 		outputDeviceID: -1,
 		volume:         1.0,
-		aecProc:        aec.New(FrameSize),
-		agcProc:        agc.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
 		PlaybackIn:     make(chan TaggedAudio, playbackChannelBuf),
 		notifCh:        make(chan []float32, notifChannelBuf),
 		stopCh:         make(chan struct{}),
 	}
 	ae.notifScale.Store(math.Float32bits(1.0))
+	ae.echoCancellationEnabled.Store(true)
+	ae.noiseSuppressionEnabled.Store(true)
+	ae.autoGainControlEnabled.Store(true)
 	return ae
 }
 
@@ -192,41 +185,23 @@ func (ae *AudioEngine) SetVolume(vol float64) {
 	ae.mu.Unlock()
 }
 
-// SetAEC enables or disables acoustic echo cancellation on the capture path.
-// Enabling resets the adaptive filter weights for a clean start.
+// SetAEC enables or disables echo-cancellation preference.
 func (ae *AudioEngine) SetAEC(enabled bool) {
-	ae.aecProc.SetEnabled(enabled)
-	ae.aecEnabled.Store(enabled)
+	ae.echoCancellationEnabled.Store(enabled)
 }
 
-// SetAGC enables or disables automatic gain control on the capture path.
+// SetAGC enables or disables automatic gain control preference.
 func (ae *AudioEngine) SetAGC(enabled bool) {
-	if enabled {
-		ae.agcProc.Reset()
-	}
-	ae.agcEnabled.Store(enabled)
+	ae.autoGainControlEnabled.Store(enabled)
 }
 
-// SetNoiseSuppression enables or disables WebRTC-style noise suppression.
-// Current desktop capture path does not expose a built-in NS primitive, so this
-// is stored as state for API compatibility while custom RNNoise processing is removed.
+// SetNoiseSuppression enables or disables noise suppression preference.
 func (ae *AudioEngine) SetNoiseSuppression(enabled bool) {
 	ae.noiseSuppressionEnabled.Store(enabled)
 }
 
-// SetAGCLevel sets the AGC target loudness. level is in [0, 100] and maps to
-// an RMS target of [0.01, 0.50] (see agc.SetTarget).
+// SetAGCLevel is a legacy no-op retained for backward compatibility.
 func (ae *AudioEngine) SetAGCLevel(level int) {
-	ae.agcProc.SetTarget(level)
-}
-
-// SetVAD is a legacy no-op retained for backward compatibility.
-func (ae *AudioEngine) SetVAD(enabled bool) {
-	_ = enabled
-}
-
-// SetVADThreshold is a legacy no-op retained for backward compatibility.
-func (ae *AudioEngine) SetVADThreshold(level int) {
 	_ = level
 }
 
@@ -244,16 +219,6 @@ func (ae *AudioEngine) SetNotificationVolume(vol float32) {
 // NotificationVolume returns the current notification volume (0.0-1.0).
 func (ae *AudioEngine) NotificationVolume() float32 {
 	return math.Float32frombits(ae.notifScale.Load())
-}
-
-// SetNoiseGate is a legacy no-op retained for backward compatibility.
-func (ae *AudioEngine) SetNoiseGate(enabled bool) {
-	_ = enabled
-}
-
-// SetNoiseGateThreshold is a legacy no-op retained for backward compatibility.
-func (ae *AudioEngine) SetNoiseGateThreshold(level int) {
-	_ = level
 }
 
 // InputLevel returns the most recent pre-gate RMS mic input level (0.0-1.0).
@@ -287,16 +252,9 @@ func (ae *AudioEngine) CurrentBitrate() int {
 	return int(ae.currentBitrate.Load())
 }
 
-// SetJitterDepth updates the target jitter buffer depth (in 20 ms frames).
-// The playback loop reads this value and applies it on the next cycle.
-// Safe to call concurrently from adaptBitrateLoop.
-func (ae *AudioEngine) SetJitterDepth(frames int) {
-	ae.jitterDepth.Store(int32(frames))
-}
-
 // SetPacketLoss tells the Opus encoder the expected packet loss percentage
 // so it can tune how much FEC redundancy to embed. lossPercent is clamped
-// to [0, 100]. Called by adaptBitrateLoop every 5 s with measured loss.
+// to [0, 100].
 func (ae *AudioEngine) SetPacketLoss(lossPercent int) {
 	if lossPercent < 0 {
 		lossPercent = 0
@@ -329,7 +287,7 @@ func (ae *AudioEngine) Start() error {
 	enc.SetBitrate(opusBitrate)
 	enc.SetDTX(true)
 	enc.SetInBandFEC(true)
-	enc.SetPacketLossPerc(5) // initial estimate; updated by adaptBitrateLoop
+	enc.SetPacketLossPerc(5) // conservative default estimate
 	ae.encoder = enc
 	ae.currentBitrate.Store(opusBitrate / 1000)
 
@@ -510,12 +468,6 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			return
 		}
 
-		// Apply acoustic echo cancellation before any other processing so the
-		// downstream stages (noise suppression, AGC, VAD) see a cleaner signal.
-		if ae.aecEnabled.Load() {
-			ae.aecProc.Process(buf)
-		}
-
 		rms := frameRMS(buf)
 		ae.inputLevel.Store(math.Float32bits(rms))
 
@@ -524,14 +476,9 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			ae.OnSpeaking()
 		}
 
-		// Apply AGC if enabled.
-		if ae.agcEnabled.Load() {
-			ae.agcProc.Process(buf)
-		}
-
 		// Push-to-talk gate: when PTT mode is enabled, only encode and
-		// send while the PTT key is held. This check runs after AEC and
-		// speaking detection so those subsystems stay primed.
+		// send while the PTT key is held. This check runs after speaking
+		// detection so the indicator still updates while muted by PTT.
 		if ae.pttMode.Load() && !ae.pttActive.Load() {
 			continue
 		}
@@ -567,12 +514,6 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 	}
 }
 
-// jitterDepth is the number of 20 ms frames the jitter buffer accumulates
-// before starting playback. 1 frame = 20 ms — optimistic for LAN where
-// jitter is typically <5 ms. The adaptive loop will increase depth within
-// seconds if network conditions require more buffering.
-const jitterDepth = 1
-
 // decoderPruneInterval controls how often per-sender decoders are pruned
 // for senders that have gone silent (every N playback cycles ≈ N*20 ms).
 const decoderPruneInterval = 500 // ~10 s
@@ -580,9 +521,9 @@ const decoderPruneInterval = 500 // ~10 s
 func (ae *AudioEngine) playbackLoop(buf []float32) {
 	pcm := make([]int16, FrameSize)
 	decoders := make(map[uint16]opusDecoder)
-	jb := jitter.New(jitterDepth)
+	lastDecoded := make(map[uint16]time.Time)
+	latestFrame := make(map[uint16]TaggedAudio)
 	var pruneCounter int
-	currentDepth := jitterDepth
 
 	for {
 		// Check for stop before every write cycle.
@@ -592,18 +533,12 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 		default:
 		}
 
-		// Apply dynamic jitter depth if adaptBitrateLoop updated it.
-		if d := int(ae.jitterDepth.Load()); d > 0 && d != currentDepth {
-			jb.SetDepth(d)
-			currentDepth = d
-		}
-
-		// Drain all available tagged frames into the jitter buffer.
+		// Drain all available tagged frames; keep the most recent frame per sender.
 	drain:
 		for {
 			select {
 			case tagged := <-ae.PlaybackIn:
-				jb.Push(tagged.SenderID, tagged.Seq, tagged.OpusData)
+				latestFrame[tagged.SenderID] = tagged
 			default:
 				break drain
 			}
@@ -618,47 +553,29 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 			ae.mu.Unlock()
 			scale := float32(vol) / 32768.0
 
-			// Pop one frame per active sender from the jitter buffer.
-			for _, f := range jb.Pop() {
-				dec, ok := decoders[f.SenderID]
+			for senderID, tagged := range latestFrame {
+				dec, ok := decoders[senderID]
 				if !ok {
 					d, err := opus.NewDecoder(sampleRate, channels)
 					if err != nil {
-						log.Printf("[audio] create decoder for sender %d: %v", f.SenderID, err)
+						log.Printf("[audio] create decoder for sender %d: %v", senderID, err)
 						continue
 					}
 					dec = d
-					decoders[f.SenderID] = dec
+					decoders[senderID] = dec
 				}
 
-				var n int
-				var err error
-				if f.OpusData != nil {
-					n, err = dec.Decode(f.OpusData, pcm)
-				} else if f.FECData != nil {
-					// FEC recovery: the next frame's Opus data embeds a
-					// low-bitrate copy of this lost frame. Better quality
-					// than pure PLC because it uses actual encoded data.
-					if fecErr := dec.DecodeFEC(f.FECData, pcm); fecErr != nil {
-						// FEC failed — fall back to PLC.
-						n, err = dec.Decode(nil, pcm)
-					} else {
-						n = FrameSize
-					}
-				} else {
-					// Packet loss concealment: Opus extrapolates from its internal
-					// state to fill the gap with a plausible waveform.
-					n, err = dec.Decode(nil, pcm)
-				}
+				n, err := dec.Decode(tagged.OpusData, pcm)
 				if err != nil {
-					log.Printf("[audio] decode sender %d: %v", f.SenderID, err)
+					log.Printf("[audio] decode sender %d: %v", senderID, err)
 					continue
 				}
+				lastDecoded[senderID] = time.Now()
 
 				// Per-user volume multiplier.
 				userScale := scale
 				if ae.UserVolumeFunc != nil {
-					userScale = scale * float32(ae.UserVolumeFunc(f.SenderID))
+					userScale = scale * float32(ae.UserVolumeFunc(senderID))
 				}
 
 				// Additively mix this sender into the output buffer.
@@ -673,16 +590,20 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 			}
 		}
 
-		// Periodically prune decoders when there are more decoders than active
-		// jitter buffer streams. This keeps memory bounded as users leave.
+		for senderID := range latestFrame {
+			delete(latestFrame, senderID)
+		}
+
+		// Periodically prune stale decoders for users that have gone silent.
 		pruneCounter++
 		if pruneCounter >= decoderPruneInterval {
 			pruneCounter = 0
-			if len(decoders) > jb.ActiveSenders()+2 {
-				// More decoders than active senders — clear the map. Active
-				// senders will get fresh decoders on the next Pop cycle; Opus
-				// reconverges within one or two frames.
-				decoders = make(map[uint16]opusDecoder)
+			cutoff := time.Now().Add(-30 * time.Second)
+			for senderID, seen := range lastDecoded {
+				if seen.Before(cutoff) {
+					delete(lastDecoded, senderID)
+					delete(decoders, senderID)
+				}
 			}
 		}
 
@@ -696,11 +617,6 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 			}
 		default:
 		}
-
-		// Feed the final output buffer to the AEC as the far-end reference.
-		// Done after all mixing (voice + notifications) so the reference
-		// matches exactly what the speakers will emit.
-		ae.aecProc.FeedFarEnd(buf)
 
 		if err := ae.playbackStream.Write(); err != nil {
 			if ae.running.Load() {
@@ -735,8 +651,7 @@ func (ae *AudioEngine) SetDeafened(deafened bool) {
 
 // SetPTTMode enables or disables push-to-talk mode. When enabled, the
 // microphone only transmits while the PTT key is held (pttActive=true).
-// PTT mode is an alternative to VAD — both can be configured, but PTT
-// takes precedence when enabled.
+// PTT mode gates transmission to key press state when enabled.
 func (ae *AudioEngine) SetPTTMode(enabled bool) {
 	ae.pttMode.Store(enabled)
 	if !enabled {

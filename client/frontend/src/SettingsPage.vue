@@ -15,7 +15,7 @@ type SettingsTab = 'audio' | 'appearance' | 'keybinds' | 'about'
 const activeTab = ref<SettingsTab>('audio')
 
 const tabs: { id: SettingsTab; label: string; icon: Component; kicker: string }[] = [
-  { id: 'audio', label: 'Audio', icon: AudioLines, kicker: 'Devices + Voice' },
+  { id: 'audio', label: 'Audio', icon: AudioLines, kicker: 'Devices + WebRTC' },
   { id: 'appearance', label: 'Appearance', icon: Palette, kicker: 'Theme + Density' },
   { id: 'keybinds', label: 'Keybinds', icon: Keyboard, kicker: 'Push To Talk' },
   { id: 'about', label: 'About', icon: CircleHelp, kicker: 'Build Info' },

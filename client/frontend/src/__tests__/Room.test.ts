@@ -70,13 +70,12 @@ describe('Room', () => {
     expect(w.find('.room-grid').exists()).toBe(true)
   })
 
-  it('emits disconnect when triggered from sidebar', async () => {
+  it('emits selectServer when triggered from sidebar', async () => {
     const w = mount(Room, { props: baseProps })
     await flushPromises()
     const sidebar = w.findComponent({ name: 'Sidebar' })
     sidebar.vm.$emit('selectServer', 'other:8443')
-    // When selecting a different server while connected, Room emits disconnect
-    expect(w.emitted('disconnect')).toBeDefined()
+    expect(w.emitted('selectServer')).toEqual([['other:8443']])
   })
 
   it('emits disconnectVoice from UserControls', async () => {

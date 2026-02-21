@@ -46,9 +46,9 @@ onMounted(async () => {
     <div class="card-body gap-4">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <p class="text-xs font-semibold uppercase tracking-wider text-primary/80">WebRTC Voice Processing</p>
-          <h3 class="text-lg font-semibold leading-tight">Clean Mic Preset</h3>
-          <p class="text-sm opacity-70 mt-1">Only the standard real-time voice controls are exposed.</p>
+          <p class="text-xs font-semibold uppercase tracking-wider text-primary/80">WebRTC Built-ins</p>
+          <h3 class="text-lg font-semibold leading-tight">Native Voice Processing</h3>
+          <p class="text-sm opacity-70 mt-1">Use the standard WebRTC echo cancellation, noise suppression, and auto gain control.</p>
         </div>
         <span class="badge badge-primary badge-soft">Live</span>
       </div>
@@ -63,7 +63,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-sm font-medium leading-none">Echo Cancellation</p>
-              <p class="text-xs opacity-60 mt-1">Reduce speaker feedback looping into your microphone.</p>
+              <p class="text-xs opacity-60 mt-1">WebRTC built-in AEC to reduce speaker feedback looping into your microphone.</p>
             </div>
           </div>
           <input
@@ -82,7 +82,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-sm font-medium leading-none">Noise Suppression</p>
-              <p class="text-xs opacity-60 mt-1">Suppress constant background noise during voice capture.</p>
+              <p class="text-xs opacity-60 mt-1">WebRTC built-in suppression for constant background noise.</p>
             </div>
           </div>
           <input
@@ -101,7 +101,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-sm font-medium leading-none">Volume Normalization</p>
-              <p class="text-xs opacity-60 mt-1">Keep microphone loudness more consistent over time.</p>
+              <p class="text-xs opacity-60 mt-1">WebRTC built-in automatic gain control for more consistent loudness.</p>
             </div>
           </div>
           <input

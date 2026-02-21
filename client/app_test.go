@@ -28,26 +28,47 @@ type mockTransport struct {
 	userVolumes map[uint16]float64
 
 	// Control messages sent
-	chatsSent        []string
-	channelChats     []struct{ channelID int64; msg string }
-	editedMessages   []struct{ msgID uint64; msg string }
-	deletedMessages  []uint64
-	reactions        []struct{ msgID uint64; emoji string }
-	removedReactions []struct{ msgID uint64; emoji string }
-	typingSent       []int64
-	kickedUsers      []uint16
-	renamedUsers     []string
-	renamedServers   []string
-	channelsJoined   []int64
-	channelsCreated  []string
-	channelsRenamed  []struct{ id int64; name string }
-	channelsDeleted  []int64
-	usersMovedTo     []struct{ userID uint16; channelID int64 }
+	chatsSent    []string
+	channelChats []struct {
+		channelID int64
+		msg       string
+	}
+	editedMessages []struct {
+		msgID uint64
+		msg   string
+	}
+	deletedMessages []uint64
+	reactions       []struct {
+		msgID uint64
+		emoji string
+	}
+	removedReactions []struct {
+		msgID uint64
+		emoji string
+	}
+	typingSent      []int64
+	kickedUsers     []uint16
+	renamedUsers    []string
+	renamedServers  []string
+	channelsJoined  []int64
+	channelsCreated []string
+	channelsRenamed []struct {
+		id   int64
+		name string
+	}
+	channelsDeleted []int64
+	usersMovedTo    []struct {
+		userID    uint16
+		channelID int64
+	}
 	videoStates      []struct{ active, screenShare bool }
 	recordingsStart  []int64
 	recordingsStop   []int64
-	videoQualityReqs []struct{ targetID uint16; quality string }
-	fileChatsSent    []struct {
+	videoQualityReqs []struct {
+		targetID uint16
+		quality  string
+	}
+	fileChatsSent []struct {
 		channelID, fileID, fileSize int64
 		fileName, message           string
 	}
@@ -129,7 +150,7 @@ func (m *mockTransport) Disconnect() {
 	m.disconnected++
 }
 
-func (m *mockTransport) SendAudio(_ []byte) error { return nil }
+func (m *mockTransport) SendAudio(_ []byte) error                               { return nil }
 func (m *mockTransport) StartReceiving(_ context.Context, _ chan<- TaggedAudio) {}
 func (m *mockTransport) MyID() uint16 {
 	m.mu.Lock()
@@ -143,7 +164,7 @@ func (m *mockTransport) GetMetrics() Metrics {
 }
 
 func (m *mockTransport) MuteUser(id uint16)   { m.mu.Lock(); m.mutedUsers[id] = true; m.mu.Unlock() }
-func (m *mockTransport) UnmuteUser(id uint16)  { m.mu.Lock(); delete(m.mutedUsers, id); m.mu.Unlock() }
+func (m *mockTransport) UnmuteUser(id uint16) { m.mu.Lock(); delete(m.mutedUsers, id); m.mu.Unlock() }
 func (m *mockTransport) IsUserMuted(id uint16) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -198,18 +219,18 @@ func (m *mockTransport) SetOnUserRenamed(fn func(uint16, string)) { m.onUserRena
 func (m *mockTransport) SetOnMessageEdited(fn func(uint64, string, int64)) {
 	m.onMessageEdited = fn
 }
-func (m *mockTransport) SetOnMessageDeleted(fn func(uint64))               { m.onMessageDeleted = fn }
-func (m *mockTransport) SetOnVideoState(fn func(uint16, bool, bool))       { m.onVideoState = fn }
-func (m *mockTransport) SetOnReactionAdded(fn func(uint64, string, uint16))  { m.onReactionAdded = fn }
+func (m *mockTransport) SetOnMessageDeleted(fn func(uint64))                { m.onMessageDeleted = fn }
+func (m *mockTransport) SetOnVideoState(fn func(uint16, bool, bool))        { m.onVideoState = fn }
+func (m *mockTransport) SetOnReactionAdded(fn func(uint64, string, uint16)) { m.onReactionAdded = fn }
 func (m *mockTransport) SetOnReactionRemoved(fn func(uint64, string, uint16)) {
 	m.onReactionRemoved = fn
 }
-func (m *mockTransport) SetOnUserTyping(fn func(uint16, string, int64))     { m.onUserTyping = fn }
-func (m *mockTransport) SetOnMessagePinned(fn func(uint64, int64, uint16))  { m.onMessagePinned = fn }
-func (m *mockTransport) SetOnMessageUnpinned(fn func(uint64))               { m.onMessageUnpinned = fn }
-func (m *mockTransport) SetOnRecordingState(fn func(int64, bool, string))   { m.onRecordingState = fn }
-func (m *mockTransport) SetOnVideoLayers(fn func(uint16, []VideoLayer))     { m.onVideoLayers = fn }
-func (m *mockTransport) SetOnVideoQualityRequest(fn func(uint16, string))   { m.onVideoQualityReq = fn }
+func (m *mockTransport) SetOnUserTyping(fn func(uint16, string, int64))    { m.onUserTyping = fn }
+func (m *mockTransport) SetOnMessagePinned(fn func(uint64, int64, uint16)) { m.onMessagePinned = fn }
+func (m *mockTransport) SetOnMessageUnpinned(fn func(uint64))              { m.onMessageUnpinned = fn }
+func (m *mockTransport) SetOnRecordingState(fn func(int64, bool, string))  { m.onRecordingState = fn }
+func (m *mockTransport) SetOnVideoLayers(fn func(uint16, []VideoLayer))    { m.onVideoLayers = fn }
+func (m *mockTransport) SetOnVideoQualityRequest(fn func(uint16, string))  { m.onVideoQualityReq = fn }
 
 // Chat operations
 func (m *mockTransport) SendChat(message string) error {
@@ -227,7 +248,10 @@ func (m *mockTransport) SendChannelChat(channelID int64, message string) error {
 	if m.sendChannelChatErr != nil {
 		return m.sendChannelChatErr
 	}
-	m.channelChats = append(m.channelChats, struct{ channelID int64; msg string }{channelID, message})
+	m.channelChats = append(m.channelChats, struct {
+		channelID int64
+		msg       string
+	}{channelID, message})
 	return nil
 }
 func (m *mockTransport) SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error {
@@ -248,7 +272,10 @@ func (m *mockTransport) EditMessage(msgID uint64, message string) error {
 	if m.editMessageErr != nil {
 		return m.editMessageErr
 	}
-	m.editedMessages = append(m.editedMessages, struct{ msgID uint64; msg string }{msgID, message})
+	m.editedMessages = append(m.editedMessages, struct {
+		msgID uint64
+		msg   string
+	}{msgID, message})
 	return nil
 }
 func (m *mockTransport) DeleteMessage(msgID uint64) error {
@@ -266,7 +293,10 @@ func (m *mockTransport) AddReaction(msgID uint64, emoji string) error {
 	if m.addReactionErr != nil {
 		return m.addReactionErr
 	}
-	m.reactions = append(m.reactions, struct{ msgID uint64; emoji string }{msgID, emoji})
+	m.reactions = append(m.reactions, struct {
+		msgID uint64
+		emoji string
+	}{msgID, emoji})
 	return nil
 }
 func (m *mockTransport) RemoveReaction(msgID uint64, emoji string) error {
@@ -275,7 +305,10 @@ func (m *mockTransport) RemoveReaction(msgID uint64, emoji string) error {
 	if m.removeReactionErr != nil {
 		return m.removeReactionErr
 	}
-	m.removedReactions = append(m.removedReactions, struct{ msgID uint64; emoji string }{msgID, emoji})
+	m.removedReactions = append(m.removedReactions, struct {
+		msgID uint64
+		emoji string
+	}{msgID, emoji})
 	return nil
 }
 func (m *mockTransport) SendTyping(channelID int64) error {
@@ -338,7 +371,10 @@ func (m *mockTransport) RenameChannel(id int64, name string) error {
 	if m.renameChannelErr != nil {
 		return m.renameChannelErr
 	}
-	m.channelsRenamed = append(m.channelsRenamed, struct{ id int64; name string }{id, name})
+	m.channelsRenamed = append(m.channelsRenamed, struct {
+		id   int64
+		name string
+	}{id, name})
 	return nil
 }
 func (m *mockTransport) DeleteChannel(id int64) error {
@@ -356,7 +392,10 @@ func (m *mockTransport) MoveUser(userID uint16, channelID int64) error {
 	if m.moveUserErr != nil {
 		return m.moveUserErr
 	}
-	m.usersMovedTo = append(m.usersMovedTo, struct{ userID uint16; channelID int64 }{userID, channelID})
+	m.usersMovedTo = append(m.usersMovedTo, struct {
+		userID    uint16
+		channelID int64
+	}{userID, channelID})
 	return nil
 }
 func (m *mockTransport) SendVideoState(active, screenShare bool) error {
@@ -392,7 +431,10 @@ func (m *mockTransport) RequestVideoQuality(targetID uint16, quality string) err
 	if m.requestVideoQualErr != nil {
 		return m.requestVideoQualErr
 	}
-	m.videoQualityReqs = append(m.videoQualityReqs, struct{ targetID uint16; quality string }{targetID, quality})
+	m.videoQualityReqs = append(m.videoQualityReqs, struct {
+		targetID uint16
+		quality  string
+	}{targetID, quality})
 	return nil
 }
 func (m *mockTransport) APIBaseURL() string {
@@ -414,6 +456,7 @@ func newTestApp() (*App, *mockTransport) {
 	app := &App{
 		audio:     NewAudioEngine(),
 		transport: mt,
+		sessions:  make(map[string]Transporter),
 	}
 	return app, mt
 }
@@ -442,11 +485,17 @@ func TestIsConnectedAfterSet(t *testing.T) {
 // ===========================================================================
 
 func TestConnectAlreadyConnected(t *testing.T) {
-	app, _ := newTestApp()
-	app.connected.Store(true)
+	app, mt := newTestApp()
+	app.sessions["localhost:8443"] = mt
 	result := app.Connect("localhost:8443", "alice")
-	if result != "already connected" {
-		t.Errorf("expected 'already connected', got %q", result)
+	if result != "" {
+		t.Errorf("expected empty result when reusing session, got %q", result)
+	}
+	mt.mu.Lock()
+	called := mt.connectCalled
+	mt.mu.Unlock()
+	if called {
+		t.Error("expected Connect to reuse existing session without dialing again")
 	}
 }
 
@@ -462,17 +511,16 @@ func TestConnectTransportError(t *testing.T) {
 	}
 }
 
-func TestConnectCallsDisconnectFirst(t *testing.T) {
+func TestConnectDoesNotDisconnectBeforeDial(t *testing.T) {
 	app, mt := newTestApp()
-	// Force a transport error so Connect returns early (before audio.Start)
-	// but after the defensive Disconnect call.
+	// Force a transport error and ensure Connect does not pre-emptively disconnect.
 	mt.connectErr = errors.New("fail")
 	app.Connect("localhost:8443", "bob")
 	mt.mu.Lock()
 	dc := mt.disconnected
 	mt.mu.Unlock()
-	if dc < 1 {
-		t.Error("expected defensive Disconnect call before Connect")
+	if dc != 0 {
+		t.Errorf("expected no Disconnect before failed Connect, got %d", dc)
 	}
 }
 
@@ -1133,17 +1181,6 @@ func TestSetAGCLevel(t *testing.T) {
 	app.SetAGCLevel(75)
 }
 
-func TestSetVAD(t *testing.T) {
-	app, _ := newTestApp()
-	app.SetVAD(true)
-	app.SetVAD(false)
-}
-
-func TestSetVADThreshold(t *testing.T) {
-	app, _ := newTestApp()
-	app.SetVADThreshold(50)
-}
-
 func TestSetPTTMode(t *testing.T) {
 	app, _ := newTestApp()
 	app.SetPTTMode(true)
@@ -1163,17 +1200,6 @@ func TestSetInputDevice(t *testing.T) {
 func TestSetOutputDevice(t *testing.T) {
 	app, _ := newTestApp()
 	app.SetOutputDevice(3)
-}
-
-func TestSetNoiseGate(t *testing.T) {
-	app, _ := newTestApp()
-	app.SetNoiseGate(true)
-	app.SetNoiseGate(false)
-}
-
-func TestSetNoiseGateThreshold(t *testing.T) {
-	app, _ := newTestApp()
-	app.SetNoiseGateThreshold(30)
 }
 
 func TestGetInputLevel(t *testing.T) {

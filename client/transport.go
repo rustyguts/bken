@@ -1601,7 +1601,7 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 }
 
 // TaggedAudio is a voice frame tagged with the sender's ID and sequence number.
-// Used to feed the per-sender jitter buffer in the audio engine.
+// Used to feed the playback mixer in the audio engine.
 type TaggedAudio struct {
 	SenderID uint16
 	Seq      uint16

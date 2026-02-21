@@ -19,6 +19,8 @@ export function DeleteMessage(arg1:number):Promise<string>;
 
 export function Disconnect():Promise<void>;
 
+export function DisconnectServer(arg1:string):Promise<string>;
+
 export function DisconnectVoice():Promise<string>;
 
 export function EditMessage(arg1:number,arg2:string):Promise<string>;
@@ -81,15 +83,13 @@ export function SetAGC(arg1:boolean):Promise<void>;
 
 export function SetAGCLevel(arg1:number):Promise<void>;
 
+export function SetActiveServer(arg1:string):Promise<string>;
+
 export function SetDeafened(arg1:boolean):Promise<void>;
 
 export function SetInputDevice(arg1:number):Promise<void>;
 
 export function SetMuted(arg1:boolean):Promise<void>;
-
-export function SetNoiseGate(arg1:boolean):Promise<void>;
-
-export function SetNoiseGateThreshold(arg1:number):Promise<void>;
 
 export function SetNoiseSuppression(arg1:boolean):Promise<void>;
 
@@ -102,10 +102,6 @@ export function SetOutputDevice(arg1:number):Promise<void>;
 export function SetPTTMode(arg1:boolean):Promise<void>;
 
 export function SetUserVolume(arg1:number,arg2:number):Promise<void>;
-
-export function SetVAD(arg1:boolean):Promise<void>;
-
-export function SetVADThreshold(arg1:number):Promise<void>;
 
 export function SetVolume(arg1:number):Promise<void>;
 

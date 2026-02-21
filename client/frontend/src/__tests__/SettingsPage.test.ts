@@ -8,47 +8,33 @@ describe('SettingsPage', () => {
     expect(w.exists()).toBe(true)
   })
 
-  it('renders the Settings heading', () => {
+  it('renders the Settings heading and all sections', () => {
     const w = mount(SettingsPage)
     expect(w.text()).toContain('Settings')
-  })
-
-  it('renders all tabs', () => {
-    const w = mount(SettingsPage)
     expect(w.text()).toContain('Audio')
     expect(w.text()).toContain('Appearance')
     expect(w.text()).toContain('Keybinds')
     expect(w.text()).toContain('About')
   })
 
-  it('defaults to audio tab', () => {
+  it('defaults to audio section', () => {
     const w = mount(SettingsPage)
-    const activeTab = w.find('[aria-selected="true"]')
-    expect(activeTab.text()).toBe('Audio')
+    const activeTab = w.find('[role="tab"][aria-selected="true"]')
+    expect(activeTab.text()).toContain('Audio')
   })
 
-  it('switches to appearance tab on click', async () => {
+  it('switches tabs on click', async () => {
     const w = mount(SettingsPage)
     const tabs = w.findAll('[role="tab"]')
-    const appearanceTab = tabs.find(t => t.text() === 'Appearance')
-    await appearanceTab!.trigger('click')
-    expect(appearanceTab!.classes()).toContain('tab-active')
-  })
 
-  it('switches to keybinds tab on click', async () => {
-    const w = mount(SettingsPage)
-    const tabs = w.findAll('[role="tab"]')
-    const keybindsTab = tabs.find(t => t.text() === 'Keybinds')
-    await keybindsTab!.trigger('click')
-    expect(keybindsTab!.classes()).toContain('tab-active')
-  })
+    await tabs[1].trigger('click')
+    expect(tabs[1].attributes('aria-selected')).toBe('true')
 
-  it('switches to about tab on click', async () => {
-    const w = mount(SettingsPage)
-    const tabs = w.findAll('[role="tab"]')
-    const aboutTab = tabs.find(t => t.text() === 'About')
-    await aboutTab!.trigger('click')
-    expect(aboutTab!.classes()).toContain('tab-active')
+    await tabs[2].trigger('click')
+    expect(tabs[2].attributes('aria-selected')).toBe('true')
+
+    await tabs[3].trigger('click')
+    expect(tabs[3].attributes('aria-selected')).toBe('true')
   })
 
   it('emits back when back button is clicked', async () => {
@@ -58,13 +44,9 @@ describe('SettingsPage', () => {
     expect(w.emitted('back')).toHaveLength(1)
   })
 
-  it('renders AudioDeviceSettings in audio tab', () => {
+  it('renders AudioDeviceSettings and VoiceProcessing in audio section', () => {
     const w = mount(SettingsPage)
     expect(w.findComponent({ name: 'AudioDeviceSettings' }).exists()).toBe(true)
-  })
-
-  it('renders VoiceProcessing in audio tab', () => {
-    const w = mount(SettingsPage)
     expect(w.findComponent({ name: 'VoiceProcessing' }).exists()).toBe(true)
   })
 })

@@ -10,17 +10,18 @@ import (
 
 // Config holds all persistent user preferences.
 type Config struct {
-	Theme          string        `json:"theme"`
-	Username       string        `json:"username"`
-	InputDeviceID  int           `json:"input_device_id"`
-	OutputDeviceID int           `json:"output_device_id"`
-	Volume         float64       `json:"volume"`
-	NoiseEnabled   bool          `json:"noise_enabled"`
-	AECEnabled     bool          `json:"aec_enabled"`
-	AGCEnabled     bool          `json:"agc_enabled"`
-	PTTEnabled     bool          `json:"ptt_enabled"`
-	PTTKey         string        `json:"ptt_key"` // keyboard key code (e.g. "Space", "Backquote")
-	Servers            []ServerEntry `json:"servers"`
+	Theme          string  `json:"theme"`
+	Username       string  `json:"username"`
+	InputDeviceID  int     `json:"input_device_id"`
+	OutputDeviceID int     `json:"output_device_id"`
+	Volume         float64 `json:"volume"`
+	// WebRTC built-in voice processing preferences.
+	NoiseEnabled bool          `json:"noise_enabled"`
+	AECEnabled   bool          `json:"aec_enabled"`
+	AGCEnabled   bool          `json:"agc_enabled"`
+	PTTEnabled   bool          `json:"ptt_enabled"`
+	PTTKey       string        `json:"ptt_key"` // keyboard key code (e.g. "Space", "Backquote")
+	Servers      []ServerEntry `json:"servers"`
 }
 
 // ServerEntry is a saved server shown in the server browser.

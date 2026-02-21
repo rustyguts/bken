@@ -430,63 +430,6 @@ func TestSendFailureThreshold(t *testing.T) {
 	}
 }
 
-// --- Fast-start adaptation tests ---
-
-func TestFastStartIntervalsAscending(t *testing.T) {
-	// Fast-start intervals should be in ascending order and shorter than
-	// the steady-state interval. This ensures rapid initial convergence
-	// that gradually slows to the steady-state cadence.
-	if len(fastStartIntervals) == 0 {
-		t.Fatal("fastStartIntervals must not be empty")
-	}
-	for i, d := range fastStartIntervals {
-		if d <= 0 {
-			t.Errorf("fastStartIntervals[%d] = %v, must be positive", i, d)
-		}
-		if i > 0 && d <= fastStartIntervals[i-1] {
-			t.Errorf("fastStartIntervals[%d] = %v, should be > [%d] = %v (ascending order)",
-				i, d, i-1, fastStartIntervals[i-1])
-		}
-		if d >= adaptInterval {
-			t.Errorf("fastStartIntervals[%d] = %v, should be < adaptInterval (%v)",
-				i, d, adaptInterval)
-		}
-	}
-}
-
-func TestWarmupTicksMatchesIntervals(t *testing.T) {
-	// Warmup ticks should not exceed the number of fast-start intervals.
-	if warmupTicks > len(fastStartIntervals) {
-		t.Errorf("warmupTicks (%d) > len(fastStartIntervals) (%d); warmup EWMA would continue past fast-start phase",
-			warmupTicks, len(fastStartIntervals))
-	}
-}
-
-func TestWarmupLossAlphaHigher(t *testing.T) {
-	// Warmup alpha must be higher than steady-state for faster initial convergence.
-	if warmupLossAlpha <= lossAlpha {
-		t.Errorf("warmupLossAlpha (%.2f) should be > lossAlpha (%.2f)", warmupLossAlpha, lossAlpha)
-	}
-	if warmupLossAlpha > 1.0 {
-		t.Errorf("warmupLossAlpha = %.2f, must be <= 1.0", warmupLossAlpha)
-	}
-}
-
-func TestFastStartTotalWarmupDuration(t *testing.T) {
-	// The total fast-start warmup should be short (< 10s) so users get
-	// optimal voice quality quickly.
-	var total time.Duration
-	for _, d := range fastStartIntervals {
-		total += d
-	}
-	if total > 10*time.Second {
-		t.Errorf("total fast-start warmup = %v, should be < 10s", total)
-	}
-	if total < 1*time.Second {
-		t.Errorf("total fast-start warmup = %v, should be >= 1s", total)
-	}
-}
-
 func TestPlaybackDroppedCounter(t *testing.T) {
 	tr := NewTransport()
 	// Initially zero.

@@ -179,7 +179,7 @@ describe('Server Connection Flow', () => {
     await flush()
 
     // UserControls leave-voice button triggers disconnectVoice
-    const leaveBtn = wrapper.find('button[title="Leave Voice Channel"]')
+    const leaveBtn = wrapper.find('button[title="DisconnectVoice"]')
     if (leaveBtn.exists()) {
       await leaveBtn.trigger('click')
       const emitted = wrapper.emitted('disconnectVoice')
@@ -418,7 +418,7 @@ describe('Voice Flow', () => {
     })
     await flush()
 
-    const leaveBtn = wrapper.find('button[title="Leave Voice Channel"]')
+    const leaveBtn = wrapper.find('button[title="DisconnectVoice"]')
     expect(leaveBtn.exists()).toBe(true)
     await leaveBtn.trigger('click')
 
@@ -878,20 +878,20 @@ describe('Settings Flow', () => {
     // Should have Audio, Appearance, Keybinds, About tabs
     const tabs = wrapper.findAll('[role="tab"]')
     expect(tabs.length).toBe(4)
-    expect(tabs[0].text()).toBe('Audio')
-    expect(tabs[1].text()).toBe('Appearance')
-    expect(tabs[2].text()).toBe('Keybinds')
-    expect(tabs[3].text()).toBe('About')
+    expect(tabs[0].text()).toContain('Audio')
+    expect(tabs[1].text()).toContain('Appearance')
+    expect(tabs[2].text()).toContain('Keybinds')
+    expect(tabs[3].text()).toContain('About')
 
     // Audio should be active by default
-    expect(tabs[0].classes()).toContain('tab-active')
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
 
     // Click Appearance
     await tabs[1].trigger('click')
     await nextTick()
 
-    expect(tabs[1].classes()).toContain('tab-active')
-    expect(tabs[0].classes()).not.toContain('tab-active')
+    expect(tabs[1].attributes('aria-selected')).toBe('true')
+    expect(tabs[0].attributes('aria-selected')).toBe('false')
   })
 
   it('emits back event when Back button is clicked', async () => {

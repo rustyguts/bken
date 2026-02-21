@@ -72,14 +72,14 @@ describe('UserControls', () => {
 
   it('emits leave-voice when leave button is clicked', async () => {
     const w = mount(UserControls, { props: baseProps })
-    const leaveBtn = w.findAll('button').find(b => b.attributes('title') === 'Leave Voice Channel')
+    const leaveBtn = w.findAll('button').find(b => b.attributes('title') === 'DisconnectVoice')
     await leaveBtn!.trigger('click')
     expect(w.emitted('leave-voice')).toHaveLength(1)
   })
 
   it('leave voice button is disabled when not voice connected', () => {
     const w = mount(UserControls, { props: { ...baseProps, voiceConnected: false } })
-    const leaveBtn = w.findAll('button').find(b => b.attributes('title') === 'Leave Voice Channel')
+    const leaveBtn = w.findAll('button').find(b => b.attributes('title') === 'DisconnectVoice')
     expect(leaveBtn?.attributes('disabled')).toBeDefined()
   })
 

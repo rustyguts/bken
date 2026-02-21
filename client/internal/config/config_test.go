@@ -42,6 +42,7 @@ func TestDefault(t *testing.T) {
 func TestSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 
 	cfg := config.Config{
 		Theme:          "dracula",
@@ -97,7 +98,9 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestLoadMissingFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 	cfg := config.Load()
 	if cfg.Theme == "" {
 		t.Error("expected non-empty theme from defaults")
@@ -107,8 +110,12 @@ func TestLoadMissingFile(t *testing.T) {
 func TestLoadCorruptFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 
-	path := filepath.Join(dir, "bken", "config.json")
+	path, err := config.Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -125,12 +132,16 @@ func TestLoadCorruptFile(t *testing.T) {
 func TestSaveCreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
 
 	if err := config.Save(config.Default()); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	path := filepath.Join(dir, "bken", "config.json")
+	path, err := config.Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("config file not created: %v", err)
 	}

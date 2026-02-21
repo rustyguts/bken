@@ -16,8 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"client/internal/adapt"
-
 	"github.com/gordonklaus/portaudio"
 	wailsrt "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -26,11 +24,16 @@ import (
 // Wails-bound methods (Connect, Disconnect, Get*, Set*) are callable from JS.
 // Keep this struct thin — delegate to Transport and AudioEngine.
 type App struct {
-	ctx         context.Context
-	audio       *AudioEngine
-	transport   Transporter
-	connected   atomic.Bool // true while a voice session is active; safe for concurrent access
-	startupAddr string      // host:port extracted from a bken:// CLI argument, if any
+	ctx            context.Context
+	audio          *AudioEngine
+	transport      Transporter
+	connected      atomic.Bool // true while a voice session is active; safe for concurrent access
+	startupAddr    string      // host:port extracted from a bken:// CLI argument, if any
+	sessionsMu     sync.RWMutex
+	sessions       map[string]Transporter // key: normalized server addr
+	activeServer   string                 // currently browsed server for text/control actions
+	voiceServer    string                 // server currently used for voice channel/audio
+	voiceTransport Transporter
 
 	// Metrics cache: updated every 5 s by adaptBitrateLoop; read by GetMetrics.
 	metricsMu     sync.Mutex
@@ -42,7 +45,76 @@ func NewApp() *App {
 	return &App{
 		audio:     NewAudioEngine(),
 		transport: NewTransport(),
+		sessions:  make(map[string]Transporter),
 	}
+}
+
+func (a *App) normalizedAddr(addr string) (string, error) {
+	return normalizeServerAddr(addr)
+}
+
+func (a *App) getSession(addr string) Transporter {
+	a.sessionsMu.RLock()
+	defer a.sessionsMu.RUnlock()
+	return a.sessions[addr]
+}
+
+func (a *App) setActiveServer(addr string) {
+	a.sessionsMu.Lock()
+	a.activeServer = addr
+	a.sessionsMu.Unlock()
+}
+
+func (a *App) getActiveServer() string {
+	a.sessionsMu.RLock()
+	defer a.sessionsMu.RUnlock()
+	return a.activeServer
+}
+
+func (a *App) activeTransport() Transporter {
+	a.sessionsMu.RLock()
+	defer a.sessionsMu.RUnlock()
+	if a.activeServer != "" {
+		if tr := a.sessions[a.activeServer]; tr != nil {
+			return tr
+		}
+	}
+	// Backward-compatible fallback for tests/legacy single-session code.
+	if a.transport != nil {
+		return a.transport
+	}
+	for _, tr := range a.sessions {
+		return tr
+	}
+	return nil
+}
+
+func (a *App) requireActiveTransport() (Transporter, error) {
+	tr := a.activeTransport()
+	if tr == nil {
+		return nil, fmt.Errorf("no active server session")
+	}
+	return tr, nil
+}
+
+func (a *App) voiceSession() (addr string, tr Transporter) {
+	a.sessionsMu.RLock()
+	defer a.sessionsMu.RUnlock()
+	return a.voiceServer, a.voiceTransport
+}
+
+func (a *App) setVoiceSession(addr string, tr Transporter) {
+	a.sessionsMu.Lock()
+	a.voiceServer = addr
+	a.voiceTransport = tr
+	a.sessionsMu.Unlock()
+}
+
+func (a *App) preferredAudioTransport() Transporter {
+	if _, tr := a.voiceSession(); tr != nil {
+		return tr
+	}
+	return a.activeTransport()
 }
 
 // startup is called when the Wails app starts.
@@ -121,8 +193,7 @@ func (a *App) SetVolume(vol float64) {
 	a.audio.SetVolume(vol)
 }
 
-// SetAEC enables or disables acoustic echo cancellation on the capture path.
-// Enabling resets the adaptive filter for a clean start.
+// SetAEC enables or disables echo-cancellation preference.
 func (a *App) SetAEC(enabled bool) {
 	a.audio.SetAEC(enabled)
 }
@@ -132,21 +203,9 @@ func (a *App) SetAGC(enabled bool) {
 	a.audio.SetAGC(enabled)
 }
 
-// SetAGCLevel sets the AGC target loudness level (0–100).
+// SetAGCLevel is retained as a no-op for backward compatibility.
 func (a *App) SetAGCLevel(level int) {
 	a.audio.SetAGCLevel(level)
-}
-
-// SetVAD enables or disables voice activity detection.
-// When enabled, silent frames are not encoded or transmitted.
-func (a *App) SetVAD(enabled bool) {
-	a.audio.SetVAD(enabled)
-}
-
-// SetVADThreshold sets VAD sensitivity (0–100). Higher values require louder
-// speech to be considered active and suppress more background sound.
-func (a *App) SetVADThreshold(level int) {
-	a.audio.SetVADThreshold(level)
 }
 
 // SetNoiseSuppression enables or disables noise suppression.
@@ -167,16 +226,6 @@ func (a *App) SetNotificationVolume(vol float64) {
 // GetNotificationVolume returns the notification volume (0.0-1.0).
 func (a *App) GetNotificationVolume() float64 {
 	return float64(a.audio.NotificationVolume())
-}
-
-// SetNoiseGate enables or disables the hard noise gate on the capture path.
-func (a *App) SetNoiseGate(enabled bool) {
-	a.audio.SetNoiseGate(enabled)
-}
-
-// SetNoiseGateThreshold sets the noise gate threshold level (0-100).
-func (a *App) SetNoiseGateThreshold(level int) {
-	a.audio.SetNoiseGateThreshold(level)
 }
 
 // GetInputLevel returns the current mic input RMS level (0.0-1.0).
@@ -237,86 +286,156 @@ func (a *App) PTTKeyUp() {
 	a.audio.SetPTTActive(false)
 }
 
-// Connect establishes a voice session with the server.
+// Connect establishes (or reuses) a control session with the server.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) Connect(addr, username string) string {
-	if a.connected.Load() {
-		return "already connected"
-	}
-
-	// Defensive cleanup in case a stale transport session survived a prior
-	// failed/partial teardown while connected=false.
-	a.transport.Disconnect()
-
-	a.wireCallbacks()
-
-	if err := a.transport.Connect(context.Background(), addr, username); err != nil {
+	normalizedAddr, err := a.normalizedAddr(addr)
+	if err != nil {
 		return err.Error()
 	}
 
-	// Wire per-user volume so audio playback respects individual multipliers.
-	a.audio.UserVolumeFunc = func(senderID uint16) float64 {
-		return a.transport.GetUserVolume(senderID)
+	// Reuse an existing control session if we are already connected.
+	if existing := a.getSession(normalizedAddr); existing != nil {
+		a.setActiveServer(normalizedAddr)
+		return ""
 	}
 
-	if err := a.audio.Start(); err != nil {
-		a.transport.Disconnect()
+	// First session reuses App.transport for backward compatibility in tests.
+	var tr Transporter
+	a.sessionsMu.Lock()
+	sessionCount := len(a.sessions)
+	if sessionCount == 0 && a.transport != nil {
+		tr = a.transport
+	} else {
+		tr = NewTransport()
+	}
+	a.sessionsMu.Unlock()
+
+	a.wireSessionCallbacks(normalizedAddr, tr)
+
+	if err := tr.Connect(context.Background(), normalizedAddr, username); err != nil {
 		return err.Error()
 	}
 
-	a.transport.StartReceiving(context.Background(), a.audio.PlaybackIn)
-	go a.sendLoop()
-	go a.adaptBitrateLoop(a.audio.Done())
+	a.sessionsMu.Lock()
+	a.sessions[normalizedAddr] = tr
+	if a.activeServer == "" {
+		a.activeServer = normalizedAddr
+	}
+	a.activeServer = normalizedAddr
+	if a.transport == nil {
+		a.transport = tr
+	}
+	a.sessionsMu.Unlock()
 
-	a.audio.PlayNotification(SoundConnect)
-
-	a.connected.Store(true)
-	log.Printf("[app] connected to %s as %s", addr, username)
+	if a.ctx != nil {
+		wailsrt.EventsEmit(a.ctx, "server:connected", map[string]any{"server_addr": normalizedAddr})
+	}
+	log.Printf("[app] connected control session to %s as %s", normalizedAddr, username)
 	return ""
 }
 
-// wireCallbacks registers transport and audio callbacks that forward events
-// to the frontend via Wails events. Must be called before transport.Connect.
+// wireCallbacks keeps legacy tests/builders working when they set app.transport
+// directly without creating named server sessions.
 func (a *App) wireCallbacks() {
-	a.transport.SetOnUserList(func(users []UserInfo) {
-		wailsrt.EventsEmit(a.ctx, "user:list", users)
-		wailsrt.EventsEmit(a.ctx, "user:me", map[string]any{"id": int(a.transport.MyID())})
+	if a.transport == nil {
+		return
+	}
+	serverAddr := a.getActiveServer()
+	if serverAddr == "" {
+		serverAddr = "legacy"
+	}
+	a.wireSessionCallbacks(serverAddr, a.transport)
+}
+
+// wireSessionCallbacks registers transport callbacks and tags each event with
+// its server address.
+func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
+	tr.SetOnUserList(func(users []UserInfo) {
+		wailsrt.EventsEmit(a.ctx, "user:list", map[string]any{
+			"server_addr": serverAddr,
+			"users":       users,
+		})
+		wailsrt.EventsEmit(a.ctx, "user:me", map[string]any{
+			"server_addr": serverAddr,
+			"id":          int(tr.MyID()),
+		})
 	})
-	a.transport.SetOnUserJoined(func(id uint16, name string) {
-		wailsrt.EventsEmit(a.ctx, "user:joined", map[string]interface{}{"id": id, "username": name})
+	tr.SetOnUserJoined(func(id uint16, name string) {
+		wailsrt.EventsEmit(a.ctx, "user:joined", map[string]any{
+			"server_addr": serverAddr,
+			"id":          id,
+			"username":    name,
+		})
 		a.audio.PlayNotification(SoundUserJoined)
 	})
-	a.transport.SetOnUserLeft(func(id uint16) {
-		wailsrt.EventsEmit(a.ctx, "user:left", map[string]interface{}{"id": id})
+	tr.SetOnUserLeft(func(id uint16) {
+		wailsrt.EventsEmit(a.ctx, "user:left", map[string]any{
+			"server_addr": serverAddr,
+			"id":          id,
+		})
 		a.audio.PlayNotification(SoundUserLeft)
 	})
-	a.transport.SetOnAudioReceived(func(userID uint16) {
-		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(userID)})
+	tr.SetOnAudioReceived(func(userID uint16) {
+		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{
+			"server_addr": serverAddr,
+			"id":          int(userID),
+		})
 	})
-	a.transport.SetOnDisconnected(func(reason string) {
-		if !a.connected.Load() {
-			return // user-initiated disconnect, ignore
+	tr.SetOnDisconnected(func(reason string) {
+		a.sessionsMu.Lock()
+		delete(a.sessions, serverAddr)
+		if a.transport == tr {
+			a.transport = nil
+			for _, nextTr := range a.sessions {
+				a.transport = nextTr
+				break
+			}
 		}
-		a.connected.Store(false)
-		a.audio.Stop()
-		a.transport.Disconnect() // ensure full transport cleanup (cancel ctx, close session)
-		wailsrt.EventsEmit(a.ctx, "connection:lost", map[string]any{"reason": reason})
-		log.Printf("[app] connection lost: %s", reason)
+		if a.activeServer == serverAddr {
+			a.activeServer = ""
+			for addr := range a.sessions {
+				a.activeServer = addr
+				break
+			}
+		}
+		voiceLost := a.voiceServer == serverAddr
+		if voiceLost {
+			a.voiceServer = ""
+			a.voiceTransport = nil
+		}
+		a.sessionsMu.Unlock()
+
+		if voiceLost && a.connected.Load() {
+			a.connected.Store(false)
+			a.audio.Stop()
+		}
+
+		wailsrt.EventsEmit(a.ctx, "connection:lost", map[string]any{
+			"server_addr": serverAddr,
+			"reason":      reason,
+		})
+		wailsrt.EventsEmit(a.ctx, "server:disconnected", map[string]any{
+			"server_addr": serverAddr,
+			"reason":      reason,
+		})
+		log.Printf("[app] connection lost (%s): %s", serverAddr, reason)
 	})
-	a.transport.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
+	tr.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
 		payload := map[string]any{
-			"username":   username,
-			"message":    message,
-			"ts":         ts,
-			"channel_id": 0,
-			"msg_id":     msgID,
-			"sender_id":  int(senderID),
+			"server_addr": serverAddr,
+			"username":    username,
+			"message":     message,
+			"ts":          ts,
+			"channel_id":  0,
+			"msg_id":      msgID,
+			"sender_id":   int(senderID),
 		}
 		if fileID != 0 {
 			payload["file_id"] = fileID
 			payload["file_name"] = fileName
 			payload["file_size"] = fileSize
-			payload["file_url"] = a.fileURL(fileID)
+			payload["file_url"] = fileURLForTransport(tr, fileID)
 		}
 		if len(mentions) > 0 {
 			intMentions := make([]int, len(mentions))
@@ -338,20 +457,21 @@ func (a *App) wireCallbacks() {
 		}
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
-	a.transport.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
+	tr.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
 		payload := map[string]any{
-			"username":   username,
-			"message":    message,
-			"ts":         ts,
-			"channel_id": channelID,
-			"msg_id":     msgID,
-			"sender_id":  int(senderID),
+			"server_addr": serverAddr,
+			"username":    username,
+			"message":     message,
+			"ts":          ts,
+			"channel_id":  channelID,
+			"msg_id":      msgID,
+			"sender_id":   int(senderID),
 		}
 		if fileID != 0 {
 			payload["file_id"] = fileID
 			payload["file_name"] = fileName
 			payload["file_size"] = fileSize
-			payload["file_url"] = a.fileURL(fileID)
+			payload["file_url"] = fileURLForTransport(tr, fileID)
 		}
 		if len(mentions) > 0 {
 			intMentions := make([]int, len(mentions))
@@ -373,8 +493,9 @@ func (a *App) wireCallbacks() {
 		}
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
-	a.transport.SetOnLinkPreview(func(msgID uint64, channelID int64, url, title, desc, image, siteName string) {
+	tr.SetOnLinkPreview(func(msgID uint64, channelID int64, url, title, desc, image, siteName string) {
 		wailsrt.EventsEmit(a.ctx, "chat:link_preview", map[string]any{
+			"server_addr": serverAddr,
 			"msg_id":      msgID,
 			"channel_id":  channelID,
 			"url":         url,
@@ -384,123 +505,233 @@ func (a *App) wireCallbacks() {
 			"site_name":   siteName,
 		})
 	})
-	a.transport.SetOnServerInfo(func(name string) {
-		wailsrt.EventsEmit(a.ctx, "server:info", map[string]any{"name": name})
+	tr.SetOnServerInfo(func(name string) {
+		wailsrt.EventsEmit(a.ctx, "server:info", map[string]any{
+			"server_addr": serverAddr,
+			"name":        name,
+		})
 	})
-	a.transport.SetOnOwnerChanged(func(ownerID uint16) {
-		wailsrt.EventsEmit(a.ctx, "room:owner", map[string]any{"owner_id": int(ownerID)})
+	tr.SetOnOwnerChanged(func(ownerID uint16) {
+		wailsrt.EventsEmit(a.ctx, "room:owner", map[string]any{
+			"server_addr": serverAddr,
+			"owner_id":    int(ownerID),
+		})
 	})
-	a.transport.SetOnKicked(func() {
-		a.connected.Store(false)
-		a.audio.Stop()
-		wailsrt.EventsEmit(a.ctx, "connection:kicked", nil)
-		log.Println("[app] kicked from server")
+	tr.SetOnKicked(func() {
+		_, voiceTr := a.voiceSession()
+		if voiceTr == tr {
+			a.connected.Store(false)
+			a.audio.Stop()
+			a.setVoiceSession("", nil)
+		}
+		wailsrt.EventsEmit(a.ctx, "connection:kicked", map[string]any{
+			"server_addr": serverAddr,
+		})
+		log.Printf("[app] kicked from server %s", serverAddr)
 	})
-	a.transport.SetOnChannelList(func(channels []ChannelInfo) {
-		wailsrt.EventsEmit(a.ctx, "channel:list", channels)
+	tr.SetOnChannelList(func(channels []ChannelInfo) {
+		wailsrt.EventsEmit(a.ctx, "channel:list", map[string]any{
+			"server_addr": serverAddr,
+			"channels":    channels,
+		})
 	})
-	a.transport.SetOnUserChannel(func(userID uint16, channelID int64) {
+	tr.SetOnUserChannel(func(userID uint16, channelID int64) {
 		wailsrt.EventsEmit(a.ctx, "channel:user_moved", map[string]any{
-			"user_id":    int(userID),
-			"channel_id": channelID,
+			"server_addr": serverAddr,
+			"user_id":     int(userID),
+			"channel_id":  channelID,
 		})
 	})
-	a.transport.SetOnUserRenamed(func(userID uint16, username string) {
+	tr.SetOnUserRenamed(func(userID uint16, username string) {
 		wailsrt.EventsEmit(a.ctx, "user:renamed", map[string]any{
-			"id":       int(userID),
-			"username": username,
+			"server_addr": serverAddr,
+			"id":          int(userID),
+			"username":    username,
 		})
 	})
-	a.transport.SetOnMessageEdited(func(msgID uint64, message string, ts int64) {
+	tr.SetOnMessageEdited(func(msgID uint64, message string, ts int64) {
 		wailsrt.EventsEmit(a.ctx, "chat:message_edited", map[string]any{
-			"msg_id":  msgID,
-			"message": message,
-			"ts":      ts,
+			"server_addr": serverAddr,
+			"msg_id":      msgID,
+			"message":     message,
+			"ts":          ts,
 		})
 	})
-	a.transport.SetOnMessageDeleted(func(msgID uint64) {
+	tr.SetOnMessageDeleted(func(msgID uint64) {
 		wailsrt.EventsEmit(a.ctx, "chat:message_deleted", map[string]any{
-			"msg_id": msgID,
+			"server_addr": serverAddr,
+			"msg_id":      msgID,
 		})
 	})
-	a.transport.SetOnVideoState(func(userID uint16, active bool, screenShare bool) {
+	tr.SetOnVideoState(func(userID uint16, active bool, screenShare bool) {
 		wailsrt.EventsEmit(a.ctx, "video:state", map[string]any{
+			"server_addr":  serverAddr,
 			"id":           int(userID),
 			"video_active": active,
 			"screen_share": screenShare,
 		})
 	})
-	a.transport.SetOnReactionAdded(func(msgID uint64, emoji string, userID uint16) {
+	tr.SetOnReactionAdded(func(msgID uint64, emoji string, userID uint16) {
 		wailsrt.EventsEmit(a.ctx, "chat:reaction_added", map[string]any{
-			"msg_id": msgID,
-			"emoji":  emoji,
-			"id":     int(userID),
+			"server_addr": serverAddr,
+			"msg_id":      msgID,
+			"emoji":       emoji,
+			"id":          int(userID),
 		})
 	})
-	a.transport.SetOnReactionRemoved(func(msgID uint64, emoji string, userID uint16) {
+	tr.SetOnReactionRemoved(func(msgID uint64, emoji string, userID uint16) {
 		wailsrt.EventsEmit(a.ctx, "chat:reaction_removed", map[string]any{
-			"msg_id": msgID,
-			"emoji":  emoji,
-			"id":     int(userID),
+			"server_addr": serverAddr,
+			"msg_id":      msgID,
+			"emoji":       emoji,
+			"id":          int(userID),
 		})
 	})
-	a.transport.SetOnUserTyping(func(userID uint16, username string, channelID int64) {
+	tr.SetOnUserTyping(func(userID uint16, username string, channelID int64) {
 		wailsrt.EventsEmit(a.ctx, "chat:user_typing", map[string]any{
-			"id":         int(userID),
-			"username":   username,
-			"channel_id": channelID,
+			"server_addr": serverAddr,
+			"id":          int(userID),
+			"username":    username,
+			"channel_id":  channelID,
 		})
 	})
-	a.transport.SetOnMessagePinned(func(msgID uint64, channelID int64, userID uint16) {
+	tr.SetOnMessagePinned(func(msgID uint64, channelID int64, userID uint16) {
 		wailsrt.EventsEmit(a.ctx, "chat:message_pinned", map[string]any{
-			"msg_id":     msgID,
-			"channel_id": channelID,
-			"id":         int(userID),
+			"server_addr": serverAddr,
+			"msg_id":      msgID,
+			"channel_id":  channelID,
+			"id":          int(userID),
 		})
 	})
-	a.transport.SetOnMessageUnpinned(func(msgID uint64) {
+	tr.SetOnMessageUnpinned(func(msgID uint64) {
 		wailsrt.EventsEmit(a.ctx, "chat:message_unpinned", map[string]any{
-			"msg_id": msgID,
+			"server_addr": serverAddr,
+			"msg_id":      msgID,
 		})
 	})
-	a.transport.SetOnRecordingState(func(channelID int64, recording bool, startedBy string) {
+	tr.SetOnRecordingState(func(channelID int64, recording bool, startedBy string) {
 		wailsrt.EventsEmit(a.ctx, "recording:state", map[string]any{
-			"channel_id": channelID,
-			"recording":  recording,
-			"started_by": startedBy,
+			"server_addr": serverAddr,
+			"channel_id":  channelID,
+			"recording":   recording,
+			"started_by":  startedBy,
 		})
 	})
-	a.transport.SetOnVideoLayers(func(userID uint16, layers []VideoLayer) {
+	tr.SetOnVideoLayers(func(userID uint16, layers []VideoLayer) {
 		wailsrt.EventsEmit(a.ctx, "video:layers", map[string]any{
-			"id":     int(userID),
-			"layers": layers,
+			"server_addr": serverAddr,
+			"id":          int(userID),
+			"layers":      layers,
 		})
 	})
-	a.transport.SetOnVideoQualityRequest(func(fromUserID uint16, quality string) {
+	tr.SetOnVideoQualityRequest(func(fromUserID uint16, quality string) {
 		wailsrt.EventsEmit(a.ctx, "video:quality_request", map[string]any{
-			"id":      int(fromUserID),
-			"quality": quality,
+			"server_addr": serverAddr,
+			"id":          int(fromUserID),
+			"quality":     quality,
 		})
 	})
 	a.audio.OnSpeaking = func() {
-		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{"id": int(a.transport.MyID())})
+		voiceAddr, voiceTr := a.voiceSession()
+		if voiceTr == nil {
+			return
+		}
+		wailsrt.EventsEmit(a.ctx, "audio:speaking", map[string]any{
+			"server_addr": voiceAddr,
+			"id":          int(voiceTr.MyID()),
+		})
 	}
 }
 
-// Disconnect ends the voice session.
+// Disconnect tears down all voice/control sessions.
 func (a *App) Disconnect() {
-	wasConnected := a.connected.Swap(false)
-	if wasConnected {
-		log.Println("[app] disconnecting...")
+	if a.connected.Load() {
+		_ = a.DisconnectVoice()
 	}
-	a.audio.Stop()
-	a.transport.Disconnect()
+
+	a.sessionsMu.Lock()
+	transports := make([]Transporter, 0, len(a.sessions))
+	for _, tr := range a.sessions {
+		transports = append(transports, tr)
+	}
+	a.sessions = make(map[string]Transporter)
+	a.activeServer = ""
+	a.voiceServer = ""
+	a.voiceTransport = nil
+	a.sessionsMu.Unlock()
+
+	for _, tr := range transports {
+		tr.Disconnect()
+	}
+	if a.transport != nil && len(transports) == 0 {
+		a.transport.Disconnect()
+	}
+
+	a.connected.Store(false)
 	a.metricsMu.Lock()
 	a.cachedMetrics = Metrics{}
 	a.metricsMu.Unlock()
-	if wasConnected {
-		log.Println("[app] disconnected")
+	log.Println("[app] disconnected all sessions")
+}
+
+// DisconnectServer closes only one server control session (text + signaling).
+// Voice is also disconnected if it currently uses this server.
+func (a *App) DisconnectServer(addr string) string {
+	normalizedAddr, err := a.normalizedAddr(addr)
+	if err != nil {
+		return err.Error()
 	}
+
+	a.sessionsMu.RLock()
+	tr := a.sessions[normalizedAddr]
+	isVoiceServer := a.voiceServer == normalizedAddr
+	a.sessionsMu.RUnlock()
+	if tr == nil {
+		return ""
+	}
+
+	if isVoiceServer {
+		if err := a.DisconnectVoice(); err != "" {
+			return err
+		}
+	}
+
+	tr.Disconnect()
+
+	a.sessionsMu.Lock()
+	delete(a.sessions, normalizedAddr)
+	if a.activeServer == normalizedAddr {
+		a.activeServer = ""
+		for nextAddr := range a.sessions {
+			a.activeServer = nextAddr
+			break
+		}
+	}
+	if a.transport == tr {
+		a.transport = nil
+		for _, nextTr := range a.sessions {
+			a.transport = nextTr
+			break
+		}
+	}
+	a.sessionsMu.Unlock()
+
+	wailsrt.EventsEmit(a.ctx, "server:disconnected", map[string]any{"server_addr": normalizedAddr})
+	return ""
+}
+
+// SetActiveServer selects the text/control context used by actions like
+// SendChannelChat, RenameServer, MoveUserToChannel, etc.
+func (a *App) SetActiveServer(addr string) string {
+	normalizedAddr, err := a.normalizedAddr(addr)
+	if err != nil {
+		return err.Error()
+	}
+	if a.getSession(normalizedAddr) == nil {
+		return "server not connected"
+	}
+	a.setActiveServer(normalizedAddr)
+	return ""
 }
 
 // DisconnectVoice stops audio capture/playback and moves the user to the
@@ -508,18 +739,22 @@ func (a *App) Disconnect() {
 // control messages continue to flow.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DisconnectVoice() string {
-	a.audio.Stop()
-	if err := a.transport.JoinChannel(0); err != nil {
-		// If the control socket is already down, voice is effectively
-		// disconnected from this client's perspective; keep this idempotent.
-		if strings.Contains(err.Error(), "control websocket not connected") {
-			log.Println("[app] disconnect voice: control websocket already closed")
-			return ""
-		}
-		return err.Error()
+	voiceAddr, voiceTr := a.voiceSession()
+	if voiceTr == nil {
+		a.connected.Store(false)
+		return ""
 	}
+
+	a.audio.Stop()
+	if err := voiceTr.JoinChannel(0); err != nil {
+		if !strings.Contains(err.Error(), "control websocket not connected") {
+			return err.Error()
+		}
+	}
+	a.connected.Store(false)
+	a.setVoiceSession("", nil)
 	a.audio.PlayNotification(SoundUserLeft)
-	log.Println("[app] disconnected from voice (session still active)")
+	log.Printf("[app] disconnected voice from %s (control session still active)", voiceAddr)
 	return ""
 }
 
@@ -527,20 +762,47 @@ func (a *App) DisconnectVoice() string {
 // Call this after DisconnectVoice to rejoin voice in a channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) ConnectVoice(channelID int) string {
-	if err := a.audio.Start(); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
 		return err.Error()
 	}
-	a.transport.StartReceiving(context.Background(), a.audio.PlaybackIn)
-	go a.sendLoop()
-	go a.adaptBitrateLoop(a.audio.Done())
-	if err := a.transport.JoinChannel(int64(channelID)); err != nil {
-		// JoinChannel failed — tear down the audio we just started so we
-		// don't leave dangling capture/playback goroutines.
-		a.audio.Stop()
+	targetAddr := a.getActiveServer()
+	if targetAddr == "" {
+		return "no active server selected"
+	}
+
+	prevAddr, prevVoiceTr := a.voiceSession()
+	if prevVoiceTr != nil && prevVoiceTr != tr {
+		_ = prevVoiceTr.JoinChannel(0)
+	}
+
+	startedAudio := false
+	if !a.connected.Load() {
+		if err := a.audio.Start(); err != nil {
+			return err.Error()
+		}
+		startedAudio = true
+	}
+
+	tr.StartReceiving(context.Background(), a.audio.PlaybackIn)
+	if startedAudio {
+		go a.sendLoop()
+		go a.adaptBitrateLoop(a.audio.Done())
+	}
+	if err := tr.JoinChannel(int64(channelID)); err != nil {
+		if startedAudio {
+			a.audio.Stop()
+		}
 		return err.Error()
 	}
+	a.setVoiceSession(targetAddr, tr)
+	a.connected.Store(true)
 	a.audio.PlayNotification(SoundConnect)
-	log.Printf("[app] reconnected voice in channel %d", channelID)
+	if prevAddr != "" && prevAddr != targetAddr {
+		log.Printf("[app] switched voice %s -> %s channel %d", prevAddr, targetAddr, channelID)
+	} else {
+		log.Printf("[app] connected voice on %s channel %d", targetAddr, channelID)
+	}
 	return ""
 }
 
@@ -552,109 +814,42 @@ func (a *App) GetMetrics() Metrics {
 	return a.cachedMetrics
 }
 
-// adaptInterval is the steady-state adaptation interval (after warmup).
+// adaptInterval is the metrics refresh interval.
 const adaptInterval = 5 * time.Second
 
-// fastStartIntervals defines the adaptation loop intervals during the initial
-// warmup phase. Shorter intervals at startup let the system converge to
-// optimal jitter depth and bitrate faster — critical on LAN where the default
-// depth=1 needs quick validation. After these intervals are exhausted, the
-// loop uses the steady-state 5-second interval.
-var fastStartIntervals = []time.Duration{
-	1 * time.Second,
-	2 * time.Second,
-	3 * time.Second,
-}
-
-const (
-	// lossAlpha is the steady-state EWMA weight for new loss samples.
-	lossAlpha = 0.3
-
-	// warmupLossAlpha is a higher EWMA weight used during the first few
-	// adaptation ticks so the smoothed loss converges faster from zero.
-	warmupLossAlpha = 0.5
-
-	// warmupTicks is the number of initial ticks that use warmupLossAlpha.
-	warmupTicks = 3
-
-	// framesPerSecond is the number of 20 ms audio frames per second.
-	framesPerSecond = 50.0
-)
-
-// adaptBitrateLoop polls transport metrics, adapts the Opus encoder bitrate
-// and jitter buffer depth based on observed network conditions and local frame
-// drops, then caches the metrics for the frontend. It exits when done is
-// closed (i.e. when audio stops).
-//
-// Fast-start: the first few ticks use shorter intervals (1s, 2s, 3s) and a
-// higher EWMA alpha so the system converges to optimal settings within ~6s
-// instead of ~15s. After warmup, it settles to a 5s steady-state cadence.
+// adaptBitrateLoop caches quality metrics for the frontend. Adaptive bitrate
+// and custom jitter-depth control were removed in favor of WebRTC defaults.
 func (a *App) adaptBitrateLoop(done <-chan struct{}) {
-	var smoothedLoss float64
-	var tick int
-
-	// Start with the first fast-start interval.
-	interval := fastStartIntervals[0]
-	timer := time.NewTimer(interval)
-	defer timer.Stop()
+	ticker := time.NewTicker(adaptInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-done:
 			return
-		case <-timer.C:
-			m := a.transport.GetMetrics()
+		case <-ticker.C:
+			_, voiceTr := a.voiceSession()
+			if voiceTr == nil {
+				continue
+			}
+			m := voiceTr.GetMetrics()
 
 			// Collect local frame drops since the last tick.
 			captureDrops, playbackDropsLocal := a.audio.DroppedFrames()
 			m.CaptureDropped = captureDrops
 			m.PlaybackDropped += playbackDropsLocal
 
-			// Use higher EWMA alpha during warmup for faster convergence.
-			alpha := lossAlpha
-			if tick < warmupTicks {
-				alpha = warmupLossAlpha
-			}
-			smoothedLoss = adapt.SmoothLoss(smoothedLoss, m.PacketLoss, alpha)
-
-			// Treat capture drops as send-side loss. Scale by actual interval.
-			framesInInterval := interval.Seconds() * framesPerSecond
-			captureLoss := float64(captureDrops) / framesInInterval
-			effectiveLoss := smoothedLoss + captureLoss
-
-			currentKbps := a.audio.CurrentBitrate()
-			nextKbps := adapt.NextBitrate(currentKbps, effectiveLoss, m.RTTMs)
-			if nextKbps != currentKbps {
-				log.Printf("[app] adapting bitrate %d→%d kbps (loss=%.1f%% smoothed=%.1f%% capDrops=%d rtt=%.0fms)",
-					currentKbps, nextKbps, m.PacketLoss*100, smoothedLoss*100, captureDrops, m.RTTMs)
-				a.audio.SetBitrate(nextKbps)
-			}
-			a.audio.SetPacketLoss(int(smoothedLoss * 100))
-
-			// Adapt jitter buffer depth based on measured jitter and loss.
-			targetDepth := adapt.TargetJitterDepth(m.JitterMs, smoothedLoss)
-			a.audio.SetJitterDepth(targetDepth)
-
 			// Compute quality level including local drops.
 			totalDrops := captureDrops + m.PlaybackDropped
-			dropRate := float64(totalDrops) / interval.Seconds()
+			dropRate := float64(totalDrops) / adaptInterval.Seconds()
 
-			m.OpusTargetKbps = nextKbps
-			m.QualityLevel = qualityLevel(smoothedLoss, m.RTTMs, m.JitterMs, dropRate)
+			m.OpusTargetKbps = a.audio.CurrentBitrate()
+			m.QualityLevel = qualityLevel(m.PacketLoss, m.RTTMs, m.JitterMs, dropRate)
 			a.metricsMu.Lock()
 			a.cachedMetrics = m
 			a.metricsMu.Unlock()
 
 			wailsrt.EventsEmit(a.ctx, "voice:quality", m)
-
-			// Advance to next interval.
-			tick++
-			if tick < len(fastStartIntervals) {
-				interval = fastStartIntervals[tick]
-			} else {
-				interval = adaptInterval
-			}
-			timer.Reset(interval)
 		}
 	}
 }
@@ -697,17 +892,29 @@ func (a *App) IsConnected() bool {
 // MuteUser suppresses incoming audio from the given remote user.
 // id is the server-assigned numeric user ID.
 func (a *App) MuteUser(id int) {
-	a.transport.MuteUser(uint16(id))
+	tr := a.preferredAudioTransport()
+	if tr == nil {
+		return
+	}
+	tr.MuteUser(uint16(id))
 }
 
 // UnmuteUser re-enables incoming audio from the given remote user.
 func (a *App) UnmuteUser(id int) {
-	a.transport.UnmuteUser(uint16(id))
+	tr := a.preferredAudioTransport()
+	if tr == nil {
+		return
+	}
+	tr.UnmuteUser(uint16(id))
 }
 
 // GetMutedUsers returns the IDs of all currently muted remote users.
 func (a *App) GetMutedUsers() []int {
-	ids := a.transport.MutedUsers()
+	tr := a.preferredAudioTransport()
+	if tr == nil {
+		return nil
+	}
+	ids := tr.MutedUsers()
 	out := make([]int, len(ids))
 	for i, id := range ids {
 		out[i] = int(id)
@@ -718,12 +925,20 @@ func (a *App) GetMutedUsers() []int {
 // SetUserVolume sets the local playback volume for a specific remote user.
 // volume is a float64 in [0.0, 2.0] representing 0%-200%.
 func (a *App) SetUserVolume(userID int, volume float64) {
-	a.transport.SetUserVolume(uint16(userID), volume)
+	tr := a.preferredAudioTransport()
+	if tr == nil {
+		return
+	}
+	tr.SetUserVolume(uint16(userID), volume)
 }
 
 // GetUserVolume returns the current local playback volume for a specific remote user.
 func (a *App) GetUserVolume(userID int) float64 {
-	return a.transport.GetUserVolume(uint16(userID))
+	tr := a.preferredAudioTransport()
+	if tr == nil {
+		return 1.0
+	}
+	return tr.GetUserVolume(uint16(userID))
 }
 
 // RenameUser updates the current user's display name on the server so that
@@ -731,8 +946,16 @@ func (a *App) GetUserVolume(userID int) float64 {
 // user_renamed broadcast.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RenameUser(name string) string {
-	if err := a.transport.RenameUser(name); err != nil {
-		return err.Error()
+	a.sessionsMu.RLock()
+	sessions := make([]Transporter, 0, len(a.sessions))
+	for _, tr := range a.sessions {
+		sessions = append(sessions, tr)
+	}
+	a.sessionsMu.RUnlock()
+	for _, tr := range sessions {
+		if err := tr.RenameUser(name); err != nil {
+			return err.Error()
+		}
 	}
 	return ""
 }
@@ -741,7 +964,11 @@ func (a *App) RenameUser(name string) string {
 // room owner; the server enforces the check and broadcasts the update.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RenameServer(name string) string {
-	if err := a.transport.RenameServer(name); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.RenameServer(name); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -751,7 +978,11 @@ func (a *App) RenameServer(name string) string {
 // caller is the room owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) KickUser(id int) string {
-	if err := a.transport.KickUser(uint16(id)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.KickUser(uint16(id)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -761,7 +992,11 @@ func (a *App) KickUser(id int) string {
 // Pass id=0 to leave all channels (return to lobby).
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) JoinChannel(id int) string {
-	if err := a.transport.JoinChannel(int64(id)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.JoinChannel(int64(id)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -770,7 +1005,11 @@ func (a *App) JoinChannel(id int) string {
 // SendChannelChat sends a channel-scoped chat message to all users in that channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendChannelChat(channelID int, message string) string {
-	if err := a.transport.SendChannelChat(int64(channelID), message); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.SendChannelChat(int64(channelID), message); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -780,7 +1019,11 @@ func (a *App) SendChannelChat(channelID int, message string) string {
 // Only the original sender is allowed to edit; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) EditMessage(msgID int, message string) string {
-	if err := a.transport.EditMessage(uint64(msgID), message); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.EditMessage(uint64(msgID), message); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -790,7 +1033,11 @@ func (a *App) EditMessage(msgID int, message string) string {
 // The original sender and the room owner are allowed to delete.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DeleteMessage(msgID int) string {
-	if err := a.transport.DeleteMessage(uint64(msgID)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.DeleteMessage(uint64(msgID)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -799,7 +1046,11 @@ func (a *App) DeleteMessage(msgID int) string {
 // AddReaction adds an emoji reaction to a message.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) AddReaction(msgID int, emoji string) string {
-	if err := a.transport.AddReaction(uint64(msgID), emoji); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.AddReaction(uint64(msgID), emoji); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -808,7 +1059,11 @@ func (a *App) AddReaction(msgID int, emoji string) string {
 // RemoveReaction removes an emoji reaction from a message.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RemoveReaction(msgID int, emoji string) string {
-	if err := a.transport.RemoveReaction(uint64(msgID), emoji); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.RemoveReaction(uint64(msgID), emoji); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -817,7 +1072,11 @@ func (a *App) RemoveReaction(msgID int, emoji string) string {
 // SendTyping notifies the server that the user is typing in a channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendTyping(channelID int) string {
-	if err := a.transport.SendTyping(int64(channelID)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.SendTyping(int64(channelID)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -826,19 +1085,35 @@ func (a *App) SendTyping(channelID int) string {
 // SendChat sends a chat message to the server for fan-out to all participants.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendChat(message string) string {
-	if err := a.transport.SendChat(message); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.SendChat(message); err != nil {
 		return err.Error()
 	}
 	return ""
 }
 
 // fileURL constructs a download URL for the given file ID using the API base URL.
-func (a *App) fileURL(fileID int64) string {
-	base := a.transport.APIBaseURL()
+func fileURLForTransport(tr Transporter, fileID int64) string {
+	if tr == nil {
+		return ""
+	}
+	base := tr.APIBaseURL()
 	if base == "" {
 		return ""
 	}
 	return fmt.Sprintf("%s/api/files/%d", base, fileID)
+}
+
+// fileURL constructs a download URL for the given file ID using the active server API base URL.
+func (a *App) fileURL(fileID int64) string {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return ""
+	}
+	return fileURLForTransport(tr, fileID)
 }
 
 // UploadFile opens a native file dialog and uploads the selected file to the
@@ -879,7 +1154,11 @@ type uploadResponse struct {
 const maxFileSize = 10 * 1024 * 1024 // 10 MB
 
 func (a *App) uploadFilePath(channelID int64, path string) string {
-	base := a.transport.APIBaseURL()
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	base := tr.APIBaseURL()
 	if base == "" {
 		return "server API not available"
 	}
@@ -928,7 +1207,7 @@ func (a *App) uploadFilePath(channelID int64, path string) string {
 	}
 
 	// Send a chat message with the file metadata.
-	if err := a.transport.SendFileChat(channelID, ur.ID, ur.Size, ur.Name, ""); err != nil {
+	if err := tr.SendFileChat(channelID, ur.ID, ur.Size, ur.Name, ""); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -937,7 +1216,11 @@ func (a *App) uploadFilePath(channelID int64, path string) string {
 // CreateChannel asks the server to create a new channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) CreateChannel(name string) string {
-	if err := a.transport.CreateChannel(name); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.CreateChannel(name); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -946,7 +1229,11 @@ func (a *App) CreateChannel(name string) string {
 // RenameChannel asks the server to rename a channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RenameChannel(id int, name string) string {
-	if err := a.transport.RenameChannel(int64(id), name); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.RenameChannel(int64(id), name); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -955,7 +1242,11 @@ func (a *App) RenameChannel(id int, name string) string {
 // DeleteChannel asks the server to delete a channel.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) DeleteChannel(id int) string {
-	if err := a.transport.DeleteChannel(int64(id)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.DeleteChannel(int64(id)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -964,7 +1255,11 @@ func (a *App) DeleteChannel(id int) string {
 // StartVideo notifies all peers that this user has started video.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartVideo() string {
-	if err := a.transport.SendVideoState(true, false); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.SendVideoState(true, false); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -973,7 +1268,11 @@ func (a *App) StartVideo() string {
 // StopVideo notifies all peers that this user has stopped video.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StopVideo() string {
-	if err := a.transport.SendVideoState(false, false); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.SendVideoState(false, false); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -982,7 +1281,11 @@ func (a *App) StopVideo() string {
 // StartScreenShare notifies all peers that this user has started screen sharing.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartScreenShare() string {
-	if err := a.transport.SendVideoState(true, true); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.SendVideoState(true, true); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -991,7 +1294,11 @@ func (a *App) StartScreenShare() string {
 // StopScreenShare notifies all peers that this user has stopped screen sharing.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StopScreenShare() string {
-	if err := a.transport.SendVideoState(false, false); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.SendVideoState(false, false); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -1001,7 +1308,11 @@ func (a *App) StopScreenShare() string {
 // Only succeeds if the caller is the room owner; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) MoveUserToChannel(userID int, channelID int) string {
-	if err := a.transport.MoveUser(uint16(userID), int64(channelID)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.MoveUser(uint16(userID), int64(channelID)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -1026,7 +1337,11 @@ func (a *App) sendLoop() {
 		case <-done:
 			return
 		case data := <-a.audio.CaptureOut:
-			if err := a.transport.SendAudio(data); err != nil {
+			_, voiceTr := a.voiceSession()
+			if voiceTr == nil {
+				continue
+			}
+			if err := voiceTr.SendAudio(data); err != nil {
 				consecutiveErrors++
 				if consecutiveErrors == 1 {
 					log.Printf("[app] send audio error: %v", err)
@@ -1034,8 +1349,8 @@ func (a *App) sendLoop() {
 					log.Printf("[app] send audio: %d consecutive errors", consecutiveErrors)
 				}
 				if consecutiveErrors >= sendFailureThreshold {
-					log.Printf("[app] send audio: %d consecutive errors, disconnecting", consecutiveErrors)
-					a.transport.Disconnect()
+					log.Printf("[app] send audio: %d consecutive errors, disconnecting voice", consecutiveErrors)
+					_ = a.DisconnectVoice()
 					return
 				}
 				continue
@@ -1049,7 +1364,11 @@ func (a *App) sendLoop() {
 // Only the room owner can start recording; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StartRecording(channelID int) string {
-	if err := a.transport.StartRecording(int64(channelID)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.StartRecording(int64(channelID)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -1059,7 +1378,11 @@ func (a *App) StartRecording(channelID int) string {
 // Only the room owner can stop recording; the server enforces the check.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) StopRecording(channelID int) string {
-	if err := a.transport.StopRecording(int64(channelID)); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.StopRecording(int64(channelID)); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -1069,7 +1392,11 @@ func (a *App) StopRecording(channelID int) string {
 // simulcast quality layer. quality must be "high", "medium", or "low".
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) RequestVideoQuality(targetUserID int, quality string) string {
-	if err := a.transport.RequestVideoQuality(uint16(targetUserID), quality); err != nil {
+	tr, err := a.requireActiveTransport()
+	if err != nil {
+		return err.Error()
+	}
+	if err := tr.RequestVideoQuality(uint16(targetUserID), quality); err != nil {
 		return err.Error()
 	}
 	return ""

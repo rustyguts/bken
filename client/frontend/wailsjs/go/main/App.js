@@ -34,6 +34,10 @@ export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }
 
+export function DisconnectServer(arg1) {
+  return window['go']['main']['App']['DisconnectServer'](arg1);
+}
+
 export function DisconnectVoice() {
   return window['go']['main']['App']['DisconnectVoice']();
 }
@@ -158,6 +162,10 @@ export function SetAGCLevel(arg1) {
   return window['go']['main']['App']['SetAGCLevel'](arg1);
 }
 
+export function SetActiveServer(arg1) {
+  return window['go']['main']['App']['SetActiveServer'](arg1);
+}
+
 export function SetDeafened(arg1) {
   return window['go']['main']['App']['SetDeafened'](arg1);
 }
@@ -168,14 +176,6 @@ export function SetInputDevice(arg1) {
 
 export function SetMuted(arg1) {
   return window['go']['main']['App']['SetMuted'](arg1);
-}
-
-export function SetNoiseGate(arg1) {
-  return window['go']['main']['App']['SetNoiseGate'](arg1);
-}
-
-export function SetNoiseGateThreshold(arg1) {
-  return window['go']['main']['App']['SetNoiseGateThreshold'](arg1);
 }
 
 export function SetNoiseSuppression(arg1) {
@@ -200,14 +200,6 @@ export function SetPTTMode(arg1) {
 
 export function SetUserVolume(arg1, arg2) {
   return window['go']['main']['App']['SetUserVolume'](arg1, arg2);
-}
-
-export function SetVAD(arg1) {
-  return window['go']['main']['App']['SetVAD'](arg1);
-}
-
-export function SetVADThreshold(arg1) {
-  return window['go']['main']['App']['SetVADThreshold'](arg1);
 }
 
 export function SetVolume(arg1) {
