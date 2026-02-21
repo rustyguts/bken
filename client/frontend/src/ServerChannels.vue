@@ -4,7 +4,7 @@ import type { Channel, User } from './types'
 import UserProfilePopup from './UserProfilePopup.vue'
 import { SetUserVolume, GetUserVolume, StartRecording, StopRecording, RenameServer } from './config'
 import { BKEN_SCHEME } from './constants'
-import { Volume2, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor } from 'lucide-vue-next'
+import { Volume2, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor, PhoneOff } from 'lucide-vue-next'
 
 const props = defineProps<{
   channels: Channel[]
@@ -35,6 +35,7 @@ const emit = defineEmits<{
   kickUser: [userID: number]
   'video-toggle': []
   'screen-share-toggle': []
+  'leave-voice': []
 }>()
 
 const myChannelId = computed(() => props.userChannels[props.myId] ?? 0)
@@ -531,6 +532,12 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
           <span class="text-xs">{{ screenSharing ? 'Sharing On' : 'Share Screen' }}</span>
         </button>
       </div>
+    </div>
+
+    <div v-if="voiceConnected" class="border-t border-error/20 p-2 shrink-0">
+      <button class="btn btn-error btn-sm w-full gap-2" @click="emit('leave-voice')">
+        <PhoneOff class="w-4 h-4" aria-hidden="true" /> Leave Voice
+      </button>
     </div>
 
     <!-- Context menu (owner right-click on channel) -->

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Connect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
-import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare, SetActiveServer, DisconnectServer } from './config'
+import { Connect, Disconnect, DisconnectVoice, GetAutoLogin } from '../wailsjs/go/main/App'
+import { ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare } from './config'
+import type { ServerEntry } from './config'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import ChannelView from './ChannelView.vue'
 import SettingsPage from './SettingsPage.vue'
@@ -44,12 +45,11 @@ const showShortcutsHelp = ref(false)
 const messageDensity = ref<'compact' | 'default' | 'comfortable'>('default')
 const showSystemMessages = ref(true)
 const voiceConnected = ref(false)
-const voiceServerAddr = ref('')
 const activeChannelId = ref(0)
 
-const activeServerAddr = ref('')
-const serverStates = ref<Record<string, ServerState>>({})
-const connectedServers = ref<string[]>([])
+const serverAddr = ref('')
+const serverState = ref<ServerState>(emptyServerState())
+const savedServers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:8080' }])
 let chatIdCounter = 0
 let typingCleanupInterval: ReturnType<typeof setInterval> | null = null
 
@@ -88,68 +88,23 @@ function normaliseAddr(addr: string): string {
   return cleaned.startsWith(BKEN_SCHEME) ? cleaned.slice(BKEN_SCHEME.length) : cleaned
 }
 
-function ensureServer(addr: string): ServerState {
-  const key = normaliseAddr(addr)
-  if (!key) return emptyServerState()
-  if (!serverStates.value[key]) {
-    serverStates.value = { ...serverStates.value, [key]: emptyServerState() }
-  }
-  return serverStates.value[key]
-}
-
-function withServer(addr: string, updater: (state: ServerState) => void): void {
-  const key = normaliseAddr(addr)
-  if (!key) return
-  const state = ensureServer(key)
-  updater(state)
-  serverStates.value = { ...serverStates.value, [key]: { ...state } }
-}
-
-function eventServerAddr(data: any): string {
-  const raw = typeof data === 'object' && data && 'server_addr' in data ? String(data.server_addr || '') : activeServerAddr.value
-  return normaliseAddr(raw)
-}
-
-function markConnected(addr: string, connected: boolean): void {
-  const key = normaliseAddr(addr)
-  if (!key) return
-  withServer(key, state => {
-    state.connected = connected
-    if (!connected) state.connectError = state.connectError || 'Disconnected'
-  })
-  const next = new Set(connectedServers.value)
-  if (connected) next.add(key)
-  else next.delete(key)
-  connectedServers.value = [...next]
-}
-
-const activeState = computed(() => {
-  const key = normaliseAddr(activeServerAddr.value)
-  if (!key) return emptyServerState()
-  return serverStates.value[key] ?? emptyServerState()
-})
-
-const connected = computed(() => activeState.value.connected)
-const connectedAddr = computed(() => normaliseAddr(activeServerAddr.value))
-const users = computed(() => activeState.value.users)
-const chatMessages = computed(() => activeState.value.chatMessages)
-const serverName = computed(() => activeState.value.serverName)
-const ownerID = computed(() => activeState.value.ownerID)
-const myID = computed(() => activeState.value.myID)
-const channels = computed(() => activeState.value.channels)
-const userChannels = computed(() => activeState.value.userChannels)
-const unreadCounts = computed(() => activeState.value.unreadCounts)
-const videoStates = computed(() => activeState.value.videoStates)
-const recordingChannels = computed(() => activeState.value.recordingChannels)
-const typingUsers = computed(() => activeState.value.typingUsers)
-const connectError = computed(() => activeState.value.connectError)
+const connected = computed(() => serverState.value.connected)
+const connectedAddr = computed(() => serverAddr.value)
+const users = computed(() => serverState.value.users)
+const chatMessages = computed(() => serverState.value.chatMessages)
+const serverName = computed(() => serverState.value.serverName)
+const ownerID = computed(() => serverState.value.ownerID)
+const myID = computed(() => serverState.value.myID)
+const channels = computed(() => serverState.value.channels)
+const userChannels = computed(() => serverState.value.userChannels)
+const unreadCounts = computed(() => serverState.value.unreadCounts)
+const videoStates = computed(() => serverState.value.videoStates)
+const recordingChannels = computed(() => serverState.value.recordingChannels)
+const typingUsers = computed(() => serverState.value.typingUsers)
+const connectError = computed(() => serverState.value.connectError)
 
 function setActiveError(message: string): void {
-  const addr = connectedAddr.value
-  if (!addr) return
-  withServer(addr, state => {
-    state.connectError = message
-  })
+  serverState.value = { ...serverState.value, connectError: message }
 }
 
 function parseRoute(hash: string): AppRoute {
@@ -240,17 +195,11 @@ function setLastConnectedAddr(addr: string): void {
   }
 }
 
-async function ensureActiveServerContext(): Promise<boolean> {
-  const addr = connectedAddr.value
-  if (!addr) {
-    return false
-  }
-  const err = await SetActiveServer(addr)
-  if (err) {
-    setActiveError(err)
-    return false
-  }
-  return true
+/** Helper to update serverState fields. */
+function updateState(updater: (state: ServerState) => void): void {
+  const s = { ...serverState.value }
+  updater(s)
+  serverState.value = s
 }
 
 async function connectToServer(addr: string, username: string): Promise<boolean> {
@@ -260,27 +209,19 @@ async function connectToServer(addr: string, username: string): Promise<boolean>
     return false
   }
   if (!user) {
-    withServer(targetAddr, state => { state.connectError = 'Set a global username first (right-click your name in User Controls).' })
+    setActiveError('Set a global username first (right-click your name in User Controls).')
     return false
   }
-
-  ensureServer(targetAddr)
-  activeServerAddr.value = targetAddr
 
   const err = await Connect(targetAddr, user)
   if (err) {
-    withServer(targetAddr, state => {
-      state.connectError = err
-      state.connected = false
-    })
-    markConnected(targetAddr, false)
+    serverState.value = { ...serverState.value, connectError: err, connected: false }
     return false
   }
 
-  markConnected(targetAddr, true)
-  withServer(targetAddr, state => { state.connectError = '' })
+  serverAddr.value = targetAddr
+  serverState.value = { ...serverState.value, connected: true, connectError: '' }
   setLastConnectedAddr(targetAddr)
-  await SetActiveServer(targetAddr)
   startupAddrHint.value = ''
   return true
 }
@@ -292,29 +233,23 @@ async function handleConnect(payload: ConnectPayload): Promise<void> {
 async function handleSelectServer(addr: string): Promise<void> {
   const targetAddr = normaliseAddr(addr)
   if (!targetAddr) return
-  if (targetAddr === connectedAddr.value) return
-  ensureServer(targetAddr)
-  const err = await SetActiveServer(targetAddr)
-  if (err) {
-    if (connectedAddr.value) {
-      setActiveError(err)
-    } else {
-      withServer(targetAddr, state => { state.connectError = err })
-    }
-    return
-  }
-  activeServerAddr.value = targetAddr
+  if (targetAddr === serverAddr.value && connected.value) return
+  await connectToServer(targetAddr, globalUsername.value)
 }
 
 async function handleActivateChannel(payload: { addr: string; channelID: number }): Promise<void> {
   if (joiningVoice.value) return
   joiningVoice.value = true
   try {
-    const ok = await connectToServer(payload.addr, globalUsername.value)
-    if (!ok) return
-    await SetActiveServer(normaliseAddr(payload.addr))
+    const targetAddr = normaliseAddr(payload.addr)
+    // If not connected or connecting to a different server, connect first
+    if (!connected.value || targetAddr !== serverAddr.value) {
+      const ok = await connectToServer(targetAddr, globalUsername.value)
+      if (!ok) return
+    }
 
-    if (voiceConnected.value && voiceServerAddr.value === normaliseAddr(payload.addr)) {
+    if (voiceConnected.value) {
+      // Already in voice — just switch channel
       const err = await JoinChannel(payload.channelID)
       if (err) {
         setActiveError(err)
@@ -327,7 +262,6 @@ async function handleActivateChannel(payload: { addr: string; channelID: number 
         return
       }
       voiceConnected.value = true
-      voiceServerAddr.value = normaliseAddr(payload.addr)
     }
     setActiveError('')
   } finally {
@@ -348,66 +282,64 @@ async function handleRenameGlobalUsername(name: string): Promise<void> {
 }
 
 async function handleEditMessage(msgID: number, message: string): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await EditMessage(msgID, message)
 }
 
 async function handleDeleteMessage(msgID: number): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await DeleteMessage(msgID)
 }
 
 async function handleAddReaction(msgID: number, emoji: string): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await AddReaction(msgID, emoji)
 }
 
 async function handleRemoveReaction(msgID: number, emoji: string): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await RemoveReaction(msgID, emoji)
 }
 
 async function handleSendChat(message: string): Promise<void> {
   activeChannelId.value = 0
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await SendChat(message)
 }
 
 async function handleSendChannelChat(channelID: number, message: string): Promise<void> {
   activeChannelId.value = channelID
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await SendChannelChat(channelID, message)
 }
 
 async function handleCreateChannel(name: string): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await CreateChannel(name)
 }
 
 async function handleRenameChannel(channelID: number, name: string): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await RenameChannel(channelID, name)
 }
 
 async function handleDeleteChannel(channelID: number): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await DeleteChannel(channelID)
 }
 
 async function handleMoveUser(userID: number, channelID: number): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await MoveUserToChannel(userID, channelID)
 }
 
 async function handleKickUser(userID: number): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await KickUser(userID)
 }
 
 function handleViewChannel(channelID: number): void {
-  const addr = connectedAddr.value
-  if (!addr) return
-  withServer(addr, state => {
+  updateState(state => {
     state.viewedChannelId = channelID
     if (state.unreadCounts[channelID]) {
       const { [channelID]: _, ...rest } = state.unreadCounts
@@ -418,57 +350,54 @@ function handleViewChannel(channelID: number): void {
 
 async function handleUploadFile(channelID: number): Promise<void> {
   activeChannelId.value = channelID
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   const err = await UploadFile(channelID)
   if (err) setActiveError(err)
 }
 
 async function handleUploadFileFromPath(channelID: number, path: string): Promise<void> {
   activeChannelId.value = channelID
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   const err = await UploadFileFromPath(channelID, path)
   if (err) setActiveError(err)
 }
 
 async function handleStartVideo(): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await StartVideo()
 }
 
 async function handleStopVideo(): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await StopVideo()
 }
 
 async function handleStartScreenShare(): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await StartScreenShare()
 }
 
 async function handleStopScreenShare(): Promise<void> {
-  if (!await ensureActiveServerContext()) return
+  if (!connected.value) return
   await StopScreenShare()
 }
 
 async function handleDisconnectVoice(): Promise<void> {
   if (disconnectingVoice.value || !voiceConnected.value) return
   disconnectingVoice.value = true
-  const priorVoiceServer = voiceServerAddr.value
   try {
     const err = await DisconnectVoice()
     if (err) {
       setActiveError(err)
       return
     }
-    if (priorVoiceServer) {
-      withServer(priorVoiceServer, state => {
-        const me = state.myID
-        if (!me) return
+    updateState(state => {
+      const me = state.myID
+      if (me) {
         state.userChannels = { ...state.userChannels, [me]: 0 }
-      })
-    }
+      }
+    })
     voiceConnected.value = false
-    voiceServerAddr.value = ''
     clearSpeaking()
   } finally {
     disconnectingVoice.value = false
@@ -476,25 +405,12 @@ async function handleDisconnectVoice(): Promise<void> {
 }
 
 async function handleDisconnect(): Promise<void> {
-  const addr = connectedAddr.value
-  if (!addr) return
-  const err = await DisconnectServer(addr)
-  if (err) {
-    setActiveError(err)
-    return
-  }
-  markConnected(addr, false)
-  if (voiceServerAddr.value === addr) {
-    voiceConnected.value = false
-    voiceServerAddr.value = ''
-    clearSpeaking()
-  }
-  withServer(addr, state => {
-    state.connected = false
-  })
-  const fallback = connectedServers.value[0] ?? Object.keys(serverStates.value)[0] ?? ''
-  activeServerAddr.value = fallback
-  if (fallback) await SetActiveServer(fallback)
+  if (!serverAddr.value) return
+  await Disconnect()
+  voiceConnected.value = false
+  clearSpeaking()
+  serverAddr.value = ''
+  serverState.value = emptyServerState()
 }
 
 async function handleCancelReconnect(): Promise<void> {
@@ -505,42 +421,25 @@ onMounted(async () => {
   syncRouteFromHash()
   window.addEventListener('hashchange', syncRouteFromHash)
 
-  EventsOn('server:connected', (data: { server_addr: string }) => {
-    const addr = normaliseAddr(data?.server_addr || '')
-    if (!addr) return
-    markConnected(addr, true)
+  EventsOn('server:connected', (_data: { server_addr: string }) => {
+    serverState.value = { ...serverState.value, connected: true }
   })
 
   EventsOn('server:disconnected', (data: { server_addr: string; reason?: string }) => {
-    const addr = normaliseAddr(data?.server_addr || '')
-    if (!addr) return
-    markConnected(addr, false)
-    if (data?.reason) {
-      withServer(addr, state => { state.connectError = data.reason || '' })
-    }
-    if (voiceServerAddr.value === addr) {
-      voiceConnected.value = false
-      voiceServerAddr.value = ''
-      clearSpeaking()
-    }
+    serverState.value = { ...serverState.value, connected: false, connectError: data?.reason || '' }
+    voiceConnected.value = false
+    clearSpeaking()
   })
 
   EventsOn('connection:lost', (data: { server_addr: string; reason: string } | null) => {
-    const addr = normaliseAddr(data?.server_addr || '')
-    if (!addr) return
-    markConnected(addr, false)
-    withServer(addr, state => { state.connectError = data?.reason || 'Connection lost' })
-    if (voiceServerAddr.value === addr) {
-      voiceConnected.value = false
-      voiceServerAddr.value = ''
-      clearSpeaking()
-    }
+    serverState.value = { ...serverState.value, connected: false, connectError: data?.reason || 'Connection lost' }
+    voiceConnected.value = false
+    clearSpeaking()
   })
 
   EventsOn('user:list', (data: any) => {
-    const addr = eventServerAddr(data)
     const list = Array.isArray(data) ? data as User[] : (data?.users ?? []) as User[]
-    withServer(addr, state => {
+    updateState(state => {
       state.users = list
       const map: Record<number, number> = {}
       for (const u of list) map[u.id] = u.channel_id ?? 0
@@ -553,8 +452,7 @@ onMounted(async () => {
   })
 
   EventsOn('user:joined', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       state.users = [...state.users, { id: data.id, username: data.username }]
       state.userChannels = { ...state.userChannels, [data.id]: 0 }
       const first = state.channels.length > 0 ? state.channels[0].id : 0
@@ -566,8 +464,7 @@ onMounted(async () => {
   })
 
   EventsOn('user:left', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const leftUser = state.users.find(u => u.id === data.id)
       state.users = state.users.filter(u => u.id !== data.id)
       const { [data.id]: _, ...rest } = state.userChannels
@@ -587,16 +484,14 @@ onMounted(async () => {
   })
 
   EventsOn('user:renamed', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       state.users = state.users.map(u => u.id === data.id ? { ...u, username: data.username } : u)
     })
   })
 
   EventsOn('channel:list', (data: any) => {
-    const addr = eventServerAddr(data)
     const list = Array.isArray(data) ? data as Channel[] : (data?.channels ?? []) as Channel[]
-    withServer(addr, state => {
+    updateState(state => {
       state.channels = list
       if (!list.some(ch => ch.id === state.viewedChannelId)) {
         state.viewedChannelId = list.length > 0 ? list[0].id : 0
@@ -605,15 +500,13 @@ onMounted(async () => {
   })
 
   EventsOn('channel:user_moved', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       state.userChannels = { ...state.userChannels, [data.user_id]: data.channel_id }
     })
   })
 
   EventsOn('chat:message', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const fallback = state.channels.length > 0 ? state.channels[0].id : 0
       const channelId = data.channel_id ?? fallback
       state.chatMessages = [...state.chatMessages, {
@@ -643,8 +536,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:link_preview', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const idx = state.chatMessages.findIndex(m => m.msgId === data.msg_id)
       if (idx === -1) return
       const updated = [...state.chatMessages]
@@ -663,8 +555,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:message_edited', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const idx = state.chatMessages.findIndex(m => m.msgId === data.msg_id)
       if (idx === -1) return
       const updated = [...state.chatMessages]
@@ -674,8 +565,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:message_deleted', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const idx = state.chatMessages.findIndex(m => m.msgId === data.msg_id)
       if (idx === -1) return
       const updated = [...state.chatMessages]
@@ -685,8 +575,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:reaction_added', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const idx = state.chatMessages.findIndex(m => m.msgId === data.msg_id)
       if (idx === -1) return
       const updated = [...state.chatMessages]
@@ -710,8 +599,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:reaction_removed', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const idx = state.chatMessages.findIndex(m => m.msgId === data.msg_id)
       if (idx === -1) return
       const updated = [...state.chatMessages]
@@ -735,8 +623,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:user_typing', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       if (data.id === state.myID) return
       state.typingUsers = {
         ...state.typingUsers,
@@ -746,8 +633,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:message_pinned', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const idx = state.chatMessages.findIndex(m => m.msgId === data.msg_id)
       if (idx === -1) return
       const updated = [...state.chatMessages]
@@ -757,8 +643,7 @@ onMounted(async () => {
   })
 
   EventsOn('chat:message_unpinned', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const idx = state.chatMessages.findIndex(m => m.msgId === data.msg_id)
       if (idx === -1) return
       const updated = [...state.chatMessages]
@@ -768,18 +653,15 @@ onMounted(async () => {
   })
 
   EventsOn('server:info', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => { state.serverName = data.name })
+    updateState(state => { state.serverName = data.name })
   })
 
   EventsOn('channel:owner', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => { state.ownerID = data.owner_id })
+    updateState(state => { state.ownerID = data.owner_id })
   })
 
   EventsOn('user:me', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => { state.myID = data.id })
+    updateState(state => { state.myID = data.id })
   })
 
   EventsOn('audio:speaking', (data: any) => {
@@ -787,8 +669,7 @@ onMounted(async () => {
   })
 
   EventsOn('video:state', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       if (data.video_active) {
         state.videoStates = { ...state.videoStates, [data.id]: { active: true, screenShare: data.screen_share } }
       } else {
@@ -799,8 +680,7 @@ onMounted(async () => {
   })
 
   EventsOn('video:layers', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       const existing = state.videoStates[data.id]
       if (!existing) return
       state.videoStates = { ...state.videoStates, [data.id]: { ...existing, layers: data.layers } }
@@ -808,8 +688,7 @@ onMounted(async () => {
   })
 
   EventsOn('recording:state', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
+    updateState(state => {
       if (data.recording) {
         state.recordingChannels = { ...state.recordingChannels, [data.channel_id]: { recording: true, startedBy: data.started_by } }
       } else {
@@ -819,23 +698,14 @@ onMounted(async () => {
     })
   })
 
-  EventsOn('connection:kicked', (data: any) => {
-    const addr = eventServerAddr(data)
-    withServer(addr, state => {
-      state.connectError = 'Disconnected by server owner'
-      state.connected = false
-    })
-    markConnected(addr, false)
-    if (voiceServerAddr.value === addr) {
-      voiceConnected.value = false
-      voiceServerAddr.value = ''
-      clearSpeaking()
-    }
+  EventsOn('connection:kicked', (_data: any) => {
+    serverState.value = { ...serverState.value, connectError: 'Disconnected by server owner', connected: false }
+    voiceConnected.value = false
+    clearSpeaking()
   })
 
   EventsOn('file:dropped', async (data: { paths: string[] }) => {
     if (!connected.value || !data.paths?.length) return
-    if (!await ensureActiveServerContext()) return
     for (const path of data.paths) {
       const err = await UploadFileFromPath(activeChannelId.value, path)
       if (err) {
@@ -847,15 +717,12 @@ onMounted(async () => {
 
   typingCleanupInterval = setInterval(() => {
     const now = Date.now()
-    const next: Record<string, ServerState> = { ...serverStates.value }
-    for (const [addr, state] of Object.entries(next)) {
-      const typing: typeof state.typingUsers = {}
-      for (const [id, entry] of Object.entries(state.typingUsers)) {
-        if (entry.expiresAt > now) typing[Number(id)] = entry
-      }
-      next[addr] = { ...state, typingUsers: typing }
+    const s = serverState.value
+    const typing: typeof s.typingUsers = {}
+    for (const [id, entry] of Object.entries(s.typingUsers)) {
+      if (entry.expiresAt > now) typing[Number(id)] = entry
     }
-    serverStates.value = next
+    serverState.value = { ...s, typingUsers: typing }
   }, 1000)
 
   window.addEventListener('keydown', handleGlobalShortcuts)
@@ -882,6 +749,9 @@ onMounted(async () => {
   pttKeyCode.value = cfg.ptt_key || 'Backquote'
   messageDensity.value = cfg.message_density ?? 'default'
   showSystemMessages.value = cfg.show_system_messages ?? true
+  if (cfg.servers?.length) {
+    savedServers.value = cfg.servers
+  }
 
   if (!globalUsername.value) {
     const hex = Array.from(crypto.getRandomValues(new Uint8Array(2)))
@@ -957,7 +827,6 @@ onBeforeUnmount(() => {
           :voice-connected="voiceConnected"
           :reconnecting="reconnecting"
           :connected-addr="connectedAddr"
-          :connected-addrs="connectedServers"
           :connect-error="connectError"
           :startup-addr="startupAddrHint"
           :global-username="globalUsername"
@@ -975,6 +844,7 @@ onBeforeUnmount(() => {
           :typing-users="typingUsers"
           :message-density="messageDensity"
           :show-system-messages="showSystemMessages"
+          :servers="savedServers"
           @connect="handleConnect"
           @select-server="handleSelectServer"
           @activate-channel="handleActivateChannel"

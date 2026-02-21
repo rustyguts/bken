@@ -9,8 +9,6 @@ describe('UserControls', () => {
     deafened: false,
     connected: true,
     voiceConnected: true,
-    videoActive: false,
-    screenSharing: false,
   }
 
   it('mounts without errors', () => {
@@ -68,45 +66,6 @@ describe('UserControls', () => {
     const settingsBtn = w.findAll('button').find(b => b.attributes('title') === 'Open Settings')
     await settingsBtn!.trigger('click')
     expect(w.emitted('open-settings')).toHaveLength(1)
-  })
-
-  it('emits leave-voice when leave button is clicked', async () => {
-    const w = mount(UserControls, { props: baseProps })
-    const leaveBtn = w.findAll('button').find(b => b.attributes('title') === 'DisconnectVoice')
-    await leaveBtn!.trigger('click')
-    expect(w.emitted('leave-voice')).toHaveLength(1)
-  })
-
-  it('leave voice button is disabled when not voice connected', () => {
-    const w = mount(UserControls, { props: { ...baseProps, voiceConnected: false } })
-    const leaveBtn = w.findAll('button').find(b => b.attributes('title') === 'DisconnectVoice')
-    expect(leaveBtn?.attributes('disabled')).toBeDefined()
-  })
-
-  it('emits video-toggle when video button is clicked', async () => {
-    const w = mount(UserControls, { props: baseProps })
-    const videoBtn = w.findAll('button').find(b => b.attributes('title') === 'Start Video')
-    await videoBtn!.trigger('click')
-    expect(w.emitted('video-toggle')).toHaveLength(1)
-  })
-
-  it('shows video active state', () => {
-    const w = mount(UserControls, { props: { ...baseProps, videoActive: true } })
-    const videoBtn = w.findAll('button').find(b => b.attributes('title') === 'Stop Video')
-    expect(videoBtn?.classes()).toContain('text-success')
-  })
-
-  it('emits screen-share-toggle when screen share button is clicked', async () => {
-    const w = mount(UserControls, { props: baseProps })
-    const shareBtn = w.findAll('button').find(b => b.attributes('title') === 'Share Screen')
-    await shareBtn!.trigger('click')
-    expect(w.emitted('screen-share-toggle')).toHaveLength(1)
-  })
-
-  it('shows screen sharing active state', () => {
-    const w = mount(UserControls, { props: { ...baseProps, screenSharing: true } })
-    const shareBtn = w.findAll('button').find(b => b.attributes('title') === 'Stop Sharing')
-    expect(shareBtn?.classes()).toContain('text-success')
   })
 
   it('renders MetricsBar when voice connected', () => {

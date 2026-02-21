@@ -70,6 +70,7 @@ const defaultChannelViewProps = () => ({
   typingUsers: {} as Record<number, { username: string; channelId: number; expiresAt: number }>,
   messageDensity: 'default' as const,
   showSystemMessages: true,
+  servers: [{ name: 'Local Dev', addr: 'localhost:8080' }],
 })
 
 const defaultChannelChatProps = () => ({
@@ -96,6 +97,9 @@ const defaultServerChannelsProps = () => ({
   selectedChannelId: 0,
   serverName: 'Test Server',
   speakingUsers: new Set<number>(),
+  voiceConnected: false,
+  videoActive: false,
+  screenSharing: false,
   connectError: '',
   isOwner: false,
   unreadCounts: {} as Record<number, number>,
@@ -116,6 +120,8 @@ describe('Server Connection Flow', () => {
       props: {
         activeServerAddr: '',
         connectedAddr: '',
+        connected: false,
+        voiceConnected: false,
         connectError: '',
         startupAddr: '',
         globalUsername: 'TestUser',
@@ -155,6 +161,8 @@ describe('Server Connection Flow', () => {
       props: {
         activeServerAddr: 'localhost:8080',
         connectedAddr: '',
+        connected: false,
+        voiceConnected: false,
         connectError: 'Connection refused',
         startupAddr: '',
         globalUsername: 'TestUser',
@@ -369,8 +377,6 @@ describe('Voice Flow', () => {
         deafened: false,
         connected: true,
         voiceConnected: true,
-        videoActive: false,
-        screenSharing: false,
       },
     })
     await flush()
@@ -391,8 +397,6 @@ describe('Voice Flow', () => {
         deafened: false,
         connected: true,
         voiceConnected: true,
-        videoActive: false,
-        screenSharing: false,
       },
     })
     await flush()
@@ -405,22 +409,30 @@ describe('Voice Flow', () => {
   })
 
   it('leave voice button emits leave-voice', async () => {
-    const wrapper = mount(UserControls, {
+    const wrapper = mount(ServerChannels, {
       props: {
-        username: 'TestUser',
-        muted: false,
-        deafened: false,
-        connected: true,
+        channels: [makeChannel({ id: 1, name: 'General' })],
+        users: [makeUser({ id: 1, username: 'TestUser' })],
+        userChannels: { 1: 1 },
+        myId: 1,
+        selectedChannelId: 1,
+        serverName: 'Test Server',
+        speakingUsers: new Set<number>(),
         voiceConnected: true,
         videoActive: false,
         screenSharing: false,
+        connectError: '',
+        isOwner: false,
+        unreadCounts: {},
+        ownerId: 0,
+        recordingChannels: {},
       },
     })
     await flush()
 
-    const leaveBtn = wrapper.find('button[title="DisconnectVoice"]')
-    expect(leaveBtn.exists()).toBe(true)
-    await leaveBtn.trigger('click')
+    const leaveBtn = wrapper.findAll('button').find(b => b.text().includes('Leave Voice'))
+    expect(leaveBtn).toBeTruthy()
+    await leaveBtn!.trigger('click')
 
     expect(wrapper.emitted('leave-voice')).toBeTruthy()
   })
@@ -433,8 +445,6 @@ describe('Voice Flow', () => {
         deafened: false,
         connected: true,
         voiceConnected: false,
-        videoActive: false,
-        screenSharing: false,
       },
     })
     await flush()
@@ -1102,6 +1112,9 @@ describe('User Management', () => {
         selectedChannelId: 1,
         serverName: 'Test',
         speakingUsers: new Set<number>(),
+        voiceConnected: false,
+        videoActive: false,
+        screenSharing: false,
         connectError: '',
         isOwner: true,
         ownerId: 1,
@@ -1149,6 +1162,9 @@ describe('User Management', () => {
         selectedChannelId: 1,
         serverName: 'Test',
         speakingUsers: new Set<number>(),
+        voiceConnected: false,
+        videoActive: false,
+        screenSharing: false,
         connectError: '',
         isOwner: true,
         ownerId: 1,
@@ -1512,6 +1528,9 @@ describe('ServerChannels - Create Channel', () => {
         selectedChannelId: 0,
         serverName: 'Test',
         speakingUsers: new Set<number>(),
+        voiceConnected: false,
+        videoActive: false,
+        screenSharing: false,
         connectError: '',
         isOwner: true,
         ownerId: 1,
@@ -1521,10 +1540,15 @@ describe('ServerChannels - Create Channel', () => {
     })
     await flush()
 
-    // Click the + button
-    const createBtn = wrapper.find('button[title="Create channel"]')
-    expect(createBtn.exists()).toBe(true)
-    await createBtn.trigger('click')
+    // Open the dropdown menu by clicking the server name trigger button
+    const dropdownTrigger = wrapper.find('.dropdown [role="button"]')
+    await dropdownTrigger.trigger('click')
+    await nextTick()
+
+    // Find the "Create Channel" button inside the dropdown menu
+    const createBtn = wrapper.findAll('.dropdown-content button').find(b => b.text().includes('Create Channel'))
+    expect(createBtn).toBeTruthy()
+    await createBtn!.trigger('click')
     await nextTick()
 
     // Dialog should open - find the input
@@ -1548,6 +1572,9 @@ describe('ServerChannels - Create Channel', () => {
         selectedChannelId: 0,
         serverName: 'Test',
         speakingUsers: new Set<number>(),
+        voiceConnected: false,
+        videoActive: false,
+        screenSharing: false,
         connectError: '',
         isOwner: false,
         ownerId: 2,
@@ -1557,54 +1584,13 @@ describe('ServerChannels - Create Channel', () => {
     })
     await flush()
 
-    const createBtn = wrapper.find('button[title="Create channel"]')
-    expect(createBtn.exists()).toBe(false)
+    // The dropdown menu should not contain a "Create Channel" button for non-owners
+    const createBtn = wrapper.findAll('button').find(b => b.text().includes('Create Channel'))
+    expect(createBtn).toBeFalsy()
   })
 })
 
-describe('UserControls - Video and Screen Share', () => {
-  it('emits video-toggle when video button is clicked', async () => {
-    const wrapper = mount(UserControls, {
-      props: {
-        username: 'TestUser',
-        muted: false,
-        deafened: false,
-        connected: true,
-        voiceConnected: true,
-        videoActive: false,
-        screenSharing: false,
-      },
-    })
-    await flush()
-
-    const videoBtn = wrapper.find('button[title="Start Video"]')
-    expect(videoBtn.exists()).toBe(true)
-    await videoBtn.trigger('click')
-
-    expect(wrapper.emitted('video-toggle')).toBeTruthy()
-  })
-
-  it('emits screen-share-toggle when screen share button is clicked', async () => {
-    const wrapper = mount(UserControls, {
-      props: {
-        username: 'TestUser',
-        muted: false,
-        deafened: false,
-        connected: true,
-        voiceConnected: true,
-        videoActive: false,
-        screenSharing: false,
-      },
-    })
-    await flush()
-
-    const shareBtn = wrapper.find('button[title="Share Screen"]')
-    expect(shareBtn.exists()).toBe(true)
-    await shareBtn.trigger('click')
-
-    expect(wrapper.emitted('screen-share-toggle')).toBeTruthy()
-  })
-
+describe('UserControls - Settings', () => {
   it('opens settings when gear button is clicked', async () => {
     const wrapper = mount(UserControls, {
       props: {
@@ -1613,8 +1599,6 @@ describe('UserControls - Video and Screen Share', () => {
         deafened: false,
         connected: true,
         voiceConnected: true,
-        videoActive: false,
-        screenSharing: false,
       },
     })
     await flush()
@@ -1636,8 +1620,6 @@ describe('UserControls - Username Rename', () => {
         deafened: false,
         connected: true,
         voiceConnected: true,
-        videoActive: false,
-        screenSharing: false,
       },
     })
     await flush()
@@ -1679,6 +1661,9 @@ describe('ServerChannels - Speaking Users', () => {
         selectedChannelId: 1,
         serverName: 'Test',
         speakingUsers: new Set([2]),
+        voiceConnected: false,
+        videoActive: false,
+        screenSharing: false,
         connectError: '',
         isOwner: false,
         ownerId: 0,
@@ -1710,6 +1695,9 @@ describe('Connected state channel indicators', () => {
         selectedChannelId: 1,
         serverName: 'Test',
         speakingUsers: new Set<number>(),
+        voiceConnected: false,
+        videoActive: false,
+        screenSharing: false,
         connectError: '',
         isOwner: false,
         ownerId: 0,

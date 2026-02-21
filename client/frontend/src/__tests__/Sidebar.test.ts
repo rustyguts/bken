@@ -6,6 +6,8 @@ describe('Sidebar', () => {
   const baseProps = {
     activeServerAddr: '',
     connectedAddr: '',
+    connected: false,
+    voiceConnected: false,
     connectError: '',
     startupAddr: '',
     globalUsername: 'TestUser',

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import MetricsBar from './MetricsBar.vue'
-import { Mic, MicOff, Volume2, VolumeX, Settings, LogOut } from 'lucide-vue-next'
+import { Mic, MicOff, Volume2, VolumeX, Settings } from 'lucide-vue-next'
 
 const props = defineProps<{
   username: string
@@ -16,7 +16,6 @@ const emit = defineEmits<{
   'open-settings': []
   'mute-toggle': []
   'deafen-toggle': []
-  'leave-voice': []
 }>()
 
 const modalOpen = ref(false)
@@ -95,16 +94,6 @@ function confirmRename(): void {
         <Settings class="w-4 h-4" aria-hidden="true" />
       </button>
 
-      <!-- Leave Voice Channel -->
-      <button
-        class="btn btn-error btn-sm btn-ghost"
-        :disabled="!voiceConnected"
-        title="DisconnectVoice"
-        aria-label="DisconnectVoice"
-        @click="emit('leave-voice')"
-      >
-        <LogOut class="w-4 h-4" aria-hidden="true" />
-      </button>
     </div>
 
     <MetricsBar v-if="voiceConnected" />

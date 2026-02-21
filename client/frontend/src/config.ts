@@ -258,16 +258,3 @@ export function RequestVideoQuality(targetUserID: number, quality: string): Prom
   return bridge()['RequestVideoQuality'](targetUserID, quality)
 }
 
-// --- Multi-server session bindings ---
-
-export function SetActiveServer(addr: string): Promise<string> {
-  const fn = bridge()['SetActiveServer']
-  if (typeof fn !== 'function') return Promise.resolve('')
-  return fn(addr)
-}
-
-export function DisconnectServer(addr: string): Promise<string> {
-  const fn = bridge()['DisconnectServer']
-  if (typeof fn !== 'function') return Promise.resolve('')
-  return fn(addr)
-}

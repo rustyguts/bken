@@ -161,8 +161,6 @@ export function resetConfig() {
 const goApp: Record<string, any> = {
   Connect: vi.fn().mockResolvedValue(''),
   Disconnect: vi.fn().mockResolvedValue(undefined),
-  DisconnectServer: vi.fn().mockResolvedValue(''),
-  SetActiveServer: vi.fn().mockResolvedValue(''),
   DisconnectVoice: vi.fn().mockResolvedValue(''),
   ConnectVoice: vi.fn().mockResolvedValue(''),
   GetAutoLogin: vi.fn().mockResolvedValue({ username: '', addr: '' }),

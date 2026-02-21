@@ -4,12 +4,13 @@ import { GetConfig, SaveConfig } from './config'
 import type { ServerEntry } from './config'
 import { BKEN_SCHEME } from './constants'
 import type { ConnectPayload } from './types'
-import { Server } from 'lucide-vue-next'
+import { Server, Home } from 'lucide-vue-next'
 
 const props = defineProps<{
   activeServerAddr: string
   connectedAddr: string
-  connectedAddrs?: string[]
+  connected: boolean
+  voiceConnected: boolean
   connectError: string
   startupAddr: string
   globalUsername: string
@@ -18,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   connect: [payload: ConnectPayload]
   selectServer: [addr: string]
+  goHome: []
 }>()
 
 const browserOpen = ref(false)
@@ -26,6 +28,10 @@ const connectingAddr = ref('')
 const newName = ref('')
 const newAddr = ref('')
 const browserError = ref('')
+
+// Confirmation dialog state (when switching servers while connected)
+const confirmDialog = ref(false)
+const confirmTargetAddr = ref('')
 
 const servers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:8080' }])
 
@@ -95,15 +101,34 @@ function serverButtonStyle(name: string, active: boolean): Record<string, string
 }
 
 function selectServer(addr: string): void {
-  emit('selectServer', normalizeAddr(addr))
+  const normalized = normalizeAddr(addr)
+  // If already connected to this server, just select it
+  if (isServerConnected(normalized)) {
+    emit('selectServer', normalized)
+    return
+  }
+  // If connected to a different server, show confirmation
+  if (props.connected) {
+    confirmTargetAddr.value = normalized
+    confirmDialog.value = true
+    return
+  }
+  emit('selectServer', normalized)
+}
+
+function confirmSwitch(): void {
+  confirmDialog.value = false
+  emit('selectServer', confirmTargetAddr.value)
+  confirmTargetAddr.value = ''
+}
+
+function cancelSwitch(): void {
+  confirmDialog.value = false
+  confirmTargetAddr.value = ''
 }
 
 function isServerConnected(addr: string): boolean {
-  const normalized = normalizeAddr(addr)
-  if (props.connectedAddrs && props.connectedAddrs.length > 0) {
-    return props.connectedAddrs.map(normalizeAddr).includes(normalized)
-  }
-  return normalizeAddr(props.connectedAddr) === normalized
+  return normalizeAddr(addr) === normalizeAddr(props.connectedAddr)
 }
 
 async function connectToNewServer(): Promise<void> {
@@ -203,7 +228,15 @@ onBeforeUnmount(() => {
 <template>
   <div class="h-full min-h-0">
     <aside class="relative flex flex-col items-center border-r border-base-content/10 bg-base-300 w-[64px] min-w-[64px] max-w-[64px] h-full overflow-x-hidden" @click="closeServerContextMenu()">
-      <div class="border-b border-base-content/10 min-h-11 w-full flex items-center justify-center shrink-0">
+      <div class="border-b border-base-content/10 min-h-11 w-full flex flex-col items-center justify-center gap-1 py-1 shrink-0">
+        <button
+          class="btn btn-ghost btn-square btn-sm"
+          aria-label="Home"
+          title="Home"
+          @click="emit('goHome')"
+        >
+          <Home class="w-5 h-5" aria-hidden="true" />
+        </button>
         <button
           class="btn btn-ghost btn-square btn-sm"
           aria-label="Server browser"
@@ -294,6 +327,25 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="browserOpen = false">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <dialog class="modal" :class="{ 'modal-open': confirmDialog }">
+      <div class="modal-box w-80">
+        <h3 class="text-sm font-semibold mb-2">Switch Server?</h3>
+        <p v-if="voiceConnected" class="text-xs opacity-70">
+          You're in a voice channel. Switching servers will disconnect you.
+        </p>
+        <p v-else class="text-xs opacity-70">
+          You'll be disconnected from the current server.
+        </p>
+        <div class="modal-action">
+          <button class="btn btn-ghost btn-sm" @click="cancelSwitch">Cancel</button>
+          <button class="btn btn-primary btn-sm" @click="confirmSwitch">Switch</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="cancelSwitch">
         <button>close</button>
       </form>
     </dialog>

@@ -34,10 +34,6 @@ export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }
 
-export function DisconnectServer(arg1) {
-  return window['go']['main']['App']['DisconnectServer'](arg1);
-}
-
 export function DisconnectVoice() {
   return window['go']['main']['App']['DisconnectVoice']();
 }
@@ -168,10 +164,6 @@ export function SetAGC(arg1) {
 
 export function SetAGCLevel(arg1) {
   return window['go']['main']['App']['SetAGCLevel'](arg1);
-}
-
-export function SetActiveServer(arg1) {
-  return window['go']['main']['App']['SetActiveServer'](arg1);
 }
 
 export function SetAudioBitrate(arg1) {

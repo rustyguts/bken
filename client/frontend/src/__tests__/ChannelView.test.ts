@@ -26,6 +26,7 @@ describe('ChannelView', () => {
     typingUsers: {} as Record<number, { username: string; channelId: number; expiresAt: number }>,
     messageDensity: 'default' as const,
     showSystemMessages: true,
+    servers: [{ name: 'Local Dev', addr: 'localhost:8080' }],
   }
 
   it('mounts without errors', async () => {
@@ -78,11 +79,11 @@ describe('ChannelView', () => {
     expect(w.emitted('selectServer')).toEqual([['other:8080']])
   })
 
-  it('emits disconnectVoice from UserControls', async () => {
+  it('emits disconnectVoice from ServerChannels', async () => {
     const w = mount(ChannelView, { props: baseProps })
     await flushPromises()
-    const controls = w.findComponent({ name: 'UserControls' })
-    controls.vm.$emit('leaveVoice')
+    const sc = w.findComponent({ name: 'ServerChannels' })
+    sc.vm.$emit('leave-voice')
     await flushPromises()
     expect(w.emitted('disconnectVoice')).toBeDefined()
   })
@@ -175,11 +176,11 @@ describe('ChannelView', () => {
     expect(w.emitted('addReaction')).toEqual([[10, '👍']])
   })
 
-  it('emits startVideo from UserControls', async () => {
+  it('emits startVideo from ServerChannels', async () => {
     const w = mount(ChannelView, { props: baseProps })
     await flushPromises()
-    const controls = w.findComponent({ name: 'UserControls' })
-    controls.vm.$emit('videoToggle')
+    const sc = w.findComponent({ name: 'ServerChannels' })
+    sc.vm.$emit('video-toggle')
     await flushPromises()
     expect(w.emitted('startVideo')).toBeDefined()
   })
@@ -192,17 +193,17 @@ describe('ChannelView', () => {
       },
     })
     await flushPromises()
-    const controls = w.findComponent({ name: 'UserControls' })
-    controls.vm.$emit('videoToggle')
+    const sc = w.findComponent({ name: 'ServerChannels' })
+    sc.vm.$emit('video-toggle')
     await flushPromises()
     expect(w.emitted('stopVideo')).toBeDefined()
   })
 
-  it('emits startScreenShare from UserControls', async () => {
+  it('emits startScreenShare from ServerChannels', async () => {
     const w = mount(ChannelView, { props: baseProps })
     await flushPromises()
-    const controls = w.findComponent({ name: 'UserControls' })
-    controls.vm.$emit('screenShareToggle')
+    const sc = w.findComponent({ name: 'ServerChannels' })
+    sc.vm.$emit('screen-share-toggle')
     await flushPromises()
     expect(w.emitted('startScreenShare')).toBeDefined()
   })

@@ -6,7 +6,9 @@ import ServerChannels from './ServerChannels.vue'
 import UserControls from './UserControls.vue'
 import ChannelChat from './ChannelChat.vue'
 import VideoGrid from './VideoGrid.vue'
+import WelcomePage from './WelcomePage.vue'
 import { BKEN_SCHEME } from './constants'
+import type { ServerEntry } from './config'
 import type { User, ChatMessage, Channel, ConnectPayload, VideoState } from './types'
 
 const props = defineProps<{
@@ -14,7 +16,6 @@ const props = defineProps<{
   voiceConnected: boolean
   reconnecting: boolean
   connectedAddr: string
-  connectedAddrs?: string[]
   connectError: string
   startupAddr: string
   globalUsername: string
@@ -32,6 +33,7 @@ const props = defineProps<{
   typingUsers: Record<number, { username: string; channelId: number; expiresAt: number }>
   messageDensity: 'compact' | 'default' | 'comfortable'
   showSystemMessages: boolean
+  servers: ServerEntry[]
 }>()
 
 
@@ -175,76 +177,89 @@ function handleSendMessage(message: string): void {
       class="channel-sidebar"
       :active-server-addr="selectedServerAddr"
       :connected-addr="connectedAddr"
-      :connected-addrs="connectedAddrs"
+      :connected="connected"
+      :voice-connected="voiceConnected"
       :connect-error="connectError"
       :startup-addr="startupAddr"
       :global-username="globalUsername"
       @connect="emit('connect', $event)"
       @select-server="handleSelectServer"
+      @go-home="emit('disconnect')"
     />
 
-    <ServerChannels
-      class="channel-channels border-r border-base-content/10 bg-base-100"
-      :channels="channels"
-      :users="users"
-      :user-channels="userChannels"
-      :my-id="myId"
-      :connected-addr="connectedAddr"
-      :selected-channel-id="selectedChannelId"
-      :server-name="serverName"
-      :speaking-users="speakingUsers"
-      :voice-connected="voiceConnected"
-      :video-active="videoActive"
-      :screen-sharing="screenSharing"
-      :connect-error="connectError"
-      :is-owner="isOwner"
-      :owner-id="ownerId"
-      :unread-counts="unreadCounts"
-      :recording-channels="recordingChannels"
-      @join="handleJoinChannel"
-      @select="handleSelectChannel"
-      @create-channel="emit('createChannel', $event)"
-      @rename-channel="(id, name) => emit('renameChannel', id, name)"
-      @delete-channel="emit('deleteChannel', $event)"
-      @move-user="(uid, chid) => emit('moveUser', uid, chid)"
-      @kick-user="emit('kickUser', $event)"
-      @video-toggle="handleVideoToggle"
-      @screen-share-toggle="handleScreenShareToggle"
-    />
-
-    <div class="channel-chat flex flex-col min-h-0">
-      <VideoGrid
+    <template v-if="connected">
+      <ServerChannels
+        class="channel-channels border-r border-base-content/10 bg-base-100"
+        :channels="channels"
         :users="users"
-        :video-states="videoStates"
+        :user-channels="userChannels"
         :my-id="myId"
-        :spotlight-id="spotlightId"
-        @spotlight="spotlightId = $event"
+        :connected-addr="connectedAddr"
+        :selected-channel-id="selectedChannelId"
+        :server-name="serverName"
+        :speaking-users="speakingUsers"
+        :voice-connected="voiceConnected"
+        :video-active="videoActive"
+        :screen-sharing="screenSharing"
+        :connect-error="connectError"
+        :is-owner="isOwner"
+        :owner-id="ownerId"
+        :unread-counts="unreadCounts"
+        :recording-channels="recordingChannels"
+        @join="handleJoinChannel"
+        @select="handleSelectChannel"
+        @create-channel="emit('createChannel', $event)"
+        @rename-channel="(id, name) => emit('renameChannel', id, name)"
+        @delete-channel="emit('deleteChannel', $event)"
+        @move-user="(uid, chid) => emit('moveUser', uid, chid)"
+        @kick-user="emit('kickUser', $event)"
+        @video-toggle="handleVideoToggle"
+        @screen-share-toggle="handleScreenShareToggle"
+        @leave-voice="handleDisconnectVoice"
       />
 
-    <ChannelChat
-      class="flex-1 min-h-0"
-      :messages="chatMessages"
-      :channels="channels"
-      :selected-channel-id="selectedChannelId"
-      :my-channel-id="myChannelId"
-      :connected="connected"
-      :unread-counts="unreadCounts"
-      :my-id="myId"
-      :owner-id="ownerId"
-      :users="users"
-      :typing-users="typingUsers"
-      :message-density="messageDensity"
-      :show-system-messages="showSystemMessages"
-      @select-channel="handleSelectChannel"
-      @send="handleSendMessage"
-      @upload-file="emit('uploadFile', selectedChannelId)"
-      @upload-file-from-path="(path: string) => emit('uploadFileFromPath', selectedChannelId, path)"
-      @edit-message="(msgID: number, message: string) => emit('editMessage', msgID, message)"
-      @delete-message="(msgID: number) => emit('deleteMessage', msgID)"
-      @add-reaction="(msgID: number, emoji: string) => emit('addReaction', msgID, emoji)"
-      @remove-reaction="(msgID: number, emoji: string) => emit('removeReaction', msgID, emoji)"
+      <div class="channel-chat flex flex-col min-h-0">
+        <VideoGrid
+          :users="users"
+          :video-states="videoStates"
+          :my-id="myId"
+          :spotlight-id="spotlightId"
+          @spotlight="spotlightId = $event"
+        />
+
+        <ChannelChat
+          class="flex-1 min-h-0"
+          :messages="chatMessages"
+          :channels="channels"
+          :selected-channel-id="selectedChannelId"
+          :my-channel-id="myChannelId"
+          :connected="connected"
+          :unread-counts="unreadCounts"
+          :my-id="myId"
+          :owner-id="ownerId"
+          :users="users"
+          :typing-users="typingUsers"
+          :message-density="messageDensity"
+          :show-system-messages="showSystemMessages"
+          @select-channel="handleSelectChannel"
+          @send="handleSendMessage"
+          @upload-file="emit('uploadFile', selectedChannelId)"
+          @upload-file-from-path="(path: string) => emit('uploadFileFromPath', selectedChannelId, path)"
+          @edit-message="(msgID: number, message: string) => emit('editMessage', msgID, message)"
+          @delete-message="(msgID: number) => emit('deleteMessage', msgID)"
+          @add-reaction="(msgID: number, emoji: string) => emit('addReaction', msgID, emoji)"
+          @remove-reaction="(msgID: number, emoji: string) => emit('removeReaction', msgID, emoji)"
+        />
+      </div>
+    </template>
+
+    <WelcomePage
+      v-else
+      class="channel-welcome"
+      :servers="servers"
+      :global-username="globalUsername"
+      @connect="emit('connect', $event)"
     />
-    </div>
 
     <UserControls
       class="channel-controls border-r border-base-content/10"
@@ -257,7 +272,6 @@ function handleSendMessage(message: string): void {
       @open-settings="emit('openSettings')"
       @mute-toggle="handleMuteToggle"
       @deafen-toggle="handleDeafenToggle"
-      @leave-voice="handleDisconnectVoice"
     />
   </div>
 </template>
@@ -291,5 +305,11 @@ function handleSendMessage(message: string): void {
   grid-column: 1 / span 2;
   grid-row: 2;
   min-width: 0;
+}
+
+.channel-welcome {
+  grid-column: 2 / span 2;
+  grid-row: 1 / span 2;
+  min-height: 0;
 }
 </style>

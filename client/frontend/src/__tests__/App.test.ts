@@ -420,7 +420,7 @@ describe('App', () => {
     emitWailsEvent('channel:list', [{ id: 1, name: 'General' }])
     await flushPromises()
 
-    go.SetActiveServer.mockResolvedValueOnce('server not connected')
+    go.Connect.mockResolvedValueOnce('server not connected')
     channel.vm.$emit('selectServer', 'offline.example:4433')
     await flushPromises()
 
@@ -430,7 +430,7 @@ describe('App', () => {
     expect(updatedChannelView.props('connectError')).toContain('server not connected')
   })
 
-  it('calls DisconnectServer when ChannelView emits disconnect', async () => {
+  it('calls Disconnect when ChannelView emits disconnect', async () => {
     const go = getGoMock()
     const w = mount(App)
     await flushPromises()
@@ -439,7 +439,7 @@ describe('App', () => {
     await flushPromises()
     channel.vm.$emit('disconnect')
     await flushPromises()
-    expect(go.DisconnectServer).toHaveBeenCalledWith('localhost:4433')
+    expect(go.Disconnect).toHaveBeenCalled()
   })
 
   it('restores voiceConnected when DisconnectVoice fails', async () => {

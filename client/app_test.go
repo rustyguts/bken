@@ -456,7 +456,6 @@ func newTestApp() (*App, *mockTransport) {
 	app := &App{
 		audio:     NewAudioEngine(),
 		transport: mt,
-		sessions:  make(map[string]Transporter),
 	}
 	return app, mt
 }
@@ -486,7 +485,7 @@ func TestIsConnectedAfterSet(t *testing.T) {
 
 func TestConnectAlreadyConnected(t *testing.T) {
 	app, mt := newTestApp()
-	app.sessions["localhost:8080"] = mt
+	app.serverAddr = "localhost:8080"
 	result := app.Connect("localhost:8080", "alice")
 	if result != "" {
 		t.Errorf("expected empty result when reusing session, got %q", result)
@@ -565,9 +564,9 @@ func TestDisconnectIdempotent(t *testing.T) {
 	mt.mu.Lock()
 	dc := mt.disconnected
 	mt.mu.Unlock()
-	// Should not panic, and transport.Disconnect is always called.
-	if dc < 2 {
-		t.Errorf("expected at least 2 Disconnect calls, got %d", dc)
+	// First call disconnects transport, second is a no-op (transport already nil).
+	if dc < 1 {
+		t.Errorf("expected at least 1 Disconnect call, got %d", dc)
 	}
 }
 
@@ -1425,7 +1424,7 @@ func TestUploadFileFromPathNoAPIBase(t *testing.T) {
 
 func TestDisconnectVoiceJoinsLobby(t *testing.T) {
 	app, mt := newTestApp()
-	app.setVoiceSession("localhost:8080", mt)
+	app.serverAddr = "localhost:8080"
 	app.connected.Store(true)
 	// DisconnectVoice calls transport.JoinChannel(0).
 	result := app.DisconnectVoice()
@@ -1441,7 +1440,7 @@ func TestDisconnectVoiceJoinsLobby(t *testing.T) {
 
 func TestDisconnectVoiceError(t *testing.T) {
 	app, mt := newTestApp()
-	app.setVoiceSession("localhost:8080", mt)
+	app.serverAddr = "localhost:8080"
 	app.connected.Store(true)
 	mt.joinChannelErr = errors.New("not connected")
 	result := app.DisconnectVoice()
@@ -1565,7 +1564,7 @@ func TestSendLoopDisconnectsAfterThreshold(t *testing.T) {
 		audio:     NewAudioEngine(),
 		transport: mt,
 	}
-	app.setVoiceSession("localhost:8080", mt)
+	app.serverAddr = "localhost:8080"
 
 	// Create channels that the send loop uses.
 	app.audio.CaptureOut = make(chan []byte, sendFailureThreshold+10)

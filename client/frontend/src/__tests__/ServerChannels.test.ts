@@ -22,6 +22,9 @@ describe('ServerChannels', () => {
     ownerId: 0,
     unreadCounts: {} as Record<number, number>,
     recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
+    voiceConnected: false,
+    videoActive: false,
+    screenSharing: false,
   }
 
   it('mounts without errors', () => {
@@ -129,7 +132,7 @@ describe('ServerChannels', () => {
 
   it('shows create channel button when owner', () => {
     const w = mount(ServerChannels, { props: { ...baseProps, isOwner: true }, ...stubs })
-    const createBtn = w.findAll('button').find(b => b.attributes('title') === 'Create channel')
+    const createBtn = w.findAll('button').find(b => b.text().includes('Create Channel'))
     expect(createBtn).toBeDefined()
   })
 
@@ -142,7 +145,7 @@ describe('ServerChannels', () => {
       props: { ...baseProps, users, isOwner: false },
       ...stubs,
     })
-    const createBtn = w.findAll('button').find(b => b.attributes('title') === 'Create channel')
+    const createBtn = w.findAll('button').find(b => b.text().includes('Create Channel'))
     expect(createBtn).toBeDefined()
   })
 
@@ -155,11 +158,11 @@ describe('ServerChannels', () => {
       props: { ...baseProps, users, isOwner: false },
       ...stubs,
     })
-    const settingsBtn = w.findAll('button').find(b => b.attributes('title') === 'Server admin settings')
+    const settingsBtn = w.findAll('button').find(b => b.text().includes('Admin Server Settings'))
     expect(settingsBtn).toBeDefined()
   })
 
-  it('opens server options and goes back to channel list', async () => {
+  it('opens server admin modal and closes it', async () => {
     const users: User[] = [
       { id: 1, username: 'Alice', role: 'ADMIN' },
       { id: 2, username: 'Bob', role: 'USER' },
@@ -168,14 +171,14 @@ describe('ServerChannels', () => {
       props: { ...baseProps, users, isOwner: false },
       ...stubs,
     })
-    const settingsBtn = w.findAll('button').find(b => b.attributes('title') === 'Server admin settings')
+    const settingsBtn = w.findAll('button').find(b => b.text().includes('Admin Server Settings'))
     expect(settingsBtn).toBeDefined()
     await settingsBtn!.trigger('click')
-    expect(w.text()).toContain('Server Options')
+    expect(w.text()).toContain('Server Admin Settings')
 
-    const backBtn = w.findAll('button').find(b => b.attributes('aria-label') === 'Back to channels')
-    expect(backBtn).toBeDefined()
-    await backBtn!.trigger('click')
+    const cancelBtn = w.findAll('button').find(b => b.text() === 'Cancel')
+    expect(cancelBtn).toBeDefined()
+    await cancelBtn!.trigger('click')
     expect(w.text()).toContain('General')
   })
 
@@ -193,13 +196,13 @@ describe('ServerChannels', () => {
       },
       ...stubs,
     })
-    const settingsBtn = w.findAll('button').find(b => b.attributes('title') === 'Server admin settings')
+    const settingsBtn = w.findAll('button').find(b => b.text().includes('Admin Server Settings'))
     expect(settingsBtn).toBeDefined()
   })
 
   it('hides create channel button when not owner', () => {
     const w = mount(ServerChannels, { props: { ...baseProps, isOwner: false }, ...stubs })
-    const createBtn = w.findAll('button').find(b => b.attributes('title') === 'Create channel')
+    const createBtn = w.findAll('button').find(b => b.text().includes('Create Channel'))
     expect(createBtn).toBeUndefined()
   })
 
@@ -242,8 +245,9 @@ describe('ServerChannels', () => {
       props: { ...baseProps, channels: [], userChannels: {} },
       ...stubs,
     })
-    // With no channels, the list is simply empty
-    const listItems = w.findAll('li')
+    // The main channel list ul has the flex-1 class; its li count should be 0
+    const channelList = w.find('ul.flex-1')
+    const listItems = channelList.findAll('li')
     expect(listItems.length).toBe(0)
   })
 })

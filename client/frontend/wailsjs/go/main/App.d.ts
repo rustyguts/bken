@@ -19,8 +19,6 @@ export function DeleteMessage(arg1:number):Promise<string>;
 
 export function Disconnect():Promise<void>;
 
-export function DisconnectServer(arg1:string):Promise<string>;
-
 export function DisconnectVoice():Promise<string>;
 
 export function EditMessage(arg1:number,arg2:string):Promise<string>;
@@ -86,8 +84,6 @@ export function SetAEC(arg1:boolean):Promise<void>;
 export function SetAGC(arg1:boolean):Promise<void>;
 
 export function SetAGCLevel(arg1:number):Promise<void>;
-
-export function SetActiveServer(arg1:string):Promise<string>;
 
 export function SetAudioBitrate(arg1:number):Promise<void>;
 
