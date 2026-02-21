@@ -1447,6 +1447,10 @@ func TestDisconnectVoiceError(t *testing.T) {
 	if result != "not connected" {
 		t.Errorf("expected 'not connected', got %q", result)
 	}
+	// connected must be cleared even on error — audio is already stopped
+	if app.connected.Load() {
+		t.Error("expected connected=false after DisconnectVoice error")
+	}
 }
 
 // ===========================================================================

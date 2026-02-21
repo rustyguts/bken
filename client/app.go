@@ -674,15 +674,33 @@ func (a *App) DisconnectVoice() string {
 	}
 
 	a.audio.Stop()
+
+	var serverErr string
 	if err := tr.JoinChannel(0); err != nil {
 		if !strings.Contains(err.Error(), "control websocket not connected") {
-			return err.Error()
+			serverErr = err.Error()
 		}
 	}
+
+	// Always mark voice as disconnected locally, even if the server
+	// message failed. Audio is already stopped at this point.
 	a.connected.Store(false)
+
+	// Emit a local channel:user_moved event so the frontend sees the user
+	// leave the channel immediately, without waiting for the server
+	// round-trip broadcast.
+	if a.ctx != nil {
+		myID := tr.MyID()
+		wailsrt.EventsEmit(a.ctx, "channel:user_moved", map[string]any{
+			"server_addr": addr,
+			"user_id":     int(myID),
+			"channel_id":  int64(0),
+		})
+	}
+
 	a.audio.PlayNotification(SoundUserLeft)
 	log.Printf("[app] disconnected voice from %s (control session still active)", addr)
-	return ""
+	return serverErr
 }
 
 // ConnectVoice restarts audio capture/playback and joins the given channel.
