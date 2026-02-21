@@ -143,12 +143,14 @@ jobs:
 
       - name: Configure Windows CGO environment
         if: matrix.build.name == 'windows'
-        shell: bash
+        shell: msys2 {0}
         run: |
-          echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
-          echo "PKG_CONFIG_PATH=C:/msys64/mingw64/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG=C:/msys64/mingw64/bin/pkg-config.exe" >> "$GITHUB_ENV"
-          echo "CC=C:/msys64/mingw64/bin/gcc.exe" >> "$GITHUB_ENV"
+          MINGW_BIN=$(cygpath -m "$MINGW_PREFIX/bin")
+          MINGW_PKGCONFIG=$(cygpath -m "$MINGW_PREFIX/lib/pkgconfig")
+          echo "$MINGW_BIN" >> "$GITHUB_PATH"
+          echo "PKG_CONFIG_PATH=$MINGW_PKGCONFIG" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG=$MINGW_BIN/pkg-config.exe" >> "$GITHUB_ENV"
+          echo "CC=$MINGW_BIN/gcc.exe" >> "$GITHUB_ENV"
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
