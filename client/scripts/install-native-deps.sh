@@ -13,38 +13,6 @@ run_root() {
   fi
 }
 
-cpu_count() {
-  if command -v nproc >/dev/null 2>&1; then
-    nproc
-    return
-  fi
-  if command -v sysctl >/dev/null 2>&1; then
-    sysctl -n hw.ncpu
-    return
-  fi
-  echo 4
-}
-
-build_and_install_rnnoise() {
-  local install_prefix="$1"
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
-
-  log "Building rnnoise from source..."
-  git clone --depth 1 https://github.com/xiph/rnnoise.git "${tmp_dir}/rnnoise"
-  pushd "${tmp_dir}/rnnoise" >/dev/null
-  ./autogen.sh
-  ./configure --prefix="${install_prefix}" --disable-shared --enable-static
-  make -j"$(cpu_count)"
-  if [[ -d "${install_prefix}" && -w "${install_prefix}" ]] || [[ -w "$(dirname "${install_prefix}")" ]]; then
-    make install
-  else
-    run_root make install
-  fi
-  popd >/dev/null
-  rm -rf "${tmp_dir}"
-}
-
 install_macos() {
   if ! command -v brew >/dev/null 2>&1; then
     log "Homebrew is required on macOS. Install it first: https://brew.sh"
@@ -52,15 +20,7 @@ install_macos() {
   fi
 
   log "Installing macOS dependencies with Homebrew..."
-  brew install portaudio opus opusfile autoconf automake libtool pkg-config git wget
-
-  local brew_prefix
-  brew_prefix="$(brew --prefix)"
-  ensure_pkg_config_prefix "${brew_prefix}"
-
-  if ! pkg-config --exists rnnoise; then
-    build_and_install_rnnoise "${brew_prefix}"
-  fi
+  brew install portaudio opus opusfile pkg-config
 }
 
 install_linux_apt() {
@@ -69,16 +29,11 @@ install_linux_apt() {
   run_root apt-get install -y \
     build-essential \
     pkg-config \
-    autoconf \
-    automake \
-    libtool \
     libgtk-3-dev \
     libwebkit2gtk-4.1-dev \
     portaudio19-dev \
     libopus-dev \
-    libopusfile-dev \
-    git \
-    wget
+    libopusfile-dev
 }
 
 install_linux_dnf() {
@@ -88,16 +43,11 @@ install_linux_dnf() {
     gcc-c++ \
     make \
     pkgconf-pkg-config \
-    autoconf \
-    automake \
-    libtool \
     gtk3-devel \
     webkit2gtk4.1-devel \
     portaudio-devel \
     opus-devel \
-    opusfile-devel \
-    git \
-    wget
+    opusfile-devel
 }
 
 install_linux_pacman() {
@@ -105,22 +55,14 @@ install_linux_pacman() {
   run_root pacman -Sy --noconfirm --needed \
     base-devel \
     pkgconf \
-    autoconf \
-    automake \
-    libtool \
     gtk3 \
     webkit2gtk-4.1 \
     portaudio \
     opus \
-    opusfile \
-    rnnoise \
-    git \
-    wget
+    opusfile
 }
 
 install_linux() {
-  ensure_pkg_config_prefix "/usr/local"
-
   if command -v apt-get >/dev/null 2>&1; then
     install_linux_apt
   elif command -v dnf >/dev/null 2>&1; then
@@ -130,10 +72,6 @@ install_linux() {
   else
     log "Unsupported Linux package manager. Supported: apt, dnf, pacman."
     exit 1
-  fi
-
-  if ! pkg-config --exists rnnoise; then
-    build_and_install_rnnoise "/usr/local"
   fi
 }
 
@@ -161,10 +99,6 @@ main() {
   fi
   if ! pkg-config --exists opusfile; then
     log "opusfile pkg-config metadata is missing after install."
-    exit 1
-  fi
-  if ! pkg-config --exists rnnoise; then
-    log "rnnoise pkg-config metadata is missing after install."
     exit 1
   fi
 

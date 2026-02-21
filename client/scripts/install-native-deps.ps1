@@ -39,7 +39,7 @@ if (-not (Test-Path $msysBash)) {
 }
 
 Write-Info "Installing Windows native dependencies with MSYS2..."
-& $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config mingw-w64-x86_64-portaudio mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile mingw-w64-x86_64-rnnoise"
+& $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config mingw-w64-x86_64-portaudio mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile"
 
 $mingwBin = "C:\msys64\mingw64\bin"
 $pkgConfigPath = "C:\msys64\mingw64\lib\pkgconfig"
