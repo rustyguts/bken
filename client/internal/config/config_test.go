@@ -25,23 +25,11 @@ func TestDefault(t *testing.T) {
 	if !cfg.NoiseEnabled {
 		t.Error("expected noise suppression enabled by default")
 	}
-	if cfg.NoiseLevel <= 0 {
-		t.Errorf("expected positive default noise level, got %d", cfg.NoiseLevel)
-	}
 	if !cfg.AGCEnabled {
 		t.Error("expected AGC enabled by default")
 	}
-	if cfg.AGCLevel <= 0 {
-		t.Errorf("expected positive default AGC level, got %d", cfg.AGCLevel)
-	}
 	if !cfg.AECEnabled {
 		t.Error("expected echo cancellation enabled by default")
-	}
-	if !cfg.VADEnabled {
-		t.Error("expected VAD enabled by default")
-	}
-	if cfg.VADThreshold <= 0 {
-		t.Errorf("expected positive default VAD threshold, got %d", cfg.VADThreshold)
 	}
 	if cfg.PTTEnabled {
 		t.Error("expected PTT disabled by default")
@@ -63,11 +51,7 @@ func TestSaveAndLoad(t *testing.T) {
 		Volume:         0.75,
 		AECEnabled:     true,
 		NoiseEnabled:   true,
-		NoiseLevel:     60,
 		AGCEnabled:     true,
-		AGCLevel:       75,
-		VADEnabled:     true,
-		VADThreshold:   40,
 		PTTEnabled:     true,
 		PTTKey:         "Space",
 		Servers: []config.ServerEntry{
@@ -100,15 +84,6 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.AGCEnabled != cfg.AGCEnabled {
 		t.Errorf("agc enabled: want %v got %v", cfg.AGCEnabled, loaded.AGCEnabled)
-	}
-	if loaded.AGCLevel != cfg.AGCLevel {
-		t.Errorf("agc level: want %d got %d", cfg.AGCLevel, loaded.AGCLevel)
-	}
-	if loaded.VADEnabled != cfg.VADEnabled {
-		t.Errorf("vad enabled: want %v got %v", cfg.VADEnabled, loaded.VADEnabled)
-	}
-	if loaded.VADThreshold != cfg.VADThreshold {
-		t.Errorf("vad threshold: want %d got %d", cfg.VADThreshold, loaded.VADThreshold)
 	}
 	if loaded.PTTEnabled != cfg.PTTEnabled {
 		t.Errorf("ptt enabled: want %v got %v", cfg.PTTEnabled, loaded.PTTEnabled)

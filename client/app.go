@@ -29,7 +29,6 @@ type App struct {
 	ctx         context.Context
 	audio       *AudioEngine
 	transport   Transporter
-	nc          *NoiseCanceller
 	connected   atomic.Bool // true while a voice session is active; safe for concurrent access
 	startupAddr string      // host:port extracted from a bken:// CLI argument, if any
 
@@ -68,10 +67,6 @@ func (a *App) startup(ctx context.Context) {
 // shutdown is called when the Wails app is closing.
 func (a *App) shutdown(_ context.Context) {
 	a.Disconnect()
-	if a.nc != nil {
-		a.nc.Destroy()
-		a.nc = nil
-	}
 	portaudio.Terminate()
 }
 
@@ -155,23 +150,13 @@ func (a *App) SetVADThreshold(level int) {
 }
 
 // SetNoiseSuppression enables or disables noise suppression.
-// The NoiseCanceller is created lazily on first call.
 func (a *App) SetNoiseSuppression(enabled bool) {
-	if a.nc == nil {
-		a.nc = NewNoiseCanceller()
-		a.audio.SetNoiseCanceller(a.nc)
-	}
-	a.nc.SetEnabled(enabled)
+	a.audio.SetNoiseSuppression(enabled)
 }
 
-// SetNoiseSuppressionLevel sets the suppression blend level (0–100 → 0.0–1.0).
-// The NoiseCanceller is created lazily on first call.
+// SetNoiseSuppressionLevel is retained as a no-op for backward compatibility.
 func (a *App) SetNoiseSuppressionLevel(level int) {
-	if a.nc == nil {
-		a.nc = NewNoiseCanceller()
-		a.audio.SetNoiseCanceller(a.nc)
-	}
-	a.nc.SetLevel(float32(level) / 100.0)
+	_ = level
 }
 
 // SetNotificationVolume sets the notification/soundboard volume (0.0-1.0).
@@ -687,15 +672,8 @@ func (a *App) ApplyConfig() {
 	a.audio.SetVolume(cfg.Volume)
 	a.audio.SetAEC(cfg.AECEnabled)
 	a.audio.SetAGC(cfg.AGCEnabled)
-	a.audio.SetAGCLevel(cfg.AGCLevel)
-	a.audio.SetVAD(cfg.VADEnabled)
-	a.audio.SetVADThreshold(cfg.VADThreshold)
 	a.audio.SetPTTMode(cfg.PTTEnabled)
-	a.audio.SetNoiseGate(cfg.NoiseGateEnabled)
-	a.audio.SetNoiseGateThreshold(cfg.NoiseGateThreshold)
-	a.audio.SetNotificationVolume(float32(cfg.NotificationVolume))
 	a.SetNoiseSuppression(cfg.NoiseEnabled)
-	a.SetNoiseSuppressionLevel(cfg.NoiseLevel)
 	if cfg.InputDeviceID >= 0 {
 		a.audio.SetInputDevice(cfg.InputDeviceID)
 	}

@@ -6,6 +6,52 @@ import (
 	"time"
 )
 
+func TestDialAddrsForWebsocketLocalhost(t *testing.T) {
+	got := dialAddrsForWebsocket("localhost:8443")
+	want := []string{"localhost:8443", "127.0.0.1:8443", "[::1]:8443"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (got=%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDialAddrsForWebsocketIPv6Loopback(t *testing.T) {
+	got := dialAddrsForWebsocket("[::1]:8443")
+	want := []string{"[::1]:8443", "127.0.0.1:8443"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (got=%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDialAddrsForWebsocketIPv4Loopback(t *testing.T) {
+	got := dialAddrsForWebsocket("127.0.0.1:8443")
+	want := []string{"127.0.0.1:8443", "[::1]:8443"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (got=%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDialAddrsForWebsocketRemoteHost(t *testing.T) {
+	got := dialAddrsForWebsocket("example.com:8443")
+	if len(got) != 1 || got[0] != "example.com:8443" {
+		t.Fatalf("got = %v, want [example.com:8443]", got)
+	}
+}
+
 // --- mute set tests ---
 
 func TestMuteUserBasic(t *testing.T) {

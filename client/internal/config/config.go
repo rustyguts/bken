@@ -16,17 +16,10 @@ type Config struct {
 	OutputDeviceID int           `json:"output_device_id"`
 	Volume         float64       `json:"volume"`
 	NoiseEnabled   bool          `json:"noise_enabled"`
-	NoiseLevel     int           `json:"noise_level"`
-	AGCEnabled     bool          `json:"agc_enabled"`
-	AGCLevel       int           `json:"agc_level"`
 	AECEnabled     bool          `json:"aec_enabled"`
-	VADEnabled     bool          `json:"vad_enabled"`
-	VADThreshold   int           `json:"vad_threshold"`
-	PTTEnabled         bool          `json:"ptt_enabled"`
-	PTTKey             string        `json:"ptt_key"` // keyboard key code (e.g. "Space", "Backquote")
-	NoiseGateEnabled   bool          `json:"noise_gate_enabled"`
-	NoiseGateThreshold int           `json:"noise_gate_threshold"`
-	NotificationVolume float64       `json:"notification_volume"` // 0.0-1.0
+	AGCEnabled     bool          `json:"agc_enabled"`
+	PTTEnabled     bool          `json:"ptt_enabled"`
+	PTTKey         string        `json:"ptt_key"` // keyboard key code (e.g. "Space", "Backquote")
 	Servers            []ServerEntry `json:"servers"`
 }
 
@@ -42,19 +35,12 @@ func Default() Config {
 		Theme:          "dark",
 		Volume:         1.0,
 		NoiseEnabled:   true,
-		NoiseLevel:     80,
 		AECEnabled:     true,
 		AGCEnabled:     true,
-		AGCLevel:       50,
-		VADEnabled:     true,
-		VADThreshold:   30,
-		PTTEnabled:         false,
-		PTTKey:             "Backquote",
-		NoiseGateEnabled:   false,
-		NoiseGateThreshold: 20,
-		NotificationVolume: 1.0,
-		InputDeviceID:      -1,
-		OutputDeviceID:     -1,
+		PTTEnabled:     false,
+		PTTKey:         "Backquote",
+		InputDeviceID:  -1,
+		OutputDeviceID: -1,
 		Servers: []ServerEntry{
 			{Name: "Local Dev", Addr: "localhost:8443"},
 		},

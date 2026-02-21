@@ -21,17 +21,10 @@ export namespace config {
 	    output_device_id: number;
 	    volume: number;
 	    noise_enabled: boolean;
-	    noise_level: number;
-	    agc_enabled: boolean;
-	    agc_level: number;
 	    aec_enabled: boolean;
-	    vad_enabled: boolean;
-	    vad_threshold: number;
+	    agc_enabled: boolean;
 	    ptt_enabled: boolean;
 	    ptt_key: string;
-	    noise_gate_enabled: boolean;
-	    noise_gate_threshold: number;
-	    notification_volume: number;
 	    servers: ServerEntry[];
 	
 	    static createFrom(source: any = {}) {
@@ -46,17 +39,10 @@ export namespace config {
 	        this.output_device_id = source["output_device_id"];
 	        this.volume = source["volume"];
 	        this.noise_enabled = source["noise_enabled"];
-	        this.noise_level = source["noise_level"];
-	        this.agc_enabled = source["agc_enabled"];
-	        this.agc_level = source["agc_level"];
 	        this.aec_enabled = source["aec_enabled"];
-	        this.vad_enabled = source["vad_enabled"];
-	        this.vad_threshold = source["vad_threshold"];
+	        this.agc_enabled = source["agc_enabled"];
 	        this.ptt_enabled = source["ptt_enabled"];
 	        this.ptt_key = source["ptt_key"];
-	        this.noise_gate_enabled = source["noise_gate_enabled"];
-	        this.noise_gate_threshold = source["noise_gate_threshold"];
-	        this.notification_volume = source["notification_volume"];
 	        this.servers = this.convertValues(source["servers"], ServerEntry);
 	    }
 	

@@ -660,6 +660,36 @@ func (t *Transport) writeCtrlBestEffort(msg ControlMsg) {
 // connectTimeout is the maximum time allowed for the initial websocket dial + join handshake.
 const connectTimeout = 10 * time.Second
 
+// dialAddrsForWebsocket returns connection attempts for addr, adding IPv4/IPv6
+// loopback fallbacks to avoid localhost resolution mismatches.
+func dialAddrsForWebsocket(addr string) []string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return []string{addr}
+	}
+
+	out := []string{net.JoinHostPort(host, port)}
+	switch host {
+	case "localhost":
+		out = append(out, net.JoinHostPort("127.0.0.1", port), net.JoinHostPort("::1", port))
+	case "127.0.0.1":
+		out = append(out, net.JoinHostPort("::1", port))
+	case "::1":
+		out = append(out, net.JoinHostPort("127.0.0.1", port))
+	}
+
+	seen := make(map[string]struct{}, len(out))
+	unique := make([]string, 0, len(out))
+	for _, a := range out {
+		if _, ok := seen[a]; ok {
+			continue
+		}
+		seen[a] = struct{}{}
+		unique = append(unique, a)
+	}
+	return unique
+}
+
 // Connect establishes the websocket control/signaling channel and sends join.
 // Callbacks must be registered via Set* methods before calling Connect.
 func (t *Transport) Connect(ctx context.Context, addr, username string) error {
@@ -694,7 +724,13 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 		HandshakeTimeout: connectTimeout,
 	}
 
-	conn, _, err := d.DialContext(dialCtx, "wss://"+normalizedAddr+"/ws", nil)
+	var conn *websocket.Conn
+	for _, dialAddr := range dialAddrsForWebsocket(normalizedAddr) {
+		conn, _, err = d.DialContext(dialCtx, "wss://"+dialAddr+"/ws", nil)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		cancel()
 		return err

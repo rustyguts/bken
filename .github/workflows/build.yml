@@ -65,25 +65,12 @@ jobs:
             portaudio19-dev \
             libopus-dev \
             libopusfile-dev \
-            pkg-config \
-            autoconf \
-            libtool
-          git clone https://github.com/xiph/rnnoise.git
-          cd rnnoise && ./autogen.sh && ./configure --prefix=/usr && make && sudo make install
+            pkg-config
 
       - name: Install macOS dependencies
         if: matrix.build.name == 'macos'
         run: |
-          brew install portaudio opus opusfile autoconf automake libtool pkg-config
-
-          git clone --depth 1 https://github.com/xiph/rnnoise.git /tmp/rnnoise
-          cd /tmp/rnnoise
-          ./autogen.sh
-          ./configure --prefix="$HOME/.local" --disable-shared --enable-static
-          make -j"$(sysctl -n hw.ncpu)"
-          make install
-
-          echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+          brew install portaudio opus opusfile pkg-config
 
       - name: Install Windows dependencies
         if: matrix.build.name == 'windows'
@@ -96,7 +83,7 @@ jobs:
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-portaudio
             mingw-w64-x86_64-opus
-            mingw-w64-x86_64-rnnoise
+            mingw-w64-x86_64-opusfile
 
       - name: Configure Windows CGO environment
         if: matrix.build.name == 'windows'

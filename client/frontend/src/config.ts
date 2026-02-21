@@ -17,19 +17,20 @@ export interface Config {
   output_device_id: number
   volume: number
   noise_enabled: boolean
-  noise_level: number
   aec_enabled: boolean
   agc_enabled: boolean
-  agc_level: number
-  vad_enabled: boolean
-  vad_threshold: number
   ptt_enabled: boolean
   ptt_key: string
-  noise_gate_enabled: boolean
-  noise_gate_threshold: number
   servers: ServerEntry[]
   message_density?: MessageDensity
   show_system_messages?: boolean
+  // Legacy fields persisted by older builds. Kept optional for compatibility.
+  noise_level?: number
+  agc_level?: number
+  vad_enabled?: boolean
+  vad_threshold?: number
+  noise_gate_enabled?: boolean
+  noise_gate_threshold?: number
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

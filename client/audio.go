@@ -10,8 +10,6 @@ import (
 	"client/internal/aec"
 	"client/internal/agc"
 	"client/internal/jitter"
-	"client/internal/noisegate"
-	"client/internal/vad"
 
 	"github.com/gordonklaus/portaudio"
 	"gopkg.in/hraban/opus.v2"
@@ -65,7 +63,6 @@ type AudioEngine struct {
 	inputDeviceID  int
 	outputDeviceID int
 	volume         float64
-	nc             *NoiseCanceller
 
 	encoder opusEncoder
 	decoder opusDecoder
@@ -91,9 +88,7 @@ type AudioEngine struct {
 
 	agcProc    *agc.AGC
 	agcEnabled atomic.Bool
-
-	vadProc  *vad.VAD
-	gateProc *noisegate.Gate
+	noiseSuppressionEnabled atomic.Bool
 
 	running        atomic.Bool
 	testMode       atomic.Bool
@@ -130,8 +125,6 @@ func NewAudioEngine() *AudioEngine {
 		volume:         1.0,
 		aecProc:        aec.New(FrameSize),
 		agcProc:        agc.New(),
-		vadProc:        vad.New(),
-		gateProc:       noisegate.New(),
 		CaptureOut:     make(chan []byte, captureChannelBuf),
 		PlaybackIn:     make(chan TaggedAudio, playbackChannelBuf),
 		notifCh:        make(chan []float32, notifChannelBuf),
@@ -139,13 +132,6 @@ func NewAudioEngine() *AudioEngine {
 	}
 	ae.notifScale.Store(math.Float32bits(1.0))
 	return ae
-}
-
-// SetNoiseCanceller attaches (or detaches when nc is nil) a NoiseCanceller.
-func (ae *AudioEngine) SetNoiseCanceller(nc *NoiseCanceller) {
-	ae.mu.Lock()
-	ae.nc = nc
-	ae.mu.Unlock()
 }
 
 // Done returns a channel that is closed when the audio engine stops.
@@ -221,22 +207,27 @@ func (ae *AudioEngine) SetAGC(enabled bool) {
 	ae.agcEnabled.Store(enabled)
 }
 
+// SetNoiseSuppression enables or disables WebRTC-style noise suppression.
+// Current desktop capture path does not expose a built-in NS primitive, so this
+// is stored as state for API compatibility while custom RNNoise processing is removed.
+func (ae *AudioEngine) SetNoiseSuppression(enabled bool) {
+	ae.noiseSuppressionEnabled.Store(enabled)
+}
+
 // SetAGCLevel sets the AGC target loudness. level is in [0, 100] and maps to
 // an RMS target of [0.01, 0.50] (see agc.SetTarget).
 func (ae *AudioEngine) SetAGCLevel(level int) {
 	ae.agcProc.SetTarget(level)
 }
 
-// SetVAD enables or disables voice activity detection on the capture path.
-// When enabled, silent frames are not encoded or sent to the network.
+// SetVAD is a legacy no-op retained for backward compatibility.
 func (ae *AudioEngine) SetVAD(enabled bool) {
-	ae.vadProc.SetEnabled(enabled)
+	_ = enabled
 }
 
-// SetVADThreshold sets the sensitivity of the VAD. level is in [0, 100] where
-// higher values suppress more (require louder speech to be considered active).
+// SetVADThreshold is a legacy no-op retained for backward compatibility.
 func (ae *AudioEngine) SetVADThreshold(level int) {
-	ae.vadProc.SetThreshold(level)
+	_ = level
 }
 
 // SetNotificationVolume sets the notification sound volume (0.0-1.0).
@@ -255,14 +246,14 @@ func (ae *AudioEngine) NotificationVolume() float32 {
 	return math.Float32frombits(ae.notifScale.Load())
 }
 
-// SetNoiseGate enables or disables the hard noise gate on the capture path.
+// SetNoiseGate is a legacy no-op retained for backward compatibility.
 func (ae *AudioEngine) SetNoiseGate(enabled bool) {
-	ae.gateProc.SetEnabled(enabled)
+	_ = enabled
 }
 
-// SetNoiseGateThreshold sets the noise gate threshold (0-100).
+// SetNoiseGateThreshold is a legacy no-op retained for backward compatibility.
 func (ae *AudioEngine) SetNoiseGateThreshold(level int) {
-	ae.gateProc.SetThreshold(level)
+	_ = level
 }
 
 // InputLevel returns the most recent pre-gate RMS mic input level (0.0-1.0).
@@ -493,6 +484,18 @@ func clampFloat32(v float32) float32 {
 	return v
 }
 
+func frameRMS(buf []float32) float32 {
+	if len(buf) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, s := range buf {
+		x := float64(s)
+		sum += x * x
+	}
+	return float32(math.Sqrt(sum / float64(len(buf))))
+}
+
 func (ae *AudioEngine) captureLoop(buf []float32) {
 	// Reuse allocations across frames.
 	pcm := make([]int16, FrameSize)
@@ -513,25 +516,12 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 			ae.aecProc.Process(buf)
 		}
 
-		// Apply noise gate: zeroes frames below threshold and returns
-		// the pre-gate RMS for the input level meter.
-		preGateRMS := ae.gateProc.Process(buf)
-		ae.inputLevel.Store(math.Float32bits(preGateRMS))
-
-		// Compute RMS after gate for speaking detection and VAD.
-		rms := vad.RMS(buf)
+		rms := frameRMS(buf)
+		ae.inputLevel.Store(math.Float32bits(rms))
 
 		if ae.OnSpeaking != nil && !ae.muted.Load() && rms > 0.01 && time.Since(lastSpeakEmit) > 80*time.Millisecond {
 			lastSpeakEmit = time.Now()
 			ae.OnSpeaking()
-		}
-
-		// Apply noise cancellation if enabled.
-		ae.mu.Lock()
-		nc := ae.nc
-		ae.mu.Unlock()
-		if nc != nil {
-			nc.Process(buf)
 		}
 
 		// Apply AGC if enabled.
@@ -544,25 +534,6 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 		// speaking detection so those subsystems stay primed.
 		if ae.pttMode.Load() && !ae.pttActive.Load() {
 			continue
-		}
-
-		// Voice activity detection: skip silent frames entirely to save
-		// CPU and bandwidth. Hangover keeps trailing frames so word endings
-		// are not clipped. Bypassed in PTT mode since the user explicitly
-		// controls transmission.
-		//
-		// When RNNoise noise cancellation is active, use its ML-based voice
-		// probability instead of energy-threshold VAD — it is far better at
-		// rejecting non-speech noise (keyboard clicks, fans, HVAC) that
-		// happens to have similar energy levels to speech.
-		if !ae.pttMode.Load() {
-			if nc != nil {
-				if !ae.vadProc.ShouldSendProb(nc.VADProbability()) {
-					continue
-				}
-			} else if !ae.vadProc.ShouldSend(vad.RMS(buf)) {
-				continue
-			}
 		}
 
 		// Convert float32 to int16 for Opus encoder.

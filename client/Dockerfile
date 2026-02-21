@@ -20,21 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pipewire-alsa \
     pipewire-jack \
     unzip \
-    autoconf automake libtool git \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 22 via NodeSource — Bookworm's Node 18 is too old for @tailwindcss/oxide.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
-
-# rnnoise is not in Debian Bookworm main — build from source.
-RUN git clone --depth=1 https://github.com/xiph/rnnoise /tmp/rnnoise \
-    && cd /tmp/rnnoise \
-    && ./autogen.sh \
-    && ./configure --prefix=/usr \
-    && make install \
-    && rm -rf /tmp/rnnoise
 
 # World-accessible GOPATH so the container can run as the host user.
 ENV GOPATH=/go
@@ -64,12 +55,12 @@ RUN mkdir -p \
 
 # ── dev: wails dev with source mounted at /app ────────────────────────────────
 FROM base AS dev
-CMD ["sh", "-c", "cd /app/frontend && npm install && cd /app && wails dev -tags webkit2_41"]
+CMD ["sh", "-c", "cd /app/frontend && bun install && cd /app && wails dev -tags webkit2_41"]
 
 # ── build: compile Wails desktop binary ──────────────────────────────────────
 FROM base AS build
 COPY . .
-RUN cd frontend && npm install
+RUN cd frontend && bun install
 RUN wails build -tags webkit2_41
 
 # ── prod: slim runtime with only shared libraries ─────────────────────────────
@@ -85,6 +76,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/build/bin/client /client
-# rnnoise shared lib from the build stage (not in bookworm-slim repos).
-COPY --from=build /usr/lib/librnnoise* /usr/lib/
 ENTRYPOINT ["/client"]
