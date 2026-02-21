@@ -4,7 +4,7 @@ import type { Channel, User } from './types'
 import UserProfilePopup from './UserProfilePopup.vue'
 import { SetUserVolume, GetUserVolume, StartRecording, StopRecording, RenameServer } from './config'
 import { BKEN_SCHEME } from './constants'
-import { Volume2, VolumeX, Mic, MicOff, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor, PhoneOff } from 'lucide-vue-next'
+import { Volume2, VolumeX, Mic, MicOff, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor, PhoneOff, AudioLines } from 'lucide-vue-next'
 
 const props = defineProps<{
   channels: Channel[]
@@ -25,6 +25,7 @@ const props = defineProps<{
   recordingChannels: Record<number, { recording: boolean; startedBy: string }>
   muted: boolean
   deafened: boolean
+  userVoiceFlags: Record<number, { muted: boolean; deafened: boolean }>
 }>()
 
 const emit = defineEmits<{
@@ -402,7 +403,6 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
           class="group flex w-full min-w-0 items-center justify-start gap-1.5 text-left"
           :class="[
             selectedChannelId === channel.id ? 'active' : '',
-            isConnectedToChannel(channel.id) ? 'font-semibold' : '',
           ]"
           @contextmenu="openContextMenu($event, channel)"
         >
@@ -428,8 +428,11 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
           </template>
 
           <template v-else>
-            <!-- Channel icon: speaker if connected, hash otherwise -->
-            <Volume2 v-if="isConnectedToChannel(channel.id)" class="w-3.5 h-3.5 shrink-0 text-success" aria-hidden="true" />
+            <AudioLines
+              v-if="usersForChannel(channel.id).length > 0"
+              class="w-3.5 h-3.5 shrink-0 text-success"
+              aria-hidden="true"
+            />
             <span v-else class="text-base-content/40 font-bold text-xs shrink-0">#</span>
 
             <span class="truncate flex-1">{{ channel.name }}</span>
@@ -462,40 +465,45 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
               {{ unreadCounts[channel.id] > 99 ? '99+' : unreadCounts[channel.id] }}
             </span>
 
-            <div
-              v-if="!isConnectedToChannel(channel.id) || usersForChannel(channel.id).length > 0"
-              class="ml-auto flex shrink-0 items-center justify-end gap-1"
-            >
+            <div class="ml-auto flex shrink-0 items-center justify-end gap-1">
+              <!-- Keep Join button footprint to avoid row jitter on connect/disconnect. -->
+              <button
+                class="btn btn-xs btn-primary transition-opacity gap-1"
+                :class="isConnectedToChannel(channel.id) ? 'invisible pointer-events-none' : 'opacity-0 group-hover:opacity-100'"
+                title="Connect to voice"
+                :disabled="isConnectedToChannel(channel.id)"
+                :tabindex="isConnectedToChannel(channel.id) ? -1 : undefined"
+                :aria-hidden="isConnectedToChannel(channel.id)"
+                @click="joinVoice(channel.id, $event)"
+              >
+                <Mic class="w-3 h-3" aria-hidden="true" />
+                Join
+              </button>
+
               <span
                 v-if="usersForChannel(channel.id).length > 0"
                 class="badge badge-ghost badge-xs"
               >
                 {{ usersForChannel(channel.id).length }}{{ channel.max_users ? '/' + channel.max_users : '' }}
               </span>
-
-              <!-- Join button (hover reveal, hidden if already in this channel) -->
-              <button
-                v-if="!isConnectedToChannel(channel.id)"
-                class="btn btn-xs btn-primary opacity-0 group-hover:opacity-100 transition-opacity"
-                title="Connect to voice"
-                @click="joinVoice(channel.id, $event)"
-              >
-                Join
-              </button>
             </div>
           </template>
         </a>
 
-        <!-- Nested vertical user list -->
-        <ul v-if="usersForChannel(channel.id).length > 0">
-          <li v-for="user in usersForChannel(channel.id)" :key="`${channel.id}-${user.id}`">
-            <a
-              class="flex items-center gap-2 py-1"
+        <!-- User list nested under channel row for clear hierarchy and single-hover behavior. -->
+        <ul v-if="usersForChannel(channel.id).length > 0" class="ml-5 mt-0.5 flex flex-col gap-0.5 py-0.5 border-0 pl-0 [&::before]:hidden">
+          <li
+            v-for="user in usersForChannel(channel.id)"
+            :key="`${channel.id}-${user.id}`"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 py-1 px-2 rounded-lg text-left bg-transparent border-0 hover:bg-base-content/5"
               :class="user.id !== myId ? 'cursor-context-menu' : ''"
               @click.stop="openProfilePopup($event, user)"
               @contextmenu="openUserContextMenu($event, user, channel.id)"
             >
-              <div class="avatar avatar-placeholder">
+              <div class="avatar avatar-placeholder shrink-0">
                 <div
                   class="w-5 rounded-full text-[9px] transition-all duration-150"
                   :class="speakingUsers.has(user.id) ? 'bg-success/20 ring-1 ring-success/50' : 'bg-neutral text-neutral-content'"
@@ -504,21 +512,28 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
                 </div>
               </div>
               <span class="text-xs truncate">{{ user.username }}</span>
-              <span
-                v-if="speakingUsers.has(user.id)"
-                class="badge badge-xs badge-success animate-pulse ml-auto"
-              />
-            </a>
+              <span class="ml-auto flex items-center gap-1 shrink-0">
+                <MicOff
+                  v-if="userVoiceFlags[user.id]?.muted"
+                  class="w-3 h-3 text-error/60 shrink-0"
+                  aria-label="Muted"
+                />
+                <VolumeX
+                  v-if="userVoiceFlags[user.id]?.deafened"
+                  class="w-3 h-3 text-error/60 shrink-0"
+                  aria-label="Deafened"
+                />
+              </span>
+            </button>
           </li>
         </ul>
       </li>
     </ul>
 
-    <div v-if="voiceConnected" class="border-t border-base-content/10 p-2 shrink-0 space-y-1">
-      <p class="px-1 text-[10px] font-semibold uppercase tracking-wider opacity-50">Channel Actions</p>
-      <div class="join join-horizontal w-full">
+    <div v-if="voiceConnected" class="border-t border-base-content/10 p-2 shrink-0">
+      <div class="flex justify-evenly">
         <button
-          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
+          class="btn btn-ghost btn-sm btn-square"
           :class="muted ? 'text-error' : ''"
           :aria-pressed="muted"
           :title="muted ? 'Unmute' : 'Mute'"
@@ -526,10 +541,9 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
         >
           <Mic v-if="!muted" class="w-4 h-4" aria-hidden="true" />
           <MicOff v-else class="w-4 h-4" aria-hidden="true" />
-          <span class="text-xs">{{ muted ? 'Unmute' : 'Mute' }}</span>
         </button>
         <button
-          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
+          class="btn btn-ghost btn-sm btn-square"
           :class="deafened ? 'text-error' : ''"
           :aria-pressed="deafened"
           :title="deafened ? 'Undeafen' : 'Deafen'"
@@ -537,29 +551,24 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
         >
           <Volume2 v-if="!deafened" class="w-4 h-4" aria-hidden="true" />
           <VolumeX v-else class="w-4 h-4" aria-hidden="true" />
-          <span class="text-xs">{{ deafened ? 'Undeafen' : 'Deafen' }}</span>
         </button>
-      </div>
-      <div class="join join-horizontal w-full">
         <button
-          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
+          class="btn btn-ghost btn-sm btn-square"
           :class="videoActive ? 'text-success' : ''"
           :disabled="true"
           title="Video is not available yet"
           @click="emit('video-toggle')"
         >
           <Video class="w-4 h-4" aria-hidden="true" />
-          <span class="text-xs">{{ videoActive ? 'Video On' : 'Video' }}</span>
         </button>
         <button
-          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
+          class="btn btn-ghost btn-sm btn-square"
           :class="screenSharing ? 'text-success' : ''"
           :disabled="true"
           title="Screen sharing is not available yet"
           @click="emit('screen-share-toggle')"
         >
           <Monitor class="w-4 h-4" aria-hidden="true" />
-          <span class="text-xs">{{ screenSharing ? 'Sharing On' : 'Share Screen' }}</span>
         </button>
       </div>
     </div>

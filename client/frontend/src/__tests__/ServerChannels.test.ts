@@ -27,6 +27,7 @@ describe('ServerChannels', () => {
     screenSharing: false,
     muted: false,
     deafened: false,
+    userVoiceFlags: {} as Record<number, { muted: boolean; deafened: boolean }>,
   }
 
   it('mounts without errors', () => {
@@ -109,11 +110,11 @@ describe('ServerChannels', () => {
     expect(w.text()).toContain('Connection failed')
   })
 
-  it('shows connected channel with speaker icon and semibold text', () => {
-    // myId=1 is in channel 1 (via userChannels), so channel 1 should show as connected
+  it('keeps channel text basic and shows green audio icon when channel has users', () => {
+    // myId=1 is in channel 1 (via userChannels), but channel text should remain basic.
     const w = mount(ServerChannels, { props: baseProps, ...stubs })
     const connectedLink = w.find('a.font-semibold')
-    expect(connectedLink.exists()).toBe(true)
+    expect(connectedLink.exists()).toBe(false)
     const speakerIcon = w.find('svg.text-success')
     expect(speakerIcon.exists()).toBe(true)
   })
@@ -236,10 +237,11 @@ describe('ServerChannels', () => {
       props: { ...baseProps, channels, userChannels: { 1: 1, 2: 1 } },
       ...stubs,
     })
-    const joinBtn = w.findAll('button').find(b => b.text().includes('Join'))
+    const joinBtn = w.findAll('button[title="Connect to voice"]').find(b => b.attributes('aria-hidden') !== 'true')
     expect(joinBtn).toBeDefined()
     await joinBtn!.trigger('click')
     expect(w.emitted('join')).toBeDefined()
+    expect(w.emitted('join')![0]).toEqual([2])
   })
 
   it('shows no channels message when channels list is empty', () => {

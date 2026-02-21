@@ -27,6 +27,8 @@ type userState struct {
 	connected map[string]struct{}
 	voice     *protocol.VoiceState
 	send      chan protocol.Message
+	muted     bool
+	deafened  bool
 }
 
 // ChannelState is the global in-memory presence state.
@@ -184,6 +186,8 @@ func (r *ChannelState) DisconnectServer(userID, serverID string) (protocol.User,
 		v := *u.voice
 		oldVoice = &v
 		u.voice = nil
+		u.muted = false
+		u.deafened = false
 	}
 
 	slog.Debug("server disconnected", "user_id", userID, "server_id", serverID, "voice_cleared", oldVoice != nil)
@@ -235,9 +239,31 @@ func (r *ChannelState) DisconnectVoice(userID string) (protocol.User, *protocol.
 	}
 	v := *u.voice
 	u.voice = nil
+	u.muted = false
+	u.deafened = false
 
 	slog.Info("voice disconnected", "user_id", userID, "was_server", v.ServerID, "was_channel", v.ChannelID)
 	return toProtocolUser(u), &v, true
+}
+
+// SetVoiceFlags updates the muted/deafened flags for a user in voice.
+// Returns the updated User and whether any flag actually changed.
+func (r *ChannelState) SetVoiceFlags(userID string, muted, deafened bool) (protocol.User, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u, ok := r.users[userID]
+	if !ok || u.voice == nil {
+		return protocol.User{}, false
+	}
+	if u.muted == muted && u.deafened == deafened {
+		return toProtocolUser(u), false
+	}
+	u.muted = muted
+	u.deafened = deafened
+
+	slog.Debug("voice flags updated", "user_id", userID, "muted", muted, "deafened", deafened)
+	return toProtocolUser(u), true
 }
 
 // CanSendText reports whether a user is connected to the target server.
@@ -423,6 +449,8 @@ func toProtocolUser(u *userState) protocol.User {
 	}
 	if u.voice != nil {
 		v := *u.voice
+		v.Muted = u.muted
+		v.Deafened = u.deafened
 		out.Voice = &v
 	}
 	return out

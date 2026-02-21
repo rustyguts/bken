@@ -33,6 +33,7 @@ const props = defineProps<{
   messageDensity: 'compact' | 'default' | 'comfortable'
   showSystemMessages: boolean
   servers: ServerEntry[]
+  userVoiceFlags: Record<number, { muted: boolean; deafened: boolean }>
 }>()
 
 
@@ -103,13 +104,34 @@ watch(() => props.startupAddr, (addr) => {
 }, { immediate: true })
 
 async function handleMuteToggle(): Promise<void> {
-  muted.value = !muted.value
-  await SetMuted(muted.value)
+  if (muted.value) {
+    // Unmuting: if deafened, also undeafen
+    muted.value = false
+    if (deafened.value) {
+      deafened.value = false
+      await SetDeafened(false)
+    }
+    await SetMuted(false)
+  } else {
+    muted.value = true
+    await SetMuted(true)
+  }
 }
 
 async function handleDeafenToggle(): Promise<void> {
-  deafened.value = !deafened.value
-  await SetDeafened(deafened.value)
+  if (deafened.value) {
+    // Undeafening: just undeafen (mute stays as-is)
+    deafened.value = false
+    await SetDeafened(false)
+  } else {
+    // Deafening: also mute
+    deafened.value = true
+    if (!muted.value) {
+      muted.value = true
+      await SetMuted(true)
+    }
+    await SetDeafened(true)
+  }
 }
 
 function handleDisconnectVoice(): void {
@@ -208,6 +230,7 @@ function handleSendMessage(message: string): void {
         :recording-channels="recordingChannels"
         :muted="muted"
         :deafened="deafened"
+        :user-voice-flags="userVoiceFlags"
         @join="handleJoinChannel"
         @select="handleSelectChannel"
         @create-channel="emit('createChannel', $event)"

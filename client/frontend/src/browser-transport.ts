@@ -228,6 +228,17 @@ export class BrowserTransport {
 
     this.eventBus.EventsEmit('user:list', users)
     this.eventBus.EventsEmit('user:me', { id: this.selfLocalId })
+
+    // Emit voice flags for users already in voice
+    for (const u of msg.users || []) {
+      if (u.voice) {
+        this.eventBus.EventsEmit('channel:user_voice_flags', {
+          user_id: this.translateId(u.id),
+          muted: !!u.voice.muted,
+          deafened: !!u.voice.deafened,
+        })
+      }
+    }
   }
 
   private handleMessage(msg: any): void {
@@ -268,6 +279,13 @@ export class BrowserTransport {
           user_id: localId,
           channel_id: channelId,
         })
+        if (user.voice) {
+          this.eventBus.EventsEmit('channel:user_voice_flags', {
+            user_id: localId,
+            muted: !!user.voice.muted,
+            deafened: !!user.voice.deafened,
+          })
+        }
         break
       }
 

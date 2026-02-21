@@ -232,6 +232,8 @@ func (m *mockTransport) SetOnRecordingState(fn func(int64, bool, string))  { m.o
 func (m *mockTransport) SetOnVideoLayers(fn func(uint16, []VideoLayer))    { m.onVideoLayers = fn }
 func (m *mockTransport) SetOnVideoQualityRequest(fn func(uint16, string))  { m.onVideoQualityReq = fn }
 func (m *mockTransport) SetOnMessageHistory(fn func(int64, []ChatHistoryMessage)) {}
+func (m *mockTransport) SetOnUserVoiceFlags(fn func(uint16, bool, bool))          {}
+func (m *mockTransport) SendVoiceFlags(muted, deafened bool) error                { return nil }
 
 // Chat operations
 func (m *mockTransport) SendChat(message string) error {

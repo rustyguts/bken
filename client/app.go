@@ -268,6 +268,12 @@ func (a *App) SetMuted(muted bool) {
 	} else {
 		a.audio.PlayNotification(SoundUnmute)
 	}
+	a.mu.RLock()
+	tr := a.transport
+	a.mu.RUnlock()
+	if tr != nil {
+		_ = tr.SendVoiceFlags(muted, a.audio.IsDeafened())
+	}
 }
 
 // SetDeafened enables or disables audio playback.
@@ -278,6 +284,12 @@ func (a *App) SetDeafened(deafened bool) {
 		a.audio.PlayNotification(SoundMute)
 	} else {
 		a.audio.PlayNotification(SoundUnmute)
+	}
+	a.mu.RLock()
+	tr := a.transport
+	a.mu.RUnlock()
+	if tr != nil {
+		_ = tr.SendVoiceFlags(a.audio.IsMuted(), deafened)
 	}
 }
 
@@ -667,6 +679,15 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			"server_addr": serverAddr,
 			"channel_id":  channelID,
 			"messages":    messages,
+		})
+	})
+	tr.SetOnUserVoiceFlags(func(userID uint16, muted, deafened bool) {
+		slog.Debug("emit channel:user_voice_flags", "addr", serverAddr, "user_id", userID, "muted", muted, "deafened", deafened)
+		wailsrt.EventsEmit(a.ctx, "channel:user_voice_flags", map[string]any{
+			"server_addr": serverAddr,
+			"user_id":     int(userID),
+			"muted":       muted,
+			"deafened":    deafened,
 		})
 	})
 	a.audio.OnSpeaking = func() {

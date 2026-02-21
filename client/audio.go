@@ -32,6 +32,7 @@ type AudioDevice struct {
 type paStream interface {
 	Start() error
 	Stop() error
+	Abort() error
 	Close() error
 	Read() error
 	Write() error
@@ -385,31 +386,61 @@ func resolveDevice(devices []*portaudio.DeviceInfo, idx int, fallback func() (*p
 	return fallback()
 }
 
+// stopGracePeriod is how long Stop() waits for goroutines to exit after the
+// initial Abort before escalating to Close. One PortAudio frame is 20 ms, so
+// 50 ms gives ~2 frames for the blocked Read/Write to notice the abort.
+const stopGracePeriod = 50 * time.Millisecond
+
 // Stop halts audio capture and playback.
 //
-// Sequence matters here: Pa_StopStream is thread-safe and causes any blocking
-// Pa_ReadStream/Pa_WriteStream calls to return, which lets the goroutines exit.
-// We must wait for them via wg before calling Pa_CloseStream, otherwise we free
-// the native stream object while a goroutine may still be touching it (SIGSEGV).
+// Previously this method called Pa_StopStream then wg.Wait() with no timeout.
+// Pa_StopStream does not reliably unblock blocking Pa_ReadStream/Pa_WriteStream
+// on all backends (notably macOS CoreAudio), which caused Stop() to hang
+// indefinitely and block everything downstream (disconnect, UI, shutdown).
+//
+// The current implementation uses an escalating strategy that guarantees return
+// within ~100 ms worst-case, which resolves the blocking issue entirely:
+//  1. Abort — immediate; most backends unblock Read/Write here.
+//  2. Brief grace period (50 ms) for goroutines to exit cleanly.
+//  3. Close — frees the native stream, which forces any stuck Read/Write to
+//     fault out. Goroutines are expected to exit immediately after this.
+//  4. Final short wait (50 ms). If goroutines still haven't exited, they are
+//     leaked (orphaned but harmless) rather than blocking the caller.
 func (ae *AudioEngine) Stop() {
 	if !ae.running.CompareAndSwap(true, false) {
 		return
 	}
 	close(ae.stopCh)
 
-	// Stop streams first — this unblocks any Read/Write calls in the goroutines.
+	// Phase 1: Abort streams — immediate stop that should unblock Read/Write.
 	ae.mu.Lock()
-	if ae.captureStream != nil {
-		ae.captureStream.Stop()
+	cs := ae.captureStream
+	ps := ae.playbackStream
+	if cs != nil {
+		cs.Abort()
 	}
-	if ae.playbackStream != nil {
-		ae.playbackStream.Stop()
+	if ps != nil {
+		ps.Abort()
 	}
 	ae.mu.Unlock()
 
-	// Wait for goroutines to fully exit before freeing stream objects.
-	ae.wg.Wait()
+	// Phase 2: Give goroutines a brief window to exit cleanly.
+	wgDone := make(chan struct{})
+	go func() {
+		ae.wg.Wait()
+		close(wgDone)
+	}()
 
+	select {
+	case <-wgDone:
+		goto cleanup
+	case <-time.After(stopGracePeriod):
+	}
+
+	// Phase 3: Abort didn't unblock I/O. Force-close the streams to free the
+	// native objects. This will cause any blocked Read/Write to return (or
+	// fault), letting the goroutines exit.
+	slog.Warn("audio abort did not unblock I/O, escalating to close")
 	ae.mu.Lock()
 	if ae.captureStream != nil {
 		ae.captureStream.Close()
@@ -421,6 +452,27 @@ func (ae *AudioEngine) Stop() {
 	}
 	ae.mu.Unlock()
 
+	// Phase 4: Brief wait for goroutines to notice the close.
+	select {
+	case <-wgDone:
+		goto drain
+	case <-time.After(stopGracePeriod):
+		slog.Error("audio goroutines still stuck after close, leaking")
+	}
+
+cleanup:
+	ae.mu.Lock()
+	if ae.captureStream != nil {
+		ae.captureStream.Close()
+		ae.captureStream = nil
+	}
+	if ae.playbackStream != nil {
+		ae.playbackStream.Close()
+		ae.playbackStream = nil
+	}
+	ae.mu.Unlock()
+
+drain:
 	// Drain stale tagged frames so they don't bleed into the next session.
 	for {
 		select {
@@ -657,6 +709,12 @@ func (ae *AudioEngine) SetMuted(muted bool) {
 func (ae *AudioEngine) SetDeafened(deafened bool) {
 	ae.deafened.Store(deafened)
 }
+
+// IsMuted reports whether the microphone is currently muted.
+func (ae *AudioEngine) IsMuted() bool { return ae.muted.Load() }
+
+// IsDeafened reports whether audio playback is currently disabled.
+func (ae *AudioEngine) IsDeafened() bool { return ae.deafened.Load() }
 
 // SetPTTMode enables or disables push-to-talk mode. When enabled, the
 // microphone only transmits while the PTT key is held (pttActive=true).

@@ -396,7 +396,7 @@ function renderMessage(msg: ChatMessage): string {
       </div>
     </Transition>
 
-    <header class="navbar min-h-0 h-auto border-b border-base-content/10 px-3 py-1 shrink-0">
+    <header class="navbar min-h-0 h-auto border-b border-base-content/10 px-2 py-0.5 shrink-0">
       <div class="flex-1 flex flex-col gap-1">
         <div class="flex items-center gap-2">
           <h2 class="text-sm font-semibold"># {{ selectedChannelName }}</h2>
@@ -468,11 +468,11 @@ function renderMessage(msg: ChatMessage): string {
       </ul>
     </div>
 
-    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto px-3 py-1">
+    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto px-3 py-0.5">
       <div v-if="!connected" class="text-sm opacity-40 text-center pt-6">Connect to a server to start chatting</div>
       <div v-else-if="visibleMessages.length === 0" class="text-sm opacity-40 text-center pt-6">No messages in this channel yet</div>
 
-      <div :class="[density === 'compact' ? 'space-y-0' : density === 'comfortable' ? 'space-y-2' : 'space-y-1']">
+      <div :class="[density === 'compact' ? 'space-y-0' : density === 'comfortable' ? 'space-y-2' : 'space-y-0.5']">
       <div
         v-for="msg in visibleMessages"
         :key="msg.id"
@@ -483,93 +483,138 @@ function renderMessage(msg: ChatMessage): string {
           <span class="badge badge-ghost badge-sm italic">{{ msg.message }}</span>
         </div>
 
-        <!-- Chat message (DaisyUI chat component) -->
+        <!-- Chat message: compact = IRC style, otherwise Discord style -->
+
+        <!-- IRC style (compact) -->
         <div
-          v-else
-          class="chat group"
+          v-else-if="density === 'compact'"
+          class="group flex items-baseline gap-1.5 px-1 py-px text-sm rounded hover:bg-base-content/5"
           :class="[
-            msg.senderId === myId ? 'chat-end' : 'chat-start',
-            isMentioned(msg) ? 'bg-warning/10 rounded border-l-2 border-warning' : '',
-            msg.pinned ? 'border-l-2 border-info/40 rounded' : '',
+            isMentioned(msg) ? 'bg-warning/10 border-l-2 border-warning' : '',
+            msg.pinned ? 'border-l-2 border-info/40' : '',
           ]"
         >
-          <!-- Avatar (hidden in compact density) -->
-          <div v-if="density !== 'compact'" class="chat-image">
+          <span class="font-semibold text-primary shrink-0">{{ msg.username }}:</span>
+          <span v-if="msg.deleted" class="opacity-40 italic">message deleted</span>
+          <span v-else-if="editingMsgId === msg.msgId" class="flex items-center gap-2 flex-1">
+            <input
+              ref="editInputEl"
+              v-model="editInput"
+              type="text"
+              maxlength="500"
+              class="input input-xs flex-1"
+              @keydown.enter.prevent="submitEdit"
+              @keydown.escape.prevent="cancelEdit"
+            />
+            <button class="btn btn-xs btn-primary" @click="submitEdit">Save</button>
+            <button class="btn btn-xs btn-ghost" @click="cancelEdit">Cancel</button>
+          </span>
+          <span v-else v-html="renderMessage(msg)" />
+          <span v-if="msg.edited" class="text-[10px] opacity-30 shrink-0">(edited)</span>
+          <!-- Hover actions -->
+          <span class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5 ml-auto shrink-0">
+            <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
+              <Smile class="w-3 h-3" aria-hidden="true" />
+            </button>
+            <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
+              <Reply class="w-3 h-3" aria-hidden="true" />
+            </button>
+            <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit" @click="startEdit(msg)">
+              <Pencil class="w-3 h-3" aria-hidden="true" />
+            </button>
+            <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete" @click="confirmDelete(msg)">
+              <Trash2 class="w-3 h-3" aria-hidden="true" />
+            </button>
+          </span>
+          <!-- Reaction picker -->
+          <div v-if="reactionPickerMsgId === msg.msgId" class="flex gap-0.5 flex-wrap p-1 bg-base-300 rounded-lg w-fit">
+            <button
+              v-for="emoji in commonEmojis"
+              :key="emoji"
+              class="btn btn-ghost btn-xs btn-square text-base"
+              @click="$emit('addReaction', msg.msgId, emoji); reactionPickerMsgId = null"
+            >{{ emoji }}</button>
+          </div>
+        </div>
+
+        <!-- Discord style (default / comfortable) -->
+        <div
+          v-else
+          class="group flex gap-3 px-2 py-1 rounded hover:bg-base-content/5"
+          :class="[
+            isMentioned(msg) ? 'bg-warning/10 border-l-2 border-warning' : '',
+            msg.pinned ? 'border-l-2 border-info/40' : '',
+          ]"
+        >
+          <!-- Avatar -->
+          <div class="shrink-0 pt-0.5">
             <div class="avatar avatar-placeholder">
-              <div class="bg-neutral text-neutral-content rounded-full" :class="density === 'comfortable' ? 'w-10' : 'w-8'">
+              <div
+                class="bg-neutral text-neutral-content rounded-full"
+                :class="density === 'comfortable' ? 'w-10' : 'w-9'"
+              >
                 <span class="text-xs">{{ initials(msg.username) }}</span>
               </div>
             </div>
           </div>
 
-          <!-- Header: username + time -->
-          <div class="chat-header flex items-baseline gap-2">
-            {{ msg.username }}
-            <time class="text-xs opacity-50">{{ formatTime(msg.ts) }}</time>
-            <span v-if="msg.edited" class="text-[10px] opacity-30">(edited)</span>
-            <span v-if="msg.pinned" class="badge badge-info badge-xs">pinned</span>
-          </div>
+          <!-- Content -->
+          <div class="flex-1 min-w-0">
+            <!-- Header row -->
+            <div class="flex items-baseline gap-2 leading-tight">
+              <span class="font-semibold text-primary text-sm">{{ msg.username }}</span>
+              <time class="text-xs opacity-40">{{ formatTime(msg.ts) }}</time>
+              <span v-if="msg.edited" class="text-[10px] opacity-30">(edited)</span>
+              <span v-if="msg.pinned" class="badge badge-info badge-xs">pinned</span>
+              <!-- Hover action icons -->
+              <span
+                v-if="!msg.deleted"
+                class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5 ml-auto"
+              >
+                <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
+                  <Smile class="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+                <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
+                  <Reply class="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+                <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
+                  <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+                <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
+                  <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </span>
+            </div>
 
-          <!-- Bubble -->
-          <div
-            v-if="msg.deleted"
-            class="chat-bubble chat-bubble-ghost opacity-40 italic text-sm"
-          >
-            message deleted
-          </div>
-          <template v-else>
-            <!-- Reply preview above bubble -->
-            <div v-if="msg.replyPreview" class="text-xs opacity-60 cursor-pointer mb-0.5 flex items-center gap-1" @click="scrollToMessage(msg.replyPreview.msg_id)">
+            <!-- Reply preview -->
+            <div v-if="msg.replyPreview" class="text-xs opacity-60 cursor-pointer mb-0.5 flex items-center gap-1 border-l-2 border-base-content/20 pl-2" @click="scrollToMessage(msg.replyPreview.msg_id)">
               <span class="font-semibold text-primary">{{ msg.replyPreview.username }}:</span>
               <span v-if="msg.replyPreview.deleted" class="italic">message deleted</span>
               <span v-else class="truncate max-w-[250px]">{{ msg.replyPreview.message }}</span>
             </div>
 
-            <!-- Inline edit mode -->
-            <div v-if="editingMsgId === msg.msgId" class="chat-bubble flex items-center gap-2">
-              <input
-                ref="editInputEl"
-                v-model="editInput"
-                type="text"
-                maxlength="500"
-                class="input input-xs flex-1"
-                @keydown.enter.prevent="submitEdit"
-                @keydown.escape.prevent="cancelEdit"
-              />
-              <button class="btn btn-xs btn-primary" @click="submitEdit">Save</button>
-              <button class="btn btn-xs btn-ghost" @click="cancelEdit">Cancel</button>
-            </div>
-
-            <!-- Normal bubble -->
-            <div
-              v-else
-              class="chat-bubble text-sm"
-              :class="msg.senderId === myId ? 'chat-bubble-primary' : ''"
-            >
-              <span v-if="msg.message" v-html="renderMessage(msg)" />
-            </div>
-          </template>
-
-          <!-- Footer: action buttons + reactions -->
-          <div class="chat-footer">
-            <!-- Hover action icons -->
-            <span
-              v-if="!msg.deleted"
-              class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
-            >
-              <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
-                <Smile class="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
-                <Reply class="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
-                <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
-                <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </span>
+            <!-- Message content -->
+            <div v-if="msg.deleted" class="text-sm opacity-40 italic">message deleted</div>
+            <template v-else>
+              <!-- Inline edit -->
+              <div v-if="editingMsgId === msg.msgId" class="flex items-center gap-2 mt-0.5">
+                <input
+                  ref="editInputEl"
+                  v-model="editInput"
+                  type="text"
+                  maxlength="500"
+                  class="input input-xs flex-1"
+                  @keydown.enter.prevent="submitEdit"
+                  @keydown.escape.prevent="cancelEdit"
+                />
+                <button class="btn btn-xs btn-primary" @click="submitEdit">Save</button>
+                <button class="btn btn-xs btn-ghost" @click="cancelEdit">Cancel</button>
+              </div>
+              <!-- Text -->
+              <div v-else class="text-sm leading-snug">
+                <span v-if="msg.message" v-html="renderMessage(msg)" />
+              </div>
+            </template>
 
             <!-- Reaction picker -->
             <div v-if="reactionPickerMsgId === msg.msgId" class="flex gap-0.5 flex-wrap mt-1 p-1 bg-base-300 rounded-lg w-fit">
@@ -578,9 +623,7 @@ function renderMessage(msg: ChatMessage): string {
                 :key="emoji"
                 class="btn btn-ghost btn-xs btn-square text-base"
                 @click="$emit('addReaction', msg.msgId, emoji); reactionPickerMsgId = null"
-              >
-                {{ emoji }}
-              </button>
+              >{{ emoji }}</button>
             </div>
 
             <!-- Reactions display -->
@@ -608,7 +651,7 @@ function renderMessage(msg: ChatMessage): string {
                 <img
                   :src="msg.fileUrl"
                   :alt="msg.fileName"
-                  class="max-w-[320px] max-h-[240px] rounded border border-base-content/10 object-contain"
+                  class="max-w-[240px] max-h-[180px] rounded border border-base-content/10 object-contain"
                   loading="lazy"
                 />
                 <span class="text-[11px] opacity-50 mt-0.5 block">
@@ -680,7 +723,7 @@ function renderMessage(msg: ChatMessage): string {
       </button>
     </div>
 
-    <footer class="border-t border-base-content/10 p-2 relative">
+    <footer class="border-t border-base-content/10 px-2 py-1 relative">
       <!-- @mention autocomplete popup -->
       <ul v-if="mentionActive && mentionSuggestions.length > 0" class="menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 absolute bottom-full left-0 right-0 mx-2 mb-1 max-h-[200px] overflow-y-auto z-40">
         <li
@@ -721,3 +764,4 @@ function renderMessage(msg: ChatMessage): string {
     </footer>
   </section>
 </template>
+

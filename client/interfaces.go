@@ -50,6 +50,10 @@ type Transporter interface {
 	SetOnVideoLayers(fn func(userID uint16, layers []VideoLayer))
 	SetOnVideoQualityRequest(fn func(fromUserID uint16, quality string))
 	SetOnMessageHistory(fn func(channelID int64, messages []ChatHistoryMessage))
+	SetOnUserVoiceFlags(fn func(userID uint16, muted, deafened bool))
+
+	// Voice state broadcasting.
+	SendVoiceFlags(muted, deafened bool) error
 
 	// Chat.
 	SendChat(message string) error

@@ -6,6 +6,8 @@ export interface User {
   username: string
   channel_id?: number // the channel the user is currently in
   role?: 'OWNER' | 'ADMIN' | 'MODERATOR' | 'USER'
+  muted?: boolean
+  deafened?: boolean
 }
 
 /** A voice channel on the server. */

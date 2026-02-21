@@ -29,6 +29,7 @@ interface ServerState {
   recordingChannels: Record<number, { recording: boolean; startedBy: string }>
   typingUsers: Record<number, { username: string; channelId: number; expiresAt: number }>
   connectError: string
+  userVoiceFlags: Record<number, { muted: boolean; deafened: boolean }>
 }
 
 const reconnecting = ref(false)
@@ -75,6 +76,7 @@ function emptyServerState(): ServerState {
     recordingChannels: {},
     typingUsers: {},
     connectError: '',
+    userVoiceFlags: {},
   }
 }
 
@@ -101,6 +103,7 @@ const videoStates = computed(() => serverState.value.videoStates)
 const recordingChannels = computed(() => serverState.value.recordingChannels)
 const typingUsers = computed(() => serverState.value.typingUsers)
 const connectError = computed(() => serverState.value.connectError)
+const userVoiceFlags = computed(() => serverState.value.userVoiceFlags)
 
 function setActiveError(message: string): void {
   serverState.value = { ...serverState.value, connectError: message }
@@ -502,6 +505,10 @@ onMounted(async () => {
         const { [data.id]: __, ...vs } = state.videoStates
         state.videoStates = vs
       }
+      if (state.userVoiceFlags[data.id]) {
+        const { [data.id]: ___, ...vf } = state.userVoiceFlags
+        state.userVoiceFlags = vf
+      }
     })
   })
 
@@ -526,6 +533,13 @@ onMounted(async () => {
     log.debug('event', 'channel:user_moved', { user_id: data.user_id, channel_id: data.channel_id })
     updateState(state => {
       state.userChannels = { ...state.userChannels, [data.user_id]: data.channel_id }
+    })
+  })
+
+  EventsOn('channel:user_voice_flags', (data: any) => {
+    log.debug('event', 'channel:user_voice_flags', { user_id: data.user_id, muted: data.muted, deafened: data.deafened })
+    updateState(state => {
+      state.userVoiceFlags = { ...state.userVoiceFlags, [data.user_id]: { muted: !!data.muted, deafened: !!data.deafened } }
     })
   })
 
@@ -836,7 +850,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalShortcuts)
   window.removeEventListener('keydown', handlePTTKeyDown)
   window.removeEventListener('keyup', handlePTTKeyUp)
-  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:history', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'channel:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
+  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:history', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'channel:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'channel:user_voice_flags', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
   cleanupSpeaking()
   if (typingCleanupInterval) clearInterval(typingCleanupInterval)
 })
@@ -904,6 +918,7 @@ onBeforeUnmount(() => {
           :message-density="messageDensity"
           :show-system-messages="showSystemMessages"
           :servers="savedServers"
+          :user-voice-flags="userVoiceFlags"
           @connect="handleConnect"
           @select-server="handleSelectServer"
           @activate-channel="handleActivateChannel"

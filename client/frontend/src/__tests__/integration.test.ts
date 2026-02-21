@@ -70,6 +70,7 @@ const defaultChannelViewProps = () => ({
   messageDensity: 'default' as const,
   showSystemMessages: true,
   servers: [{ name: 'Local Dev', addr: 'localhost:8080' }],
+  userVoiceFlags: {} as Record<number, { muted: boolean; deafened: boolean }>,
 })
 
 const defaultChannelChatProps = () => ({
@@ -106,6 +107,7 @@ const defaultServerChannelsProps = () => ({
   recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
   muted: false,
   deafened: false,
+  userVoiceFlags: {} as Record<number, { muted: boolean; deafened: boolean }>,
 })
 
 beforeEach(() => {
@@ -345,6 +347,7 @@ describe('Voice Flow', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
     })
     await flush()
@@ -377,6 +380,7 @@ describe('Voice Flow', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
     })
     await flush()
@@ -408,6 +412,7 @@ describe('Voice Flow', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
     })
     await flush()
@@ -439,6 +444,7 @@ describe('Voice Flow', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
     })
     await flush()
@@ -629,9 +635,9 @@ describe('Mention Flow', () => {
     })
     await flush()
 
-    // The message chat div should have the mention highlight class
-    const chatDiv = wrapper.find('.chat')
-    expect(chatDiv.classes()).toContain('bg-warning/10')
+    // The message div should have the mention highlight class
+    const chatDiv = wrapper.find('[data-msg-id]')
+    expect(chatDiv.find('div').classes()).toContain('bg-warning/10')
   })
 })
 
@@ -1113,6 +1119,7 @@ describe('User Management', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
       global: {
         stubs: { Teleport: true },
@@ -1120,11 +1127,11 @@ describe('User Management', () => {
     })
     await flush()
 
-    // The user list shows username text elements; right-click on Bob's link/avatar
-    const userLinks = wrapper.findAll('a')
-    const bobLink = userLinks.find(a => a.text().includes('Bob'))
-    expect(bobLink).toBeTruthy()
-    await bobLink!.trigger('contextmenu', { clientX: 100, clientY: 100 })
+    // The user list shows username text elements; right-click on Bob's div
+    const userDivs = wrapper.findAll('.flex.items-center.gap-2')
+    const bobDiv = userDivs.find(d => d.text().includes('Bob'))
+    expect(bobDiv).toBeTruthy()
+    await bobDiv!.trigger('contextmenu', { clientX: 100, clientY: 100 })
     await flush()
 
     // Kick link should appear in context menu
@@ -1165,6 +1172,7 @@ describe('User Management', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
       global: {
         stubs: { Teleport: true },
@@ -1172,11 +1180,11 @@ describe('User Management', () => {
     })
     await flush()
 
-    // Right-click on Bob's user link
-    const userLinks = wrapper.findAll('a')
-    const bobLink = userLinks.find(a => a.text().includes('Bob'))
-    expect(bobLink).toBeTruthy()
-    await bobLink!.trigger('contextmenu', { clientX: 100, clientY: 100 })
+    // Right-click on Bob's user div
+    const userDivs = wrapper.findAll('.flex.items-center.gap-2')
+    const bobDiv = userDivs.find(d => d.text().includes('Bob'))
+    expect(bobDiv).toBeTruthy()
+    await bobDiv!.trigger('contextmenu', { clientX: 100, clientY: 100 })
     await flush()
 
     // Move to Random (use last matching link since context menu renders after channel list)
@@ -1534,6 +1542,7 @@ describe('ServerChannels - Create Channel', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
     })
     await flush()
@@ -1580,6 +1589,7 @@ describe('ServerChannels - Create Channel', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
     })
     await flush()
@@ -1688,13 +1698,14 @@ describe('ServerChannels - Speaking Users', () => {
         recordingChannels: {},
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
     })
     await flush()
 
-    // Bob should have a speaking indicator badge (animate-pulse badge-success)
-    const speakingDot = wrapper.find('.badge-success.animate-pulse')
-    expect(speakingDot.exists()).toBe(true)
+    // Bob should have a speaking indicator ring on avatar
+    const speakingAvatar = wrapper.find('.ring-success\\/50')
+    expect(speakingAvatar.exists()).toBe(true)
 
     // Bob's user entry should be in the list
     expect(wrapper.text()).toContain('Bob')
@@ -1702,7 +1713,7 @@ describe('ServerChannels - Speaking Users', () => {
 })
 
 describe('Connected state channel indicators', () => {
-  it('shows connected speaker icon when user is in a channel', async () => {
+  it('keeps channel text basic and shows green audio icon when users are in channel', async () => {
     const users = [makeUser({ id: 1, username: 'Me' })]
     const channels = [makeChannel({ id: 1, name: 'General' })]
     const wrapper = mount(ServerChannels, {
@@ -1724,6 +1735,7 @@ describe('Connected state channel indicators', () => {
         recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
         muted: false,
         deafened: false,
+        userVoiceFlags: {},
       },
       global: {
         stubs: { Teleport: true },
@@ -1731,13 +1743,11 @@ describe('Connected state channel indicators', () => {
     })
     await flush()
 
-    // When connected to a channel, the channel shows a speaker icon (svg with text-success)
-    // and the channel link has font-semibold class
+    // Channel row keeps basic text styling while showing presence icon for populated channels.
     expect(wrapper.text()).toContain('General')
     expect(wrapper.text()).toContain('Me')
     const activeChannelLink = wrapper.find('a.font-semibold')
-    expect(activeChannelLink.exists()).toBe(true)
-    // Connected channel shows a speaker SVG with text-success class
+    expect(activeChannelLink.exists()).toBe(false)
     const speakerIcon = wrapper.find('svg.text-success')
     expect(speakerIcon.exists()).toBe(true)
   })

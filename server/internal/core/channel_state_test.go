@@ -264,6 +264,93 @@ func TestChannelsPerServerIsolation(t *testing.T) {
 	}
 }
 
+func TestSetVoiceFlags_NotInVoice(t *testing.T) {
+	r := NewChannelState("")
+	s, _, err := r.Add("alice", 8)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// Not in voice — should return changed=false.
+	_, changed := r.SetVoiceFlags(s.UserID, true, false)
+	if changed {
+		t.Fatal("expected changed=false when user is not in voice")
+	}
+}
+
+func TestSetVoiceFlags_InVoice(t *testing.T) {
+	r := NewChannelState("")
+	s, _, err := r.Add("alice", 8)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, _, err := r.ConnectServer(s.UserID, "srv-1"); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if _, _, err := r.JoinVoice(s.UserID, "srv-1", "chan-a"); err != nil {
+		t.Fatalf("join voice: %v", err)
+	}
+
+	// Set muted=true, deafened=false.
+	user, changed := r.SetVoiceFlags(s.UserID, true, false)
+	if !changed {
+		t.Fatal("expected changed=true")
+	}
+	if user.Voice == nil {
+		t.Fatal("expected non-nil voice")
+	}
+	if !user.Voice.Muted {
+		t.Fatal("expected muted=true in returned user")
+	}
+	if user.Voice.Deafened {
+		t.Fatal("expected deafened=false in returned user")
+	}
+
+	// Setting same values should return changed=false.
+	_, changed = r.SetVoiceFlags(s.UserID, true, false)
+	if changed {
+		t.Fatal("expected changed=false when flags unchanged")
+	}
+
+	// Set deafened=true.
+	user, changed = r.SetVoiceFlags(s.UserID, true, true)
+	if !changed {
+		t.Fatal("expected changed=true for deafened update")
+	}
+	if !user.Voice.Deafened {
+		t.Fatal("expected deafened=true")
+	}
+}
+
+func TestDisconnectVoice_ResetsFlags(t *testing.T) {
+	r := NewChannelState("")
+	s, _, err := r.Add("alice", 8)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, _, err := r.ConnectServer(s.UserID, "srv-1"); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if _, _, err := r.JoinVoice(s.UserID, "srv-1", "chan-a"); err != nil {
+		t.Fatalf("join voice: %v", err)
+	}
+	r.SetVoiceFlags(s.UserID, true, true)
+
+	// Disconnect voice — flags should reset.
+	r.DisconnectVoice(s.UserID)
+
+	// Re-join voice and check flags are clean.
+	user, _, err := r.JoinVoice(s.UserID, "srv-1", "chan-a")
+	if err != nil {
+		t.Fatalf("rejoin voice: %v", err)
+	}
+	if user.Voice == nil {
+		t.Fatal("expected voice after rejoin")
+	}
+	if user.Voice.Muted || user.Voice.Deafened {
+		t.Fatalf("expected flags reset after disconnect, got muted=%v deafened=%v", user.Voice.Muted, user.Voice.Deafened)
+	}
+}
+
 func assertRecvType(t *testing.T, ch <-chan protocol.Message, typ string) {
 	t.Helper()
 	select {

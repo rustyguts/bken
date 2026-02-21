@@ -27,6 +27,7 @@ describe('ChannelView', () => {
     messageDensity: 'default' as const,
     showSystemMessages: true,
     servers: [{ name: 'Local Dev', addr: 'localhost:8080' }],
+    userVoiceFlags: {} as Record<number, { muted: boolean; deafened: boolean }>,
   }
 
   it('mounts without errors', async () => {

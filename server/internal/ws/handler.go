@@ -336,6 +336,17 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 			Messages:  msgs,
 		})
 
+	case protocol.TypeSetVoiceState:
+		muted := in.Muted != nil && *in.Muted
+		deafened := in.Deafened != nil && *in.Deafened
+		user, changed := h.channelState.SetVoiceFlags(userID, muted, deafened)
+		if changed {
+			h.channelState.SendTo(userID, protocol.Message{Type: protocol.TypeUserState, User: &user})
+			if user.Voice != nil {
+				h.channelState.BroadcastToServer(user.Voice.ServerID, protocol.Message{Type: protocol.TypeUserState, User: &user}, userID)
+			}
+		}
+
 	case protocol.TypeGetServerInfo:
 		slog.Debug("get_server_info", "user_id", userID)
 		h.channelState.SendTo(userID, protocol.Message{

@@ -1,11 +1,275 @@
 package main
 
 import (
+	"fmt"
 	"math"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gopkg.in/hraban/opus.v2"
 )
+
+// --- Mock paStream for Stop() tests ---
+
+// mockPAStream implements paStream for testing. Read() and Write() block until
+// unblockCh is closed (simulating a real PortAudio blocking call). Stop()/Abort()
+// closes unblockCh so the blocked calls return, just like Pa_AbortStream should.
+type mockPAStream struct {
+	unblockCh chan struct{}
+	stopped   atomic.Bool
+	closed    atomic.Bool
+	// If set, Read/Write will NOT unblock when Stop()/Abort() is called —
+	// simulating a broken PortAudio backend.
+	brokenStop bool
+	// blockedInRead/blockedInWrite are set just before blocking, so tests
+	// can wait for goroutines to be truly blocked before calling Stop().
+	blockedInRead  atomic.Bool
+	blockedInWrite atomic.Bool
+}
+
+func newMockPAStream(broken bool) *mockPAStream {
+	return &mockPAStream{
+		unblockCh:  make(chan struct{}),
+		brokenStop: broken,
+	}
+}
+
+func (m *mockPAStream) Start() error { return nil }
+
+func (m *mockPAStream) Stop() error {
+	m.stopped.Store(true)
+	if !m.brokenStop {
+		select {
+		case <-m.unblockCh:
+		default:
+			close(m.unblockCh)
+		}
+	}
+	return nil
+}
+
+func (m *mockPAStream) Abort() error {
+	return m.Stop()
+}
+
+func (m *mockPAStream) Close() error {
+	m.closed.Store(true)
+	return nil
+}
+
+func (m *mockPAStream) Read() error {
+	m.blockedInRead.Store(true)
+	<-m.unblockCh
+	return fmt.Errorf("stream stopped")
+}
+
+func (m *mockPAStream) Write() error {
+	m.blockedInWrite.Store(true)
+	<-m.unblockCh
+	return fmt.Errorf("stream stopped")
+}
+
+// waitBlocked spins until both the capture and playback mocks report they
+// are blocked inside Read()/Write(), or until the timeout expires.
+func waitBlocked(t *testing.T, capture, playback *mockPAStream, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for !capture.blockedInRead.Load() || !playback.blockedInWrite.Load() {
+		select {
+		case <-deadline:
+			t.Fatalf("goroutines did not block in Read/Write within %v (read=%v write=%v)",
+				timeout, capture.blockedInRead.Load(), playback.blockedInWrite.Load())
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+// mockEncoder implements opusEncoder for testing.
+type mockEncoder struct{}
+
+func (m *mockEncoder) Encode(pcm []int16, data []byte) (int, error) {
+	// Return a minimal 1-byte "packet".
+	if len(data) > 0 {
+		data[0] = 0
+		return 1, nil
+	}
+	return 0, nil
+}
+func (m *mockEncoder) SetBitrate(int) error       { return nil }
+func (m *mockEncoder) SetDTX(bool) error           { return nil }
+func (m *mockEncoder) SetInBandFEC(bool) error      { return nil }
+func (m *mockEncoder) SetPacketLossPerc(int) error  { return nil }
+
+// startWithMocks wires mock streams/encoder and starts the capture+playback
+// goroutines the same way Start() does, but without touching real PortAudio.
+func startWithMocks(ae *AudioEngine, capture, playback paStream) {
+	ae.mu.Lock()
+	ae.captureStream = capture
+	ae.playbackStream = playback
+	ae.encoder = &mockEncoder{}
+	ae.stopCh = make(chan struct{})
+	ae.notifCh = make(chan []float32, notifChannelBuf)
+	ae.running.Store(true)
+	ae.mu.Unlock()
+
+	captureBuf := make([]float32, FrameSize)
+	playbackBuf := make([]float32, FrameSize)
+
+	ae.wg.Add(2)
+	go func() { defer ae.wg.Done(); ae.captureLoop(captureBuf) }()
+	go func() { defer ae.wg.Done(); ae.playbackLoop(playbackBuf) }()
+}
+
+// TestStopReturnsWhenStreamsUnblock verifies that Stop() completes promptly
+// when stream Abort() unblocks Read()/Write().
+func TestStopReturnsWhenStreamsUnblock(t *testing.T) {
+	ae := NewAudioEngine()
+	capture := newMockPAStream(false)
+	playback := newMockPAStream(false)
+	startWithMocks(ae, capture, playback)
+
+	// Ensure goroutines are actually blocked in Read()/Write().
+	waitBlocked(t, capture, playback, 2*time.Second)
+
+	done := make(chan struct{})
+	go func() {
+		ae.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Stop() returned — success.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() blocked for >2s — wg.Wait() is likely deadlocked because Abort() didn't unblock Read()/Write()")
+	}
+
+	if !capture.stopped.Load() {
+		t.Error("capture stream was not stopped")
+	}
+	if !playback.stopped.Load() {
+		t.Error("playback stream was not stopped")
+	}
+	if !capture.closed.Load() {
+		t.Error("capture stream was not closed")
+	}
+	if !playback.closed.Load() {
+		t.Error("playback stream was not closed")
+	}
+}
+
+// TestStopReturnsQuicklyWhenStreamBroken verifies that Stop() returns
+// promptly (via escalation to Close) even if Abort() does NOT unblock
+// Read()/Write(). Previously this would hang forever on wg.Wait().
+func TestStopReturnsQuicklyWhenStreamBroken(t *testing.T) {
+	ae := NewAudioEngine()
+	capture := newMockPAStream(true)  // broken: Abort() won't unblock Read()
+	playback := newMockPAStream(true) // broken: Abort() won't unblock Write()
+	startWithMocks(ae, capture, playback)
+
+	// Ensure goroutines are actually blocked in Read()/Write().
+	waitBlocked(t, capture, playback, 2*time.Second)
+
+	done := make(chan struct{})
+	go func() {
+		ae.Stop()
+		close(done)
+	}()
+
+	// Stop() should return within ~100 ms (two 50 ms grace periods), not hang.
+	select {
+	case <-done:
+		// Stop() returned — escalation worked.
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Stop() blocked >500ms — escalation to Close failed")
+	}
+
+	// Clean up: unblock any leaked goroutines so they don't linger.
+	select {
+	case <-capture.unblockCh:
+	default:
+		close(capture.unblockCh)
+	}
+	select {
+	case <-playback.unblockCh:
+	default:
+		close(playback.unblockCh)
+	}
+}
+
+// TestStopIdempotent verifies calling Stop() twice doesn't panic or block.
+func TestStopIdempotent(t *testing.T) {
+	ae := NewAudioEngine()
+	capture := newMockPAStream(false)
+	playback := newMockPAStream(false)
+	startWithMocks(ae, capture, playback)
+
+	waitBlocked(t, capture, playback, 2*time.Second)
+
+	done := make(chan struct{})
+	go func() {
+		ae.Stop()
+		ae.Stop() // second call should be a no-op
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("double Stop() blocked")
+	}
+}
+
+// TestStopOnNeverStarted verifies Stop() is a no-op on a fresh engine.
+func TestStopOnNeverStarted(t *testing.T) {
+	ae := NewAudioEngine()
+
+	done := make(chan struct{})
+	go func() {
+		ae.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Stop() blocked on an engine that was never started")
+	}
+}
+
+// TestStopConcurrent verifies multiple concurrent Stop() calls don't race.
+func TestStopConcurrent(t *testing.T) {
+	ae := NewAudioEngine()
+	capture := newMockPAStream(false)
+	playback := newMockPAStream(false)
+	startWithMocks(ae, capture, playback)
+
+	waitBlocked(t, capture, playback, 2*time.Second)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ae.Stop()
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Stop() calls blocked")
+	}
+}
 
 func TestOpusEncodeDecodeRoundTrip(t *testing.T) {
 	enc, err := opus.NewEncoder(sampleRate, channels, opus.AppVoIP)

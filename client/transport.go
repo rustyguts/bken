@@ -133,6 +133,8 @@ type backendUser struct {
 type backendVoiceState struct {
 	ServerID  string `json:"server_id"`
 	ChannelID string `json:"channel_id"`
+	Muted     bool   `json:"muted,omitempty"`
+	Deafened  bool   `json:"deafened,omitempty"`
 }
 
 type backendSnapshotMsg struct {
@@ -304,6 +306,7 @@ type Transport struct {
 	onVideoLayers        func(userID uint16, layers []VideoLayer)
 	onVideoQualityReq    func(fromUserID uint16, quality string)
 	onMessageHistory     func(channelID int64, messages []ChatHistoryMessage)
+	onUserVoiceFlags     func(userID uint16, muted, deafened bool)
 }
 
 // Verify Transport satisfies the Transporter interface at compile time.
@@ -482,6 +485,21 @@ func (t *Transport) SetOnMessageHistory(fn func(channelID int64, messages []Chat
 	t.cbMu.Lock()
 	t.onMessageHistory = fn
 	t.cbMu.Unlock()
+}
+
+func (t *Transport) SetOnUserVoiceFlags(fn func(userID uint16, muted, deafened bool)) {
+	t.cbMu.Lock()
+	t.onUserVoiceFlags = fn
+	t.cbMu.Unlock()
+}
+
+// SendVoiceFlags sends a set_voice_state message to the server.
+func (t *Transport) SendVoiceFlags(muted, deafened bool) error {
+	return t.writeJSON(map[string]any{
+		"type":     "set_voice_state",
+		"muted":    muted,
+		"deafened": deafened,
+	})
 }
 
 // --- Per-user local muting ---
@@ -1615,6 +1633,7 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		onVideoLayers := t.onVideoLayers
 		onVideoQualityReq := t.onVideoQualityReq
 		onMessageHistory := t.onMessageHistory
+		onUserVoiceFlags := t.onUserVoiceFlags
 		t.cbMu.RUnlock()
 
 		var header struct {
@@ -1656,6 +1675,14 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 
 			if onUserList != nil {
 				onUserList(users)
+			}
+			if onUserVoiceFlags != nil {
+				for _, u := range msg.Users {
+					if u.Voice != nil {
+						id := t.localUserID(u.ID)
+						onUserVoiceFlags(id, u.Voice.Muted, u.Voice.Deafened)
+					}
+				}
 			}
 		case "user_joined":
 			var msg backendUserMsg
@@ -1713,6 +1740,9 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 			}
 			if onUserChannel != nil {
 				onUserChannel(id, channelID)
+			}
+			if onUserVoiceFlags != nil && msg.User.Voice != nil {
+				onUserVoiceFlags(id, msg.User.Voice.Muted, msg.User.Voice.Deafened)
 			}
 		case "text_message":
 			var msg backendUserMsg

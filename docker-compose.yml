@@ -8,20 +8,20 @@ services:
     ports:
       - "8080:8080/tcp"
 
-  client:
-    build:
-      context: ./client
-      target: dev
-    ports:
-      - "5173:5173/tcp"
-    environment:
-      - BKEN_ADDR=server:8080
-    volumes:
-      # - ./client:/app
-      - client-go-cache:/go
-      - client-node-modules:/app/frontend/node_modules
-    depends_on:
-      - server
+  # client:
+  #   build:
+  #     context: ./client
+  #     target: dev
+  #   ports:
+  #     - "5173:5173/tcp"
+  #   environment:
+  #     - BKEN_ADDR=server:8080
+  #   volumes:
+  #     # - ./client:/app
+  #     - client-go-cache:/go
+  #     - client-node-modules:/app/frontend/node_modules
+  #   depends_on:
+  #     - server
 
 volumes:
   client-go-cache:

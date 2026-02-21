@@ -32,6 +32,7 @@ const (
 	TypeMessageHistory        = "message_history"
 	TypeGetServerInfo         = "get_server_info"
 	TypeServerInfo            = "server_info"
+	TypeSetVoiceState         = "set_voice_state"
 )
 
 // Message is the JSON control envelope exchanged over websocket.
@@ -50,6 +51,8 @@ type Message struct {
 	Users      []User        `json:"users,omitempty"`
 	Channels   []Channel     `json:"channels,omitempty"`
 	Messages   []TextMessage `json:"messages,omitempty"`
+	Muted      *bool         `json:"muted,omitempty"`
+	Deafened   *bool         `json:"deafened,omitempty"`
 }
 
 // TextMessage is a persisted chat message returned in history queries.
@@ -114,4 +117,6 @@ type User struct {
 type VoiceState struct {
 	ServerID  string `json:"server_id"`
 	ChannelID string `json:"channel_id"`
+	Muted     bool   `json:"muted,omitempty"`
+	Deafened  bool   `json:"deafened,omitempty"`
 }
