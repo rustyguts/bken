@@ -284,12 +284,16 @@ func (ae *AudioEngine) Start() error {
 	if err != nil {
 		return err
 	}
-	enc.SetBitrate(opusBitrate)
+	targetKbps := int(ae.currentBitrate.Load())
+	if targetKbps <= 0 {
+		targetKbps = opusBitrate / 1000
+	}
+	enc.SetBitrate(targetKbps * 1000)
 	enc.SetDTX(true)
 	enc.SetInBandFEC(true)
 	enc.SetPacketLossPerc(5) // conservative default estimate
 	ae.encoder = enc
-	ae.currentBitrate.Store(opusBitrate / 1000)
+	ae.currentBitrate.Store(int32(targetKbps))
 
 	dec, err := opus.NewDecoder(sampleRate, channels)
 	if err != nil {

@@ -47,7 +47,7 @@ chmod +x server-linux-amd64
 ./server-linux-amd64
 ```
 
-The server listens on TCP port **8443** (WebSocket signaling) and **8080** (REST API) by default. To use a different port:
+The server listens on TCP port **8080** for both WebSocket signaling and REST API endpoints by default. To use a different port:
 
 ```bash
 ./server-linux-amd64 -addr :9000
@@ -56,11 +56,11 @@ The server listens on TCP port **8443** (WebSocket signaling) and **8080** (REST
 ### Docker
 
 ```bash
-docker run --rm -p 8443:8443 -p 8080:8080 -v bken-data:/data ghcr.io/rustyguts/bken-server:latest
+docker run --rm -p 8080:8080 -v bken-data:/data ghcr.io/rustyguts/bken-server:latest
 ```
 
 ::: tip Firewall
-Open TCP port 8443 on the server machine. WebRTC audio flows directly between clients on ephemeral ports and does not require any additional firewall rules on the server.
+Open TCP port 8080 on the server machine. WebRTC audio flows directly between clients on ephemeral ports and does not require any additional firewall rules on the server.
 :::
 
 ---
@@ -69,14 +69,12 @@ Open TCP port 8443 on the server machine. WebRTC audio flows directly between cl
 
 1. Start the server and note the machine's local IP address (e.g. `192.168.1.10`).
 2. Open the client on each machine joining the call.
-3. Enter your name and the server address — for example `192.168.1.10:8443` — then click **Connect**.
+3. Enter your name and the server address — for example `192.168.1.10:8080` — then click **Connect**.
 
 You will be placed into the first channel automatically. Use the channel list on the left to switch channels or create new ones.
 
 ---
 
-## Why does it say "untrusted certificate"?
+## Why is there no TLS prompt in dev?
 
-BKEN generates a self-signed TLS certificate on each server start. The certificate is only used to encrypt the WebSocket connection — it is not used for identity. Clients skip certificate validation by design, which is safe on a trusted local network where you control who can connect.
-
-The fingerprint printed at server startup can be used to manually verify the certificate if needed.
+The current dev server uses plain WebSocket/HTTP on `:8080`. If you need TLS for internet-facing deployments, place the service behind a reverse proxy.

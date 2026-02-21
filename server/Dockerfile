@@ -18,16 +18,14 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /serve
 # ── prod: minimal runtime image ──────────────────────────────────────────────
 FROM alpine:latest AS prod
 RUN apk --no-cache add ca-certificates && \
-    addgroup -S bken && adduser -S bken -G bken && \
-    mkdir -p /data && chown bken:bken /data
+    addgroup -S bken && adduser -S bken -G bken
 
 COPY --from=build /server /server
 
 USER bken
-VOLUME /data
-EXPOSE 8443/udp 8443/tcp 8080/tcp
+EXPOSE 8080/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:8080/health || exit 1
 
-ENTRYPOINT ["/server", "-db", "/data/bken.db"]
+ENTRYPOINT ["/server", "-addr", ":8080"]

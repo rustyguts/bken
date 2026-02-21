@@ -7,9 +7,7 @@ services:
     volumes:
       - ./server:/app
     ports:
-      - "8443:8443/udp"
-      - "8443:8443/tcp"
-      - "8080:8080" # optional, needed for REST/upload endpoints
+      - "8080:8080/tcp"
 
   # ── production server ──────────────────────────────────────────────────────
   # server-prod:
@@ -19,13 +17,11 @@ services:
   #     args:
   #       VERSION: ${BKEN_VERSION:-0.1.0}
   #   ports:
-  #     - "8443:8443/udp"
-  #     - "8443:8443/tcp"
-  #     - "8080:8080"
+  #     - "8080:8080/tcp"
   #   volumes:
   #     - bken-data:/data
   #   environment:
-  #     - BKEN_ADDR=:8443
+  #     - BKEN_ADDR=:8080
   #     - BKEN_API_ADDR=:8080
   #   deploy:
   #     resources:
@@ -52,7 +48,7 @@ services:
   #     - LIBGL_ALWAYS_SOFTWARE=1
   #     - GDK_BACKEND=x11
   #     - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
-  #     - BKEN_ADDR=localhost:8443
+  #     - BKEN_ADDR=localhost:8080
   #   volumes:
   #     - ./client:/app
   #     - ${XAUTHORITY:-/tmp/.Xauthority}:/tmp/.Xauthority:ro

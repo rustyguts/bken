@@ -16,6 +16,7 @@ export interface Config {
   input_device_id: number
   output_device_id: number
   volume: number
+  audio_bitrate_kbps: number
   noise_enabled: boolean
   aec_enabled: boolean
   agc_enabled: boolean
@@ -27,10 +28,6 @@ export interface Config {
   // Legacy fields persisted by older builds. Kept optional for compatibility.
   noise_level?: number
   agc_level?: number
-  vad_enabled?: boolean
-  vad_threshold?: number
-  noise_gate_enabled?: boolean
-  noise_gate_threshold?: number
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -64,24 +61,14 @@ export function SetAGCLevel(level: number): Promise<void> {
   return bridge()['SetAGCLevel'](level)
 }
 
-// --- VAD bindings ---
+// --- Audio bitrate bindings ---
 
-export function SetVAD(enabled: boolean): Promise<void> {
-  return bridge()['SetVAD'](enabled)
+export function SetAudioBitrate(kbps: number): Promise<void> {
+  return bridge()['SetAudioBitrate'](kbps)
 }
 
-export function SetVADThreshold(level: number): Promise<void> {
-  return bridge()['SetVADThreshold'](level)
-}
-
-// --- Noise Gate bindings ---
-
-export function SetNoiseGate(enabled: boolean): Promise<void> {
-  return bridge()['SetNoiseGate'](enabled)
-}
-
-export function SetNoiseGateThreshold(level: number): Promise<void> {
-  return bridge()['SetNoiseGateThreshold'](level)
+export function GetAudioBitrate(): Promise<number> {
+  return bridge()['GetAudioBitrate']()
 }
 
 // --- Input Level bindings ---
@@ -182,6 +169,17 @@ export function RenameUser(name: string): Promise<string> {
 
 export function GetStartupAddr(): Promise<string> {
   return bridge()['GetStartupAddr']()
+}
+
+export function GetBuildInfo(): Promise<{
+  commit: string
+  build_time: string
+  go_version: string
+  goos: string
+  goarch: string
+  dirty: boolean
+}> {
+  return bridge()['GetBuildInfo']()
 }
 
 // --- Channel bindings ---

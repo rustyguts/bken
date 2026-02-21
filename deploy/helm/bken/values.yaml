@@ -10,7 +10,7 @@ fullnameOverride: ""
 
 service:
   type: ClusterIP
-  wsPort: 8443
+  wsPort: 8080
   apiPort: 8080
 
 ingress:

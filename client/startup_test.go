@@ -9,11 +9,11 @@ func TestParseStartupAddr(t *testing.T) {
 	}{
 		{nil, ""},
 		{[]string{}, ""},
-		{[]string{"bken://localhost:8443"}, "localhost:8443"},
-		{[]string{"--flag", "bken://10.0.0.1:8443"}, "10.0.0.1:8443"},
-		{[]string{"bken://host:port/"}, "host:port"},  // trailing slash stripped
-		{[]string{"bken://"}, ""},                     // empty addr → ""
-		{[]string{"notbken://host:port"}, ""},          // wrong scheme
+		{[]string{"bken://localhost:8080"}, "localhost:8080"},
+		{[]string{"--flag", "bken://10.0.0.1:8080"}, "10.0.0.1:8080"},
+		{[]string{"bken://host:port/"}, "host:port"}, // trailing slash stripped
+		{[]string{"bken://"}, ""},                    // empty addr → ""
+		{[]string{"notbken://host:port"}, ""},        // wrong scheme
 		{[]string{"someflag", "otherarg"}, ""},
 	}
 	for _, c := range cases {

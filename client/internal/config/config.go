@@ -15,6 +15,7 @@ type Config struct {
 	InputDeviceID  int     `json:"input_device_id"`
 	OutputDeviceID int     `json:"output_device_id"`
 	Volume         float64 `json:"volume"`
+	AudioBitrate   int     `json:"audio_bitrate_kbps"`
 	// WebRTC built-in voice processing preferences.
 	NoiseEnabled bool          `json:"noise_enabled"`
 	AECEnabled   bool          `json:"aec_enabled"`
@@ -35,6 +36,7 @@ func Default() Config {
 	return Config{
 		Theme:          "dark",
 		Volume:         1.0,
+		AudioBitrate:   32,
 		NoiseEnabled:   true,
 		AECEnabled:     true,
 		AGCEnabled:     true,
@@ -43,7 +45,7 @@ func Default() Config {
 		InputDeviceID:  -1,
 		OutputDeviceID: -1,
 		Servers: []ServerEntry{
-			{Name: "Local Dev", Addr: "localhost:8443"},
+			{Name: "Local Dev", Addr: "localhost:8080"},
 		},
 	}
 }

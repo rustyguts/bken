@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"math"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -114,6 +116,33 @@ type VideoLayer struct {
 	Bitrate int    `json:"bitrate"` // kbps
 }
 
+type backendUser struct {
+	ID       string             `json:"id"`
+	Username string             `json:"username"`
+	Voice    *backendVoiceState `json:"voice,omitempty"`
+}
+
+type backendVoiceState struct {
+	ServerID  string `json:"server_id"`
+	ChannelID string `json:"channel_id"`
+}
+
+type backendSnapshotMsg struct {
+	Type   string        `json:"type"`
+	SelfID string        `json:"self_id"`
+	Users  []backendUser `json:"users"`
+}
+
+type backendUserMsg struct {
+	Type      string       `json:"type"`
+	User      *backendUser `json:"user,omitempty"`
+	ServerID  string       `json:"server_id,omitempty"`
+	ChannelID string       `json:"channel_id,omitempty"`
+	Message   string       `json:"message,omitempty"`
+	Ts        int64        `json:"ts,omitempty"`
+	Error     string       `json:"error,omitempty"`
+}
+
 // Metrics holds connection quality metrics shown in the UI.
 type Metrics struct {
 	RTTMs           float64 `json:"rtt_ms"`
@@ -205,6 +234,7 @@ type Transport struct {
 
 	// serverAddr is the normalized host:port passed to Connect.
 	serverAddr string // protected by mu
+	serverID   string // protected by mu; backend server_id routing key
 
 	// apiBaseURL is the HTTP base URL for the server's REST API (e.g. "http://host:8080").
 	// Set from the api_port field in user_list.
@@ -215,6 +245,12 @@ type Transport struct {
 
 	// userChannels tracks the latest channel for each connected user.
 	userChannels sync.Map // map[uint16]int64
+
+	// ID/channel mapping for backend protocol compatibility.
+	userIDByWire    map[string]uint16 // protected by mu
+	wireIDByUser    map[uint16]string // protected by mu
+	channelIDByWire map[string]int64  // protected by mu
+	wireChannelByID map[int64]string  // protected by mu
 
 	// iceServers holds ICE configuration received from the server in user_list.
 	iceServers []ICEServerInfo // protected by mu
@@ -273,6 +309,10 @@ func NewTransport() *Transport {
 		lastSeen:        make(map[uint16]time.Time),
 		lastArrival:     make(map[uint16]time.Time),
 		lastSpeaking:    make(map[uint16]time.Time),
+		userIDByWire:    make(map[string]uint16),
+		wireIDByUser:    make(map[uint16]string),
+		channelIDByWire: make(map[string]int64),
+		wireChannelByID: make(map[int64]string),
 	}
 }
 
@@ -479,7 +519,14 @@ func (t *Transport) RenameServer(name string) error {
 // JoinChannel sends a join_channel request to the server.
 // Pass channelID=0 to leave all channels (return to lobby).
 func (t *Transport) JoinChannel(id int64) error {
-	return t.writeCtrl(ControlMsg{Type: "join_channel", ChannelID: id})
+	if id == 0 {
+		return t.writeJSON(map[string]any{"type": "DisconnectVoice"})
+	}
+	return t.writeJSON(map[string]any{
+		"type":       "join_voice",
+		"server_id":  t.backendServerID(),
+		"channel_id": t.wireChannelID(id),
+	})
 }
 
 // CreateChannel asks the server to create a new channel with the given name.
@@ -567,17 +614,12 @@ func (t *Transport) APIBaseURL() string {
 // SendFileChat sends a chat message with a file attachment.
 // The file metadata must come from a prior upload to the server's API.
 func (t *Transport) SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error {
-	if len(message) > 500 {
-		return fmt.Errorf("message must not exceed 500 characters")
-	}
-	return t.writeCtrl(ControlMsg{
-		Type:      "chat",
-		Message:   message,
-		ChannelID: channelID,
-		FileID:    fileID,
-		FileName:  fileName,
-		FileSize:  fileSize,
-	})
+	_ = channelID
+	_ = fileID
+	_ = fileSize
+	_ = fileName
+	_ = message
+	return fmt.Errorf("file chat is not supported by this backend")
 }
 
 // SendChannelChat sends a channel-scoped chat message.
@@ -585,7 +627,12 @@ func (t *Transport) SendChannelChat(channelID int64, message string) error {
 	if err := validateChat(message); err != nil {
 		return err
 	}
-	return t.writeCtrl(ControlMsg{Type: "chat", Message: message, ChannelID: channelID})
+	return t.writeJSON(map[string]any{
+		"type":       "send_text",
+		"server_id":  t.backendServerID(),
+		"channel_id": t.wireChannelID(channelID),
+		"message":    message,
+	})
 }
 
 // SendChat sends a chat message to the server for fan-out to all participants.
@@ -593,7 +640,12 @@ func (t *Transport) SendChat(message string) error {
 	if err := validateChat(message); err != nil {
 		return err
 	}
-	return t.writeCtrl(ControlMsg{Type: "chat", Message: message})
+	return t.writeJSON(map[string]any{
+		"type":       "send_text",
+		"server_id":  t.backendServerID(),
+		"channel_id": t.wireChannelID(1),
+		"message":    message,
+	})
 }
 
 // AddReaction adds an emoji reaction to a message.
@@ -617,7 +669,7 @@ func (t *Transport) SendTyping(channelID int64) error {
 	if channelID == 0 {
 		return fmt.Errorf("channel_id must not be zero")
 	}
-	return t.writeCtrl(ControlMsg{Type: "typing", ChannelID: channelID})
+	return nil
 }
 
 // validateChat returns an error if the message is empty or too long.
@@ -631,9 +683,8 @@ func validateChat(message string) error {
 	return nil
 }
 
-// writeCtrl serialises a control message write; safe for concurrent callers.
-func (t *Transport) writeCtrl(msg ControlMsg) error {
-	data, err := json.Marshal(msg)
+func (t *Transport) writeJSON(v any) error {
+	data, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
@@ -649,6 +700,11 @@ func (t *Transport) writeCtrl(msg ControlMsg) error {
 	return nil
 }
 
+// writeCtrl serialises a control message write; safe for concurrent callers.
+func (t *Transport) writeCtrl(msg ControlMsg) error {
+	return t.writeJSON(msg)
+}
+
 // writeCtrlBestEffort sends a control message without returning errors.
 // Used for non-critical messages where failure is handled elsewhere.
 func (t *Transport) writeCtrlBestEffort(msg ControlMsg) {
@@ -657,7 +713,111 @@ func (t *Transport) writeCtrlBestEffort(msg ControlMsg) {
 	}
 }
 
-// connectTimeout is the maximum time allowed for the initial websocket dial + join handshake.
+func (t *Transport) backendServerID() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.serverID == "" {
+		t.serverID = "default"
+	}
+	return t.serverID
+}
+
+func (t *Transport) wireChannelID(channelID int64) string {
+	if channelID == 0 {
+		return "0"
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if ch, ok := t.wireChannelByID[channelID]; ok {
+		return ch
+	}
+	ch := strconv.FormatInt(channelID, 10)
+	t.wireChannelByID[channelID] = ch
+	t.channelIDByWire[ch] = channelID
+	return ch
+}
+
+func (t *Transport) localChannelID(wire string) int64 {
+	wire = strings.TrimSpace(wire)
+	if wire == "" || wire == "0" {
+		return 0
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if id, ok := t.channelIDByWire[wire]; ok {
+		return id
+	}
+
+	if n, err := strconv.ParseInt(wire, 10, 64); err == nil && n != 0 {
+		t.channelIDByWire[wire] = n
+		t.wireChannelByID[n] = wire
+		return n
+	}
+
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(wire))
+	id := int64(h.Sum32())
+	if id == 0 {
+		id = 1
+	}
+	if id < 0 {
+		id = -id
+	}
+	for {
+		if _, used := t.wireChannelByID[id]; !used {
+			break
+		}
+		id++
+	}
+	t.channelIDByWire[wire] = id
+	t.wireChannelByID[id] = wire
+	return id
+}
+
+func (t *Transport) localUserID(wire string) uint16 {
+	wire = strings.TrimSpace(wire)
+	if wire == "" {
+		return 0
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if id, ok := t.userIDByWire[wire]; ok {
+		return id
+	}
+
+	var candidate uint16
+	raw := wire
+	if strings.HasPrefix(raw, "u") {
+		raw = strings.TrimPrefix(raw, "u")
+	}
+	if n, err := strconv.ParseUint(raw, 10, 16); err == nil && n > 0 {
+		candidate = uint16(n)
+		if existing, used := t.wireIDByUser[candidate]; used && existing != wire {
+			candidate = 0
+		}
+	}
+	if candidate == 0 {
+		for i := uint16(1); i != 0; i++ {
+			if _, used := t.wireIDByUser[i]; !used {
+				candidate = i
+				break
+			}
+		}
+		if candidate == 0 {
+			return 0
+		}
+	}
+
+	t.userIDByWire[wire] = candidate
+	t.wireIDByUser[candidate] = wire
+	return candidate
+}
+
+// connectTimeout is the maximum time allowed for the initial websocket dial + hello handshake.
 const connectTimeout = 10 * time.Second
 
 // dialAddrsForWebsocket returns connection attempts for addr, adding IPv4/IPv6
@@ -690,7 +850,7 @@ func dialAddrsForWebsocket(addr string) []string {
 	return unique
 }
 
-// Connect establishes the websocket control/signaling channel and sends join.
+// Connect establishes the websocket control/signaling channel and sends hello.
 // Callbacks must be registered via Set* methods before calling Connect.
 func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	normalizedAddr, err := normalizeServerAddr(addr)
@@ -709,9 +869,14 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	t.mu.Lock()
 	t.disconnectReason = ""
 	t.serverAddr = normalizedAddr
-	t.apiBaseURL = ""
+	t.serverID = normalizedAddr
+	t.apiBaseURL = "http://" + normalizedAddr
 	t.myID = 0
 	t.myChannel.Store(0)
+	t.userIDByWire = make(map[string]uint16)
+	t.wireIDByUser = make(map[uint16]string)
+	t.channelIDByWire = make(map[string]int64)
+	t.wireChannelByID = make(map[int64]string)
 	t.mu.Unlock()
 
 	dialCtx, dialCancel := context.WithTimeout(ctx, connectTimeout)
@@ -719,14 +884,11 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 
-	d := websocket.Dialer{
-		TLSClientConfig:  &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // self-signed local server cert
-		HandshakeTimeout: connectTimeout,
-	}
+	d := websocket.Dialer{HandshakeTimeout: connectTimeout}
 
 	var conn *websocket.Conn
 	for _, dialAddr := range dialAddrsForWebsocket(normalizedAddr) {
-		conn, _, err = d.DialContext(dialCtx, "wss://"+dialAddr+"/ws", nil)
+		conn, _, err = d.DialContext(dialCtx, "ws://"+dialAddr+"/ws", nil)
 		if err == nil {
 			break
 		}
@@ -752,9 +914,19 @@ func (t *Transport) Connect(ctx context.Context, addr, username string) error {
 	t.lastMetricsTime = time.Now()
 	t.metricsMu.Unlock()
 
-	if err := t.writeCtrl(ControlMsg{Type: "join", Username: username}); err != nil {
+	if err := t.writeJSON(map[string]any{
+		"type":     "hello",
+		"username": username,
+	}); err != nil {
 		t.Disconnect()
-		return fmt.Errorf("send join: %w", err)
+		return fmt.Errorf("send hello: %w", err)
+	}
+	if err := t.writeJSON(map[string]any{
+		"type":      "connect_server",
+		"server_id": t.backendServerID(),
+	}); err != nil {
+		t.Disconnect()
+		return fmt.Errorf("connect server: %w", err)
 	}
 
 	go t.readControl(sessionCtx, conn)
@@ -1367,16 +1539,12 @@ func (t *Transport) pingLoop(ctx context.Context) {
 
 // readControl reads JSON control messages from the server websocket.
 func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
+	_ = ctx
+
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			break
-		}
-
-		var msg ControlMsg
-		if err := json.Unmarshal(data, &msg); err != nil {
-			log.Printf("[transport] invalid control msg: %v", err)
-			continue
 		}
 
 		t.cbMu.RLock()
@@ -1405,68 +1573,125 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		onVideoQualityReq := t.onVideoQualityReq
 		t.cbMu.RUnlock()
 
-		switch msg.Type {
-		case "user_list":
-			selfID := msg.SelfID
-			if selfID == 0 && len(msg.Users) > 0 {
-				selfID = msg.Users[len(msg.Users)-1].ID
+		var header struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(data, &header); err != nil {
+			log.Printf("[transport] invalid control msg: %v", err)
+			continue
+		}
+
+		switch header.Type {
+		case "snapshot":
+			var msg backendSnapshotMsg
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("[transport] invalid snapshot msg: %v", err)
+				continue
 			}
 
+			selfID := t.localUserID(msg.SelfID)
 			t.mu.Lock()
 			t.myID = selfID
 			t.mu.Unlock()
 
+			users := make([]UserInfo, 0, len(msg.Users))
 			t.clearUserChannels()
 			for _, u := range msg.Users {
-				t.userChannels.Store(u.ID, u.ChannelID)
-				if u.ID == selfID {
-					t.myChannel.Store(u.ChannelID)
+				id := t.localUserID(u.ID)
+				channelID := int64(0)
+				if u.Voice != nil {
+					channelID = t.localChannelID(u.Voice.ChannelID)
 				}
-			}
-
-			if msg.APIPort != 0 {
-				t.mu.Lock()
-				host, _, err := net.SplitHostPort(t.serverAddr)
-				if err != nil {
-					host = t.serverAddr
+				t.userChannels.Store(id, channelID)
+				if id == selfID {
+					t.myChannel.Store(channelID)
 				}
-				t.apiBaseURL = fmt.Sprintf("http://%s:%d", host, msg.APIPort)
-				t.mu.Unlock()
+				users = append(users, UserInfo{ID: id, Username: u.Username, ChannelID: channelID})
 			}
 
-			if len(msg.ICEServers) > 0 {
-				t.mu.Lock()
-				t.iceServers = msg.ICEServers
-				t.mu.Unlock()
+			if onChannelList != nil {
+				onChannelList([]ChannelInfo{{ID: 1, Name: "General"}})
 			}
-
 			if onUserList != nil {
-				onUserList(msg.Users)
+				onUserList(users)
 			}
-			if msg.ServerName != "" && onServerInfo != nil {
-				onServerInfo(msg.ServerName)
-			}
-			if onOwnerChanged != nil {
-				onOwnerChanged(msg.OwnerID)
-			}
-			t.ensurePeersFromUserList(msg.Users)
 		case "user_joined":
-			t.userChannels.Store(msg.ID, int64(0))
-			if onUserJoined != nil {
-				onUserJoined(msg.ID, msg.Username)
+			var msg backendUserMsg
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("[transport] invalid user_joined msg: %v", err)
+				continue
 			}
-			myID := t.MyID()
-			if myID != 0 && msg.ID != 0 && msg.ID != myID {
-				_, created := t.ensurePeer(msg.ID)
-				if created && myID < msg.ID {
-					go t.createAndSendOffer(msg.ID)
-				}
+			if msg.User == nil {
+				continue
+			}
+			id := t.localUserID(msg.User.ID)
+			channelID := int64(0)
+			if msg.User.Voice != nil {
+				channelID = t.localChannelID(msg.User.Voice.ChannelID)
+			}
+			t.userChannels.Store(id, channelID)
+			if onUserJoined != nil {
+				onUserJoined(id, msg.User.Username)
+			}
+			if onUserChannel != nil {
+				onUserChannel(id, channelID)
 			}
 		case "user_left":
-			t.userChannels.Delete(msg.ID)
-			t.closePeer(msg.ID)
+			var msg backendUserMsg
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("[transport] invalid user_left msg: %v", err)
+				continue
+			}
+			if msg.User == nil {
+				continue
+			}
+			id := t.localUserID(msg.User.ID)
+			t.userChannels.Delete(id)
+			t.closePeer(id)
 			if onUserLeft != nil {
-				onUserLeft(msg.ID)
+				onUserLeft(id)
+			}
+		case "user_state":
+			var msg backendUserMsg
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("[transport] invalid user_state msg: %v", err)
+				continue
+			}
+			if msg.User == nil {
+				continue
+			}
+			id := t.localUserID(msg.User.ID)
+			channelID := int64(0)
+			if msg.User.Voice != nil {
+				channelID = t.localChannelID(msg.User.Voice.ChannelID)
+			}
+			t.userChannels.Store(id, channelID)
+			if id == t.MyID() {
+				t.myChannel.Store(channelID)
+			}
+			if onUserChannel != nil {
+				onUserChannel(id, channelID)
+			}
+		case "text_message":
+			var msg backendUserMsg
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("[transport] invalid text_message msg: %v", err)
+				continue
+			}
+			if msg.User == nil {
+				continue
+			}
+			id := t.localUserID(msg.User.ID)
+			channelID := t.localChannelID(msg.ChannelID)
+			if msg.Ts == 0 {
+				msg.Ts = time.Now().UnixMilli()
+			}
+			if channelID != 0 {
+				if onChannelChat != nil {
+					onChannelChat(0, id, channelID, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
+				}
+			} else if onChat != nil {
+				onChat(0, id, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
 			}
 		case "pong":
 			t.lastPongTime.Store(time.Now().UnixNano())
@@ -1482,103 +1707,179 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 				}
 				t.smoothedRTT.Store(math.Float64bits(next))
 			}
-		case "chat":
-			if msg.ChannelID != 0 {
-				if onChannelChat != nil {
-					onChannelChat(msg.MsgID, msg.ID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
+		case "error":
+			var msg backendUserMsg
+			if err := json.Unmarshal(data, &msg); err == nil && msg.Error != "" {
+				log.Printf("[transport] server error: %s", msg.Error)
+			}
+		default:
+			var msg ControlMsg
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("[transport] invalid legacy control msg: %v", err)
+				continue
+			}
+
+			switch msg.Type {
+			case "user_list":
+				selfID := msg.SelfID
+				if selfID == 0 && len(msg.Users) > 0 {
+					selfID = msg.Users[len(msg.Users)-1].ID
 				}
-			} else {
-				if onChat != nil {
-					onChat(msg.MsgID, msg.ID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
+
+				t.mu.Lock()
+				t.myID = selfID
+				t.mu.Unlock()
+
+				t.clearUserChannels()
+				for _, u := range msg.Users {
+					t.userChannels.Store(u.ID, u.ChannelID)
+					if u.ID == selfID {
+						t.myChannel.Store(u.ChannelID)
+					}
 				}
+
+				if msg.APIPort != 0 {
+					t.mu.Lock()
+					host, _, err := net.SplitHostPort(t.serverAddr)
+					if err != nil {
+						host = t.serverAddr
+					}
+					t.apiBaseURL = fmt.Sprintf("http://%s:%d", host, msg.APIPort)
+					t.mu.Unlock()
+				}
+
+				if len(msg.ICEServers) > 0 {
+					t.mu.Lock()
+					t.iceServers = msg.ICEServers
+					t.mu.Unlock()
+				}
+
+				if onUserList != nil {
+					onUserList(msg.Users)
+				}
+				if msg.ServerName != "" && onServerInfo != nil {
+					onServerInfo(msg.ServerName)
+				}
+				if onOwnerChanged != nil {
+					onOwnerChanged(msg.OwnerID)
+				}
+				t.ensurePeersFromUserList(msg.Users)
+			case "user_joined":
+				t.userChannels.Store(msg.ID, int64(0))
+				if onUserJoined != nil {
+					onUserJoined(msg.ID, msg.Username)
+				}
+				myID := t.MyID()
+				if myID != 0 && msg.ID != 0 && msg.ID != myID {
+					_, created := t.ensurePeer(msg.ID)
+					if created && myID < msg.ID {
+						go t.createAndSendOffer(msg.ID)
+					}
+				}
+			case "user_left":
+				t.userChannels.Delete(msg.ID)
+				t.closePeer(msg.ID)
+				if onUserLeft != nil {
+					onUserLeft(msg.ID)
+				}
+			case "chat":
+				if msg.ChannelID != 0 {
+					if onChannelChat != nil {
+						onChannelChat(msg.MsgID, msg.ID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
+					}
+				} else {
+					if onChat != nil {
+						onChat(msg.MsgID, msg.ID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
+					}
+				}
+			case "link_preview":
+				if onLinkPreview != nil {
+					onLinkPreview(msg.MsgID, msg.ChannelID, msg.LinkURL, msg.LinkTitle, msg.LinkDesc, msg.LinkImage, msg.LinkSite)
+				}
+			case "server_info":
+				if msg.ServerName != "" && onServerInfo != nil {
+					onServerInfo(msg.ServerName)
+				}
+			case "owner_changed":
+				if onOwnerChanged != nil {
+					onOwnerChanged(msg.OwnerID)
+				}
+			case "kicked":
+				if onKicked != nil {
+					onKicked()
+				}
+			case "channel_list":
+				if onChannelList != nil {
+					onChannelList(msg.Channels)
+				}
+			case "user_channel":
+				t.userChannels.Store(msg.ID, msg.ChannelID)
+				if msg.ID == t.MyID() {
+					t.myChannel.Store(msg.ChannelID)
+				}
+				if onUserChannel != nil {
+					onUserChannel(msg.ID, msg.ChannelID)
+				}
+			case "user_renamed":
+				if onUserRenamed != nil {
+					onUserRenamed(msg.ID, msg.Username)
+				}
+			case "message_edited":
+				if onMessageEdited != nil {
+					onMessageEdited(msg.MsgID, msg.Message, msg.Ts)
+				}
+			case "message_deleted":
+				if onMessageDeleted != nil {
+					onMessageDeleted(msg.MsgID)
+				}
+			case "reaction_added":
+				if onReactionAdded != nil {
+					onReactionAdded(msg.MsgID, msg.Emoji, msg.ID)
+				}
+			case "reaction_removed":
+				if onReactionRemoved != nil {
+					onReactionRemoved(msg.MsgID, msg.Emoji, msg.ID)
+				}
+			case "user_typing":
+				if onUserTyping != nil {
+					onUserTyping(msg.ID, msg.Username, msg.ChannelID)
+				}
+			case "message_pinned":
+				if onMessagePinned != nil {
+					onMessagePinned(msg.MsgID, msg.ChannelID, msg.ID)
+				}
+			case "message_unpinned":
+				if onMessageUnpinned != nil {
+					onMessageUnpinned(msg.MsgID)
+				}
+			case "video_state":
+				if onVideoState != nil {
+					active := msg.VideoActive != nil && *msg.VideoActive
+					screen := msg.ScreenShare != nil && *msg.ScreenShare
+					onVideoState(msg.ID, active, screen)
+				}
+				if onVideoLayers != nil && len(msg.VideoLayers) > 0 {
+					onVideoLayers(msg.ID, msg.VideoLayers)
+				}
+			case "set_video_quality":
+				if onVideoQualityReq != nil && msg.VideoQuality != "" {
+					onVideoQualityReq(msg.ID, msg.VideoQuality)
+				}
+			case "recording_started":
+				if onRecordingState != nil {
+					onRecordingState(msg.ChannelID, true, msg.Username)
+				}
+			case "recording_stopped":
+				if onRecordingState != nil {
+					onRecordingState(msg.ChannelID, false, "")
+				}
+			case "webrtc_offer":
+				t.handleOffer(msg.ID, msg.SDP)
+			case "webrtc_answer":
+				t.handleAnswer(msg.ID, msg.SDP)
+			case "webrtc_ice":
+				t.handleICE(msg.ID, msg)
 			}
-		case "link_preview":
-			if onLinkPreview != nil {
-				onLinkPreview(msg.MsgID, msg.ChannelID, msg.LinkURL, msg.LinkTitle, msg.LinkDesc, msg.LinkImage, msg.LinkSite)
-			}
-		case "server_info":
-			if msg.ServerName != "" && onServerInfo != nil {
-				onServerInfo(msg.ServerName)
-			}
-		case "owner_changed":
-			if onOwnerChanged != nil {
-				onOwnerChanged(msg.OwnerID)
-			}
-		case "kicked":
-			if onKicked != nil {
-				onKicked()
-			}
-		case "channel_list":
-			if onChannelList != nil {
-				onChannelList(msg.Channels)
-			}
-		case "user_channel":
-			t.userChannels.Store(msg.ID, msg.ChannelID)
-			if msg.ID == t.MyID() {
-				t.myChannel.Store(msg.ChannelID)
-			}
-			if onUserChannel != nil {
-				onUserChannel(msg.ID, msg.ChannelID)
-			}
-		case "user_renamed":
-			if onUserRenamed != nil {
-				onUserRenamed(msg.ID, msg.Username)
-			}
-		case "message_edited":
-			if onMessageEdited != nil {
-				onMessageEdited(msg.MsgID, msg.Message, msg.Ts)
-			}
-		case "message_deleted":
-			if onMessageDeleted != nil {
-				onMessageDeleted(msg.MsgID)
-			}
-		case "reaction_added":
-			if onReactionAdded != nil {
-				onReactionAdded(msg.MsgID, msg.Emoji, msg.ID)
-			}
-		case "reaction_removed":
-			if onReactionRemoved != nil {
-				onReactionRemoved(msg.MsgID, msg.Emoji, msg.ID)
-			}
-		case "user_typing":
-			if onUserTyping != nil {
-				onUserTyping(msg.ID, msg.Username, msg.ChannelID)
-			}
-		case "message_pinned":
-			if onMessagePinned != nil {
-				onMessagePinned(msg.MsgID, msg.ChannelID, msg.ID)
-			}
-		case "message_unpinned":
-			if onMessageUnpinned != nil {
-				onMessageUnpinned(msg.MsgID)
-			}
-		case "video_state":
-			if onVideoState != nil {
-				active := msg.VideoActive != nil && *msg.VideoActive
-				screen := msg.ScreenShare != nil && *msg.ScreenShare
-				onVideoState(msg.ID, active, screen)
-			}
-			if onVideoLayers != nil && len(msg.VideoLayers) > 0 {
-				onVideoLayers(msg.ID, msg.VideoLayers)
-			}
-		case "set_video_quality":
-			if onVideoQualityReq != nil && msg.VideoQuality != "" {
-				onVideoQualityReq(msg.ID, msg.VideoQuality)
-			}
-		case "recording_started":
-			if onRecordingState != nil {
-				onRecordingState(msg.ChannelID, true, msg.Username)
-			}
-		case "recording_stopped":
-			if onRecordingState != nil {
-				onRecordingState(msg.ChannelID, false, "")
-			}
-		case "webrtc_offer":
-			t.handleOffer(msg.ID, msg.SDP)
-		case "webrtc_answer":
-			t.handleAnswer(msg.ID, msg.SDP)
-		case "webrtc_ice":
-			t.handleICE(msg.ID, msg)
 		}
 	}
 

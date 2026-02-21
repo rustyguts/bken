@@ -46,8 +46,16 @@ export function EditMessage(arg1, arg2) {
   return window['go']['main']['App']['EditMessage'](arg1, arg2);
 }
 
+export function GetAudioBitrate() {
+  return window['go']['main']['App']['GetAudioBitrate']();
+}
+
 export function GetAutoLogin() {
   return window['go']['main']['App']['GetAutoLogin']();
+}
+
+export function GetBuildInfo() {
+  return window['go']['main']['App']['GetBuildInfo']();
 }
 
 export function GetConfig() {
@@ -164,6 +172,10 @@ export function SetAGCLevel(arg1) {
 
 export function SetActiveServer(arg1) {
   return window['go']['main']['App']['SetActiveServer'](arg1);
+}
+
+export function SetAudioBitrate(arg1) {
+  return window['go']['main']['App']['SetAudioBitrate'](arg1);
 }
 
 export function SetDeafened(arg1) {

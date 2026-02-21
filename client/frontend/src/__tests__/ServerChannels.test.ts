@@ -189,7 +189,7 @@ describe('ServerChannels', () => {
         ...baseProps,
         users,
         isOwner: false,
-        connectedAddr: 'localhost:8443',
+        connectedAddr: 'localhost:8080',
       },
       ...stubs,
     })

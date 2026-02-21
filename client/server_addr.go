@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const defaultServerPort = "8443"
+const defaultServerPort = "8080"
 
 // normalizeServerAddr accepts host, host:port, IPv6, bken:// links, and
 // http(s) URLs and returns a canonical host:port for transport dialing.

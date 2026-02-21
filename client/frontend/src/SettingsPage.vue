@@ -15,7 +15,7 @@ type SettingsTab = 'audio' | 'appearance' | 'keybinds' | 'about'
 const activeTab = ref<SettingsTab>('audio')
 
 const tabs: { id: SettingsTab; label: string; icon: Component; kicker: string }[] = [
-  { id: 'audio', label: 'Audio', icon: AudioLines, kicker: 'Devices + WebRTC' },
+  { id: 'audio', label: 'Audio', icon: AudioLines, kicker: 'Devices + Voice' },
   { id: 'appearance', label: 'Appearance', icon: Palette, kicker: 'Theme + Density' },
   { id: 'keybinds', label: 'Keybinds', icon: Keyboard, kicker: 'Push To Talk' },
   { id: 'about', label: 'About', icon: CircleHelp, kicker: 'Build Info' },
@@ -39,7 +39,6 @@ const tabs: { id: SettingsTab; label: string; icon: Component; kicker: string }[
                 <h2 class="text-base font-semibold leading-none">Settings</h2>
               </div>
             </div>
-            <span class="badge badge-primary badge-soft">DaisyUI</span>
           </header>
 
           <div class="flex-1 min-h-0 grid grid-rows-[auto_1fr] lg:grid-rows-1 lg:grid-cols-[260px_1fr]">

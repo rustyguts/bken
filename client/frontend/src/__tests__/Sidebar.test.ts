@@ -43,7 +43,7 @@ describe('Sidebar', () => {
 
   it('shows active ring on connected server', async () => {
     const w = mount(Sidebar, {
-      props: { ...baseProps, activeServerAddr: 'localhost:8443' },
+      props: { ...baseProps, activeServerAddr: 'localhost:8080' },
     })
     await flushPromises()
     expect(w.html()).toContain('ring-2')
@@ -51,7 +51,7 @@ describe('Sidebar', () => {
 
   it('shows green connected indicator for connected server', async () => {
     const w = mount(Sidebar, {
-      props: { ...baseProps, connectedAddr: 'localhost:8443' },
+      props: { ...baseProps, connectedAddr: 'localhost:8080' },
     })
     await flushPromises()
     expect(w.find('.bg-success').exists()).toBe(true)
@@ -87,7 +87,7 @@ describe('Sidebar', () => {
     const inputs = w.findAll('input[type="text"]')
     const addrInput = inputs.find(i => i.attributes('placeholder')?.includes('host:port'))
     if (addrInput) {
-      await addrInput.setValue('192.168.1.1:8443')
+      await addrInput.setValue('192.168.1.1:8080')
       // Click connect
       const connectBtn = w.findAll('button').find(b => b.text().includes('Connect'))
       if (connectBtn) {

@@ -9,48 +9,25 @@ describe('AboutSettings', () => {
     expect(w.exists()).toBe(true)
   })
 
-  it('renders About heading', async () => {
+  it('renders about and build information headings', async () => {
     const w = mount(AboutSettings)
     await flushPromises()
     expect(w.text()).toContain('About')
+    expect(w.text()).toContain('Build Information')
   })
 
-  it('renders app name', async () => {
+  it('renders key build info labels', async () => {
     const w = mount(AboutSettings)
     await flushPromises()
-    expect(w.text()).toContain('bken')
+    expect(w.text()).toContain('Git Commit')
+    expect(w.text()).toContain('Go Version')
+    expect(w.text()).toContain('Browser Engine')
+    expect(w.text()).toContain('Runtime')
   })
 
-  it('renders app description', async () => {
+  it('does not include ThemePicker', async () => {
     const w = mount(AboutSettings)
     await flushPromises()
-    expect(w.text()).toContain('LAN voice chat application')
-  })
-
-  it('mentions the tech stack', async () => {
-    const w = mount(AboutSettings)
-    await flushPromises()
-    expect(w.text()).toContain('Wails')
-    expect(w.text()).toContain('Vue 3')
-    expect(w.text()).toContain('Go')
-  })
-
-  it('mentions audio codec', async () => {
-    const w = mount(AboutSettings)
-    await flushPromises()
-    expect(w.text()).toContain('Opus')
-    expect(w.text()).toContain('PortAudio')
-  })
-
-  it('mentions transport protocol', async () => {
-    const w = mount(AboutSettings)
-    await flushPromises()
-    expect(w.text()).toContain('WebTransport')
-  })
-
-  it('includes ThemePicker component', async () => {
-    const w = mount(AboutSettings)
-    await flushPromises()
-    expect(w.findComponent({ name: 'ThemePicker' }).exists()).toBe(true)
+    expect(w.findComponent({ name: 'ThemePicker' }).exists()).toBe(false)
   })
 })

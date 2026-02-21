@@ -24,7 +24,7 @@ BKEN is a LAN-first voice chat application. The server handles WebSocket signali
 
 The server is a single Go binary with no external dependencies beyond embedded SQLite. It serves two roles:
 
-1. **WebSocket signaling** (port 8443): upgrades HTTP connections to WebSocket, manages the join handshake, relays control messages (chat, WebRTC signaling, channel management), and maintains the room state.
+1. **WebSocket signaling** (port 8080): upgrades HTTP connections to WebSocket, manages the join handshake, relays control messages (chat, WebRTC signaling, channel management), and maintains the room state.
 
 2. **REST API** (port 8080): provides HTTP endpoints for health checks, server settings, channel CRUD, file uploads/downloads, and invite pages.
 

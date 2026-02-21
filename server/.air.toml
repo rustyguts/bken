@@ -4,7 +4,7 @@ tmp_dir = "tmp"
 [build]
   cmd = "go build -o ./tmp/server ."
   entrypoint = "./tmp/server"
-  args_bin = ["-test-user", "TestUser"]
+  args_bin = ["-addr", ":8080"]
   delay = 500
   exclude_dir = ["tmp"]
   include_ext = ["go"]

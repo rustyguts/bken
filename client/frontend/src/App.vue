@@ -444,11 +444,19 @@ async function handleStopScreenShare(): Promise<void> {
 async function handleDisconnectVoice(): Promise<void> {
   if (disconnectingVoice.value || !voiceConnected.value) return
   disconnectingVoice.value = true
+  const priorVoiceServer = voiceServerAddr.value
   try {
     const err = await DisconnectVoice()
     if (err) {
       setActiveError(err)
       return
+    }
+    if (priorVoiceServer) {
+      withServer(priorVoiceServer, state => {
+        const me = state.myID
+        if (!me) return
+        state.userChannels = { ...state.userChannels, [me]: 0 }
+      })
     }
     voiceConnected.value = false
     voiceServerAddr.value = ''

@@ -132,7 +132,7 @@ describe('Server Connection Flow', () => {
     const inputs = wrapper.findAll('.modal input')
     const addrInput = inputs.find(i => i.attributes('placeholder')?.includes('host:port'))
     expect(addrInput).toBeTruthy()
-    await addrInput!.setValue('192.168.1.10:8443')
+    await addrInput!.setValue('192.168.1.10:8080')
 
     // Also set a name
     const nameInput = inputs.find(i => i.attributes('placeholder')?.includes('Server name'))
@@ -146,14 +146,14 @@ describe('Server Connection Flow', () => {
     const emitted = wrapper.emitted('connect')
     expect(emitted).toBeTruthy()
     expect(emitted![0][0]).toEqual(
-      expect.objectContaining({ username: 'TestUser', addr: '192.168.1.10:8443' })
+      expect.objectContaining({ username: 'TestUser', addr: '192.168.1.10:8080' })
     )
   })
 
   it('shows connect error when passed as prop', async () => {
     const wrapper = mount(Sidebar, {
       props: {
-        activeServerAddr: 'localhost:8443',
+        activeServerAddr: 'localhost:8080',
         connectedAddr: '',
         connectError: 'Connection refused',
         startupAddr: '',
@@ -174,7 +174,7 @@ describe('Server Connection Flow', () => {
 
   it('Room emits disconnect when disconnect is requested', async () => {
     const wrapper = mount(Room, {
-      props: { ...defaultRoomProps(), connected: true, voiceConnected: true, connectedAddr: 'localhost:8443' },
+      props: { ...defaultRoomProps(), connected: true, voiceConnected: true, connectedAddr: 'localhost:8080' },
     })
     await flush()
 
@@ -453,7 +453,7 @@ describe('Voice Flow', () => {
         ...defaultRoomProps(),
         connected: true,
         voiceConnected: true,
-        connectedAddr: 'localhost:8443',
+        connectedAddr: 'localhost:8080',
         users,
         channels,
         userChannels: { 1: 0 },

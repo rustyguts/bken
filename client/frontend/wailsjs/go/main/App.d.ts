@@ -25,7 +25,11 @@ export function DisconnectVoice():Promise<string>;
 
 export function EditMessage(arg1:number,arg2:string):Promise<string>;
 
+export function GetAudioBitrate():Promise<number>;
+
 export function GetAutoLogin():Promise<main.AutoLogin>;
+
+export function GetBuildInfo():Promise<main.BuildInfo>;
 
 export function GetConfig():Promise<config.Config>;
 
@@ -84,6 +88,8 @@ export function SetAGC(arg1:boolean):Promise<void>;
 export function SetAGCLevel(arg1:number):Promise<void>;
 
 export function SetActiveServer(arg1:string):Promise<string>;
+
+export function SetAudioBitrate(arg1:number):Promise<void>;
 
 export function SetDeafened(arg1:boolean):Promise<void>;
 

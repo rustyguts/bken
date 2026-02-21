@@ -63,4 +63,11 @@ describe('AudioDeviceSettings', () => {
     await flushPromises()
     expect(w.text()).toContain('Volume')
   })
+
+  it('renders mic level meter and bitrate slider', async () => {
+    const w = mount(AudioDeviceSettings)
+    await flushPromises()
+    expect(w.text()).toContain('Mic level')
+    expect(w.find('[aria-label="Audio bitrate"]').exists()).toBe(true)
+  })
 })

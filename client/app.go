@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +40,21 @@ type App struct {
 	// Metrics cache: updated every 5 s by adaptBitrateLoop; read by GetMetrics.
 	metricsMu     sync.Mutex
 	cachedMetrics Metrics
+}
+
+var (
+	buildCommit = "dev"
+	buildTime   = ""
+)
+
+// BuildInfo contains local app build/runtime details shown in Settings > About.
+type BuildInfo struct {
+	Commit    string `json:"commit"`
+	BuildTime string `json:"build_time"`
+	GoVersion string `json:"go_version"`
+	GOOS      string `json:"goos"`
+	GOARCH    string `json:"goarch"`
+	Dirty     bool   `json:"dirty"`
 }
 
 // NewApp creates a new App.
@@ -160,12 +177,45 @@ func (a *App) GetStartupAddr() string {
 func (a *App) GetAutoLogin() AutoLogin {
 	addr := os.Getenv("BKEN_ADDR")
 	if addr == "" {
-		addr = "localhost:8443"
+		addr = "localhost:8080"
 	}
 	return AutoLogin{
 		Username: os.Getenv("BKEN_USERNAME"),
 		Addr:     addr,
 	}
+}
+
+// GetBuildInfo returns application build/runtime details for diagnostics.
+func (a *App) GetBuildInfo() BuildInfo {
+	info := BuildInfo{
+		Commit:    buildCommit,
+		BuildTime: buildTime,
+		GoVersion: runtime.Version(),
+		GOOS:      runtime.GOOS,
+		GOARCH:    runtime.GOARCH,
+	}
+
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if bi.GoVersion != "" {
+			info.GoVersion = bi.GoVersion
+		}
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				if info.Commit == "" || info.Commit == "dev" {
+					info.Commit = s.Value
+				}
+			case "vcs.time":
+				if info.BuildTime == "" {
+					info.BuildTime = s.Value
+				}
+			case "vcs.modified":
+				info.Dirty = s.Value == "true"
+			}
+		}
+	}
+
+	return info
 }
 
 // GetInputDevices returns available audio input devices.
@@ -191,6 +241,16 @@ func (a *App) SetOutputDevice(id int) {
 // SetVolume sets playback volume in the range [0.0, 1.0].
 func (a *App) SetVolume(vol float64) {
 	a.audio.SetVolume(vol)
+}
+
+// SetAudioBitrate sets the Opus target bitrate in kbps.
+func (a *App) SetAudioBitrate(kbps int) {
+	a.audio.SetBitrate(kbps)
+}
+
+// GetAudioBitrate returns the current Opus target bitrate in kbps.
+func (a *App) GetAudioBitrate() int {
+	return a.audio.CurrentBitrate()
 }
 
 // SetAEC enables or disables echo-cancellation preference.
@@ -865,6 +925,9 @@ func (a *App) GetConfig() Config {
 func (a *App) ApplyConfig() {
 	cfg := LoadConfig()
 	a.audio.SetVolume(cfg.Volume)
+	if cfg.AudioBitrate > 0 {
+		a.audio.SetBitrate(cfg.AudioBitrate)
+	}
 	a.audio.SetAEC(cfg.AECEnabled)
 	a.audio.SetAGC(cfg.AGCEnabled)
 	a.audio.SetPTTMode(cfg.PTTEnabled)
@@ -952,6 +1015,13 @@ func (a *App) RenameUser(name string) string {
 		sessions = append(sessions, tr)
 	}
 	a.sessionsMu.RUnlock()
+	if len(sessions) == 0 {
+		// Backward-compatible fallback for single-session/test setups where
+		// sessions map is not populated.
+		if tr := a.activeTransport(); tr != nil {
+			sessions = append(sessions, tr)
+		}
+	}
 	for _, tr := range sessions {
 		if err := tr.RenameUser(name); err != nil {
 			return err.Error()
@@ -1336,7 +1406,10 @@ func (a *App) sendLoop() {
 		select {
 		case <-done:
 			return
-		case data := <-a.audio.CaptureOut:
+		case data, ok := <-a.audio.CaptureOut:
+			if !ok {
+				return
+			}
 			_, voiceTr := a.voiceSession()
 			if voiceTr == nil {
 				continue

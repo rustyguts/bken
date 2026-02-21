@@ -20,7 +20,7 @@ onMounted(() => {
     <!-- System mode button -->
     <div class="mb-2">
       <button
-        class="rounded-xl px-3 py-2 text-left text-xs transition-all cursor-pointer border w-full"
+        class="rounded-lg px-2.5 py-1.5 text-left text-xs transition-all cursor-pointer border w-full"
         :class="themeMode === 'system'
           ? 'border-primary bg-primary/10 shadow-sm'
           : 'border-base-content/10 hover:border-primary/40 hover:bg-base-200/60'"
@@ -30,11 +30,11 @@ onMounted(() => {
       </button>
     </div>
 
-    <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Theme selection">
+    <div class="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-5" role="radiogroup" aria-label="Theme selection">
       <button
         v-for="theme in THEMES"
         :key="theme.name"
-        class="rounded-xl px-3 py-2 text-left text-xs transition-all cursor-pointer border truncate"
+        class="rounded-md px-2 py-1.5 text-left text-[11px] leading-tight transition-all cursor-pointer border truncate"
         :class="themeMode !== 'system' && currentTheme === theme.name
           ? 'border-primary bg-primary/10 shadow-sm'
           : 'border-base-content/10 hover:border-primary/40 hover:bg-base-200/60'"

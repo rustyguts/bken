@@ -8,13 +8,12 @@ Run your own BKEN voice server. The server is a single Go binary with no externa
 
 ```bash
 docker run --rm \
-  -p 8443:8443 \
   -p 8080:8080 \
   -v bken-data:/data \
   ghcr.io/rustyguts/bken-server:latest
 ```
 
-This exposes the WebSocket/TLS signaling port (8443 TCP) and the REST API (8080). Data is persisted in a Docker volume.
+This exposes port `8080` (WebSocket signaling + REST API). Data is persisted in a Docker volume.
 
 ### Docker Compose
 
@@ -25,11 +24,10 @@ services:
   server:
     image: ghcr.io/rustyguts/bken-server:latest
     ports:
-      - "8443:8443"
       - "8080:8080"
     volumes:
       - bken-data:/data
-    command: ["-addr", ":8443", "-api-addr", ":8080", "-db", "/data/bken.db"]
+    command: ["-addr", ":8080"]
     restart: unless-stopped
 
 volumes:
@@ -51,32 +49,29 @@ go build -o bken-server .
 ./bken-server
 ```
 
-The server listens on `:8443` (TLS/WebSocket) and `:8080` (REST API) by default. See the [Configuration Reference](/configuration) for all flags.
+The server listens on `:8080` by default. See the [Configuration Reference](/configuration) for all flags.
 
 ## Network Requirements
 
-BKEN uses two TCP ports:
+BKEN uses one TCP port:
 
 | Port | Protocol | Purpose |
 |------|----------|---------|
-| 8443 | TCP | WebSocket signaling (TLS). Clients connect here. |
-| 8080 | TCP | REST API for file uploads, health checks, settings. |
+| 8080 | TCP | WebSocket signaling and REST API endpoints. |
 
-WebRTC audio flows peer-to-peer between clients on ephemeral ports — it does not pass through the server. Only the WebSocket signaling connection uses port 8443.
+WebRTC audio flows peer-to-peer between clients on ephemeral ports and does not pass through the server.
 
 ### Firewall Rules
 
 **ufw (Ubuntu/Debian):**
 
 ```bash
-sudo ufw allow 8443/tcp
 sudo ufw allow 8080/tcp
 ```
 
 **firewalld (Fedora/RHEL):**
 
 ```bash
-sudo firewall-cmd --permanent --add-port=8443/tcp
 sudo firewall-cmd --permanent --add-port=8080/tcp
 sudo firewall-cmd --reload
 ```
@@ -84,7 +79,6 @@ sudo firewall-cmd --reload
 **iptables:**
 
 ```bash
-iptables -A INPUT -p tcp --dport 8443 -j ACCEPT
 iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
 ```
 
@@ -147,7 +141,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/bken.example.com/privkey.pem;
 
     location /ws {
-        proxy_pass https://127.0.0.1:8443;
+        proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -168,11 +162,7 @@ server {
 ```
 bken.example.com {
     handle /ws {
-        reverse_proxy https://127.0.0.1:8443 {
-            transport http {
-                tls_insecure_skip_verify
-            }
-        }
+        reverse_proxy http://127.0.0.1:8080
     }
 
     handle /api/* {
@@ -183,12 +173,4 @@ bken.example.com {
 
 ### TLS
 
-BKEN generates a self-signed TLS certificate on each start. This is sufficient for LAN use where all participants trust the network.
-
-For production deployments over the internet, place BKEN behind a reverse proxy with a proper TLS certificate (e.g. Let's Encrypt). The WebRTC peer connections between clients are always encrypted regardless of the signaling transport.
-
-The certificate validity defaults to 24 hours and can be adjusted:
-
-```bash
-./bken-server -cert-validity 720h  # 30 days
-```
+If you need TLS, terminate it at a reverse proxy (nginx/Caddy/Traefik) in front of BKEN.

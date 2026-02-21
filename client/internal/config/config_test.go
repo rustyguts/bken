@@ -16,6 +16,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Volume != 1.0 {
 		t.Errorf("expected volume 1.0, got %v", cfg.Volume)
 	}
+	if cfg.AudioBitrate != 32 {
+		t.Errorf("expected default audio bitrate 32 kbps, got %d", cfg.AudioBitrate)
+	}
 	if cfg.InputDeviceID != -1 || cfg.OutputDeviceID != -1 {
 		t.Error("expected device IDs to default to -1")
 	}
@@ -50,13 +53,14 @@ func TestSaveAndLoad(t *testing.T) {
 		InputDeviceID:  2,
 		OutputDeviceID: 3,
 		Volume:         0.75,
+		AudioBitrate:   48,
 		AECEnabled:     true,
 		NoiseEnabled:   true,
 		AGCEnabled:     true,
 		PTTEnabled:     true,
 		PTTKey:         "Space",
 		Servers: []config.ServerEntry{
-			{Name: "Home", Addr: "192.168.1.10:8443"},
+			{Name: "Home", Addr: "192.168.1.10:8080"},
 		},
 	}
 
@@ -77,6 +81,9 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.Volume != cfg.Volume {
 		t.Errorf("volume: want %v got %v", cfg.Volume, loaded.Volume)
 	}
+	if loaded.AudioBitrate != cfg.AudioBitrate {
+		t.Errorf("audio bitrate: want %d got %d", cfg.AudioBitrate, loaded.AudioBitrate)
+	}
 	if loaded.AECEnabled != cfg.AECEnabled {
 		t.Errorf("aec enabled: want %v got %v", cfg.AECEnabled, loaded.AECEnabled)
 	}
@@ -92,7 +99,7 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.PTTKey != cfg.PTTKey {
 		t.Errorf("ptt key: want %q got %q", cfg.PTTKey, loaded.PTTKey)
 	}
-	if len(loaded.Servers) != 1 || loaded.Servers[0].Addr != "192.168.1.10:8443" {
+	if len(loaded.Servers) != 1 || loaded.Servers[0].Addr != "192.168.1.10:8080" {
 		t.Errorf("servers: unexpected value %+v", loaded.Servers)
 	}
 }

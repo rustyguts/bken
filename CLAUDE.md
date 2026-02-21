@@ -30,13 +30,13 @@ cd client && wails build -tags webkit2_41
 cd client/frontend && bun run build
 ```
 
-The server accepts a `-addr` flag (default `:8443`).
+The server accepts a `-addr` flag (default `:8080`).
 
 ## Architecture
 
 ### Wire protocol
 
-Every connection uses WebSocket over TLS (`/ws` on port 8443):
+Every connection uses WebSocket over TLS (`/ws` on port 8080):
 
 1. **Control messages** — reliable, bidirectional, newline-delimited JSON. Client connects and immediately sends `{"type":"join","username":"..."}`. Server responds with `user_list` (includes channel list and ICE server config), then pushes events: `user_joined`, `user_left`, `chat`, `edit_message`, `delete_message`, `create_channel`, `rename_channel`, `delete_channel`, `webrtc_offer`, `webrtc_answer`, `webrtc_ice`, `kick`, `move_user`, `reaction`, `typing`, and more.
 2. **Voice audio** — peer-to-peer WebRTC (`pion/webrtc/v4`). The server relays only WebRTC signaling (offer/answer/ICE candidates); Opus audio flows directly between clients over DTLS-SRTP.

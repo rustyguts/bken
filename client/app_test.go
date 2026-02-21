@@ -486,8 +486,8 @@ func TestIsConnectedAfterSet(t *testing.T) {
 
 func TestConnectAlreadyConnected(t *testing.T) {
 	app, mt := newTestApp()
-	app.sessions["localhost:8443"] = mt
-	result := app.Connect("localhost:8443", "alice")
+	app.sessions["localhost:8080"] = mt
+	result := app.Connect("localhost:8080", "alice")
 	if result != "" {
 		t.Errorf("expected empty result when reusing session, got %q", result)
 	}
@@ -502,7 +502,7 @@ func TestConnectAlreadyConnected(t *testing.T) {
 func TestConnectTransportError(t *testing.T) {
 	app, mt := newTestApp()
 	mt.connectErr = errors.New("dial failed")
-	result := app.Connect("localhost:8443", "alice")
+	result := app.Connect("localhost:8080", "alice")
 	if result != "dial failed" {
 		t.Errorf("expected 'dial failed', got %q", result)
 	}
@@ -515,7 +515,7 @@ func TestConnectDoesNotDisconnectBeforeDial(t *testing.T) {
 	app, mt := newTestApp()
 	// Force a transport error and ensure Connect does not pre-emptively disconnect.
 	mt.connectErr = errors.New("fail")
-	app.Connect("localhost:8443", "bob")
+	app.Connect("localhost:8080", "bob")
 	mt.mu.Lock()
 	dc := mt.disconnected
 	mt.mu.Unlock()
@@ -1299,9 +1299,9 @@ func TestGetStartupAddrDefault(t *testing.T) {
 
 func TestGetStartupAddrSet(t *testing.T) {
 	app, _ := newTestApp()
-	app.startupAddr = "192.168.1.5:8443"
-	if addr := app.GetStartupAddr(); addr != "192.168.1.5:8443" {
-		t.Errorf("expected '192.168.1.5:8443', got %q", addr)
+	app.startupAddr = "192.168.1.5:8080"
+	if addr := app.GetStartupAddr(); addr != "192.168.1.5:8080" {
+		t.Errorf("expected '192.168.1.5:8080', got %q", addr)
 	}
 }
 
@@ -1314,8 +1314,8 @@ func TestGetAutoLoginDefaults(t *testing.T) {
 	if login.Username != "" {
 		t.Errorf("expected empty username, got %q", login.Username)
 	}
-	if login.Addr != "localhost:8443" {
-		t.Errorf("expected 'localhost:8443', got %q", login.Addr)
+	if login.Addr != "localhost:8080" {
+		t.Errorf("expected 'localhost:8080', got %q", login.Addr)
 	}
 }
 
@@ -1425,6 +1425,8 @@ func TestUploadFileFromPathNoAPIBase(t *testing.T) {
 
 func TestDisconnectVoiceJoinsLobby(t *testing.T) {
 	app, mt := newTestApp()
+	app.setVoiceSession("localhost:8080", mt)
+	app.connected.Store(true)
 	// DisconnectVoice calls transport.JoinChannel(0).
 	result := app.DisconnectVoice()
 	if result != "" {
@@ -1439,6 +1441,8 @@ func TestDisconnectVoiceJoinsLobby(t *testing.T) {
 
 func TestDisconnectVoiceError(t *testing.T) {
 	app, mt := newTestApp()
+	app.setVoiceSession("localhost:8080", mt)
+	app.connected.Store(true)
 	mt.joinChannelErr = errors.New("not connected")
 	result := app.DisconnectVoice()
 	if result != "not connected" {
@@ -1561,6 +1565,7 @@ func TestSendLoopDisconnectsAfterThreshold(t *testing.T) {
 		audio:     NewAudioEngine(),
 		transport: mt,
 	}
+	app.setVoiceSession("localhost:8080", mt)
 
 	// Create channels that the send loop uses.
 	app.audio.CaptureOut = make(chan []byte, sendFailureThreshold+10)

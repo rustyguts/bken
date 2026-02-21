@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"os"
 	"testing"
 	"time"
@@ -22,11 +21,9 @@ func TestProbeRemoteWebTransport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	d := websocket.Dialer{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-	}
+	d := websocket.Dialer{}
 
-	conn, _, err := d.DialContext(ctx, "wss://"+target+"/ws", nil)
+	conn, _, err := d.DialContext(ctx, "ws://"+target+"/ws", nil)
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}

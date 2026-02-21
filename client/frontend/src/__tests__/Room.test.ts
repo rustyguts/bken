@@ -8,7 +8,7 @@ describe('Room', () => {
     connected: true,
     voiceConnected: true,
     reconnecting: false,
-    connectedAddr: 'localhost:8443',
+    connectedAddr: 'localhost:8080',
     connectError: '',
     startupAddr: '',
     globalUsername: 'TestUser',
@@ -74,8 +74,8 @@ describe('Room', () => {
     const w = mount(Room, { props: baseProps })
     await flushPromises()
     const sidebar = w.findComponent({ name: 'Sidebar' })
-    sidebar.vm.$emit('selectServer', 'other:8443')
-    expect(w.emitted('selectServer')).toEqual([['other:8443']])
+    sidebar.vm.$emit('selectServer', 'other:8080')
+    expect(w.emitted('selectServer')).toEqual([['other:8080']])
   })
 
   it('emits disconnectVoice from UserControls', async () => {

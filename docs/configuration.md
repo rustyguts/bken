@@ -6,7 +6,7 @@ The BKEN server is configured entirely via command-line flags. There are no conf
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-addr` | `:8443` | HTTPS/WebSocket listen address. Clients connect to this port for signaling. |
+| `-addr` | `:8080` | HTTPS/WebSocket listen address. Clients connect to this port for signaling. |
 | `-api-addr` | `:8080` | REST API listen address. Used for file uploads, health checks, settings. Set to empty string to disable. |
 | `-db` | `bken.db` | Path to the SQLite database file. Created on first run. |
 | `-idle-timeout` | `30s` | HTTP idle timeout for connections. |
@@ -24,7 +24,7 @@ The BKEN server is configured entirely via command-line flags. There are no conf
 ./bken-server
 ```
 
-Listens on `:8443` (signaling) and `:8080` (API), stores data in `./bken.db`.
+Listens on `:8080` (signaling) and `:8080` (API), stores data in `./bken.db`.
 
 **Custom ports and data directory:**
 

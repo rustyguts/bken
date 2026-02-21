@@ -70,18 +70,15 @@ describe('App', () => {
       servers: [],
       input_device_id: -1,
       output_device_id: -1,
-      volume: 100,
+      volume: 1,
+      audio_bitrate_kbps: 32,
       noise_enabled: false,
       noise_level: 0,
       aec_enabled: false,
       agc_enabled: false,
       agc_level: 0,
-      vad_enabled: false,
-      vad_threshold: 0,
       ptt_enabled: false,
       ptt_key: 'Backquote',
-      noise_gate_enabled: false,
-      noise_gate_threshold: 0,
     })
     const w = mount(App)
     await flushPromises()
@@ -98,18 +95,15 @@ describe('App', () => {
       servers: [],
       input_device_id: -1,
       output_device_id: -1,
-      volume: 100,
+      volume: 1,
+      audio_bitrate_kbps: 32,
       noise_enabled: false,
       noise_level: 0,
       aec_enabled: false,
       agc_enabled: false,
       agc_level: 0,
-      vad_enabled: false,
-      vad_threshold: 0,
       ptt_enabled: false,
       ptt_key: 'Backquote',
-      noise_gate_enabled: false,
-      noise_gate_threshold: 0,
     })
     const w = mount(App)
     await flushPromises()
@@ -433,7 +427,7 @@ describe('App', () => {
     await flushPromises()
     const room = w.findComponent({ name: 'Room' })
 
-    room.vm.$emit('activateChannel', { addr: 'localhost:8443', channelID: 1 })
+    room.vm.$emit('activateChannel', { addr: 'localhost:8080', channelID: 1 })
     await flushPromises()
     expect(room.props('voiceConnected')).toBe(true)
 

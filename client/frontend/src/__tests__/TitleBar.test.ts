@@ -27,7 +27,7 @@ describe('TitleBar', () => {
 
   it('shows rename button when isOwner=true and serverName exists', () => {
     const w = mount(TitleBar, {
-      props: { serverName: 'Test', isOwner: true, serverAddr: '1.2.3.4:8443' },
+      props: { serverName: 'Test', isOwner: true, serverAddr: '1.2.3.4:8080' },
     })
     const editBtn = w.findAll('button').find(b => b.attributes('title') === 'Rename server')
     expect(editBtn).toBeDefined()
@@ -43,7 +43,7 @@ describe('TitleBar', () => {
 
   it('shows copy invite link button for owner with server addr', () => {
     const w = mount(TitleBar, {
-      props: { serverName: 'Test', isOwner: true, serverAddr: '1.2.3.4:8443' },
+      props: { serverName: 'Test', isOwner: true, serverAddr: '1.2.3.4:8080' },
     })
     const copyBtn = w.findAll('button').find(b => b.attributes('title')?.includes('invite'))
     expect(copyBtn).toBeDefined()
@@ -54,11 +54,11 @@ describe('TitleBar', () => {
     Object.assign(navigator, { clipboard: { writeText } })
 
     const w = mount(TitleBar, {
-      props: { serverName: 'Test', isOwner: true, serverAddr: '1.2.3.4:8443' },
+      props: { serverName: 'Test', isOwner: true, serverAddr: '1.2.3.4:8080' },
     })
     const copyBtn = w.findAll('button').find(b => b.attributes('title')?.includes('invite'))
     await copyBtn!.trigger('click')
-    expect(writeText).toHaveBeenCalledWith('bken://1.2.3.4:8443')
+    expect(writeText).toHaveBeenCalledWith('bken://1.2.3.4:8080')
   })
 
   it('has window control buttons (minimise, maximise, close)', () => {

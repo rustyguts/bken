@@ -31,15 +31,14 @@ Download the binary and run it:
 Or use Docker:
 
 ```bash
-docker run --rm -p 8443:8443 -p 8080:8080 ghcr.io/rustyguts/bken-server:latest
+docker run --rm -p 8080:8080 ghcr.io/rustyguts/bken-server:latest
 ```
 
 See the [Self-Hosting Guide](/self-hosting) for full details.
 
 ### What ports do I need to open?
 
-- **8443** (TCP): WebSocket signaling. Clients connect here.
-- **8080** (TCP): REST API for file uploads, health checks, and settings.
+- **8080** (TCP): WebSocket signaling and REST API.
 
 WebRTC audio flows peer-to-peer between clients on ephemeral ports and does not pass through the server.
 
@@ -90,16 +89,14 @@ Opus at 48 kHz, mono, with adaptive bitrate (8-48 kbps). Opus is the standard co
 ### Does BKEN work over the internet?
 
 BKEN is designed for LAN use but can work over the internet if:
-1. The signaling server (port 8443) is reachable from all clients
+1. The signaling server (port 8080) is reachable from all clients
 2. Clients can establish peer-to-peer WebRTC connections (may require STUN/TURN)
 
 For internet use, configure a TURN server. See the [Self-Hosting Guide](/self-hosting#turn-setup).
 
-### Why does it say "untrusted certificate"?
+### Can I run with TLS?
 
-BKEN generates a self-signed TLS certificate on each start. This is normal for LAN use. The certificate encrypts the connection but is not issued by a trusted authority. Clients skip certificate validation by design.
-
-For production/internet deployments, place BKEN behind a reverse proxy with a proper TLS certificate.
+Yes. The dev server runs plain WebSocket/HTTP on port `8080`. For TLS, run BKEN behind a reverse proxy (nginx/Caddy/Traefik) with certificates.
 
 ### What is STUN/TURN?
 
@@ -111,7 +108,7 @@ For production/internet deployments, place BKEN behind a reverse proxy with a pr
 ### Client can't connect to server
 
 1. Verify the server is running and the address is correct
-2. Check that port 8443 is open on the server machine's firewall
+2. Check that port 8080 is open on the server machine's firewall
 3. Make sure both machines are on the same network (for LAN use)
 4. Try the server's IP address instead of hostname
 

@@ -20,6 +20,7 @@ export namespace config {
 	    input_device_id: number;
 	    output_device_id: number;
 	    volume: number;
+	    audio_bitrate_kbps: number;
 	    noise_enabled: boolean;
 	    aec_enabled: boolean;
 	    agc_enabled: boolean;
@@ -38,6 +39,7 @@ export namespace config {
 	        this.input_device_id = source["input_device_id"];
 	        this.output_device_id = source["output_device_id"];
 	        this.volume = source["volume"];
+	        this.audio_bitrate_kbps = source["audio_bitrate_kbps"];
 	        this.noise_enabled = source["noise_enabled"];
 	        this.aec_enabled = source["aec_enabled"];
 	        this.agc_enabled = source["agc_enabled"];
@@ -95,6 +97,28 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.username = source["username"];
 	        this.addr = source["addr"];
+	    }
+	}
+	export class BuildInfo {
+	    commit: string;
+	    build_time: string;
+	    go_version: string;
+	    goos: string;
+	    goarch: string;
+	    dirty: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new BuildInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.commit = source["commit"];
+	        this.build_time = source["build_time"];
+	        this.go_version = source["go_version"];
+	        this.goos = source["goos"];
+	        this.goarch = source["goarch"];
+	        this.dirty = source["dirty"];
 	    }
 	}
 	export class Metrics {

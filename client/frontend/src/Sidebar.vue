@@ -27,7 +27,7 @@ const newName = ref('')
 const newAddr = ref('')
 const browserError = ref('')
 
-const servers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:8443' }])
+const servers = ref<ServerEntry[]>([{ name: 'Local Dev', addr: 'localhost:8080' }])
 
 function normalizeAddr(raw: string): string {
   let addr = raw.trim()
@@ -47,7 +47,7 @@ function normalizeServers(entries: ServerEntry[]): ServerEntry[] {
       addr,
     })
   }
-  return out.length ? out : [{ name: 'Local Dev', addr: 'localhost:8443' }]
+  return out.length ? out : [{ name: 'Local Dev', addr: 'localhost:8080' }]
 }
 
 async function loadConfig(): Promise<void> {
@@ -162,7 +162,7 @@ async function removeServer(): Promise<void> {
   const addr = normalizeAddr(serverContextMenu.value.server.addr)
   servers.value = servers.value.filter(s => normalizeAddr(s.addr) !== addr)
   if (!servers.value.length) {
-    servers.value = [{ name: 'Local Dev', addr: 'localhost:8443' }]
+    servers.value = [{ name: 'Local Dev', addr: 'localhost:8080' }]
   }
   closeServerContextMenu()
   await saveConfig()
