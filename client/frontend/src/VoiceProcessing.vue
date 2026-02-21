@@ -42,75 +42,88 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="card border border-base-content/10 bg-base-100 shadow-sm">
-    <div class="card-body gap-4">
-      <div class="flex items-start justify-between gap-3">
+  <section>
+    <div class="flex items-center gap-2 mb-3">
+      <ShieldCheck class="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
+      <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Voice Enhancements</span>
+    </div>
+
+    <div class="card bg-base-200/40 border border-base-content/10">
+      <div class="card-body gap-4 p-4">
         <div>
-          <p class="text-xs font-semibold uppercase tracking-wider text-primary/80">Voice Enhancements</p>
-          <h3 class="text-lg font-semibold leading-tight">Help Others Hear You Clearly</h3>
-          <p class="text-sm opacity-70 mt-1">Turn these on for clearer calls in most channels.</p>
+          <h3 class="card-title text-sm">Help Others Hear You Clearly</h3>
+          <p class="text-xs opacity-70 mt-1">Turn these on for clearer calls in most channels.</p>
         </div>
-      </div>
 
-      <div class="divider my-0"></div>
+        <div class="divider my-0"></div>
 
-      <div class="grid gap-3">
-        <label class="flex items-center justify-between gap-3 rounded-xl border border-base-content/10 bg-base-200/40 px-3 py-3">
-          <div class="flex items-center gap-3">
-            <div class="size-9 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <ShieldCheck class="size-4" aria-hidden="true" />
-            </div>
-            <div>
-              <p class="text-sm font-medium leading-none">Echo Cancellation</p>
-              <p class="text-xs opacity-60 mt-1">Helps stop speaker sound from feeding back into your mic.</p>
-            </div>
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend text-xs">Processing</legend>
+          <div class="grid gap-3">
+            <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-3">
+              <div class="flex items-center gap-3">
+                <div class="avatar placeholder">
+                  <div class="bg-primary/10 text-primary w-9 rounded-lg">
+                    <ShieldCheck class="size-4" aria-hidden="true" />
+                  </div>
+                </div>
+                <div>
+                  <span class="label-text text-sm font-medium">Echo Cancellation</span>
+                  <p class="text-xs opacity-60 mt-1">Helps stop speaker sound from feeding back into your mic.</p>
+                </div>
+              </div>
+              <input
+                v-model="aecEnabled"
+                type="checkbox"
+                class="toggle toggle-primary"
+                aria-label="Toggle echo cancellation"
+                @change="handleAECToggle"
+              />
+            </label>
+
+            <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-3">
+              <div class="flex items-center gap-3">
+                <div class="avatar placeholder">
+                  <div class="bg-primary/10 text-primary w-9 rounded-lg">
+                    <Waves class="size-4" aria-hidden="true" />
+                  </div>
+                </div>
+                <div>
+                  <span class="label-text text-sm font-medium">Noise Suppression</span>
+                  <p class="text-xs opacity-60 mt-1">Reduces steady background sounds like fans and hum.</p>
+                </div>
+              </div>
+              <input
+                v-model="noiseEnabled"
+                type="checkbox"
+                class="toggle toggle-primary"
+                aria-label="Toggle noise suppression"
+                @change="handleNoiseToggle"
+              />
+            </label>
+
+            <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-3">
+              <div class="flex items-center gap-3">
+                <div class="avatar placeholder">
+                  <div class="bg-primary/10 text-primary w-9 rounded-lg">
+                    <Mic2 class="size-4" aria-hidden="true" />
+                  </div>
+                </div>
+                <div>
+                  <span class="label-text text-sm font-medium">Volume Normalization</span>
+                  <p class="text-xs opacity-60 mt-1">Keeps your voice at a more even loudness over time.</p>
+                </div>
+              </div>
+              <input
+                v-model="agcEnabled"
+                type="checkbox"
+                class="toggle toggle-primary"
+                aria-label="Toggle volume normalization"
+                @change="handleAGCToggle"
+              />
+            </label>
           </div>
-          <input
-            v-model="aecEnabled"
-            type="checkbox"
-            class="toggle toggle-primary"
-            aria-label="Toggle echo cancellation"
-            @change="handleAECToggle"
-          />
-        </label>
-
-        <label class="flex items-center justify-between gap-3 rounded-xl border border-base-content/10 bg-base-200/40 px-3 py-3">
-          <div class="flex items-center gap-3">
-            <div class="size-9 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <Waves class="size-4" aria-hidden="true" />
-            </div>
-            <div>
-              <p class="text-sm font-medium leading-none">Noise Suppression</p>
-              <p class="text-xs opacity-60 mt-1">Reduces steady background sounds like fans and hum.</p>
-            </div>
-          </div>
-          <input
-            v-model="noiseEnabled"
-            type="checkbox"
-            class="toggle toggle-primary"
-            aria-label="Toggle noise suppression"
-            @change="handleNoiseToggle"
-          />
-        </label>
-
-        <label class="flex items-center justify-between gap-3 rounded-xl border border-base-content/10 bg-base-200/40 px-3 py-3">
-          <div class="flex items-center gap-3">
-            <div class="size-9 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <Mic2 class="size-4" aria-hidden="true" />
-            </div>
-            <div>
-              <p class="text-sm font-medium leading-none">Volume Normalization</p>
-              <p class="text-xs opacity-60 mt-1">Keeps your voice at a more even loudness over time.</p>
-            </div>
-          </div>
-          <input
-            v-model="agcEnabled"
-            type="checkbox"
-            class="toggle toggle-primary"
-            aria-label="Toggle volume normalization"
-            @change="handleAGCToggle"
-          />
-        </label>
+        </fieldset>
       </div>
     </div>
   </section>

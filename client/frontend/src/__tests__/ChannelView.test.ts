@@ -53,22 +53,16 @@ describe('ChannelView', () => {
     expect(w.findComponent({ name: 'ChannelChat' }).exists()).toBe(true)
   })
 
-  it('renders UserControls component', async () => {
-    const w = mount(ChannelView, { props: baseProps })
-    await flushPromises()
-    expect(w.findComponent({ name: 'UserControls' }).exists()).toBe(true)
-  })
-
   it('renders VideoGrid component', async () => {
     const w = mount(ChannelView, { props: baseProps })
     await flushPromises()
     expect(w.findComponent({ name: 'VideoGrid' }).exists()).toBe(true)
   })
 
-  it('applies channel-grid layout class', async () => {
+  it('applies grid layout class', async () => {
     const w = mount(ChannelView, { props: baseProps })
     await flushPromises()
-    expect(w.find('.channel-grid').exists()).toBe(true)
+    expect(w.find('.grid').exists()).toBe(true)
   })
 
   it('emits selectServer when triggered from sidebar', async () => {
@@ -113,11 +107,11 @@ describe('ChannelView', () => {
     expect(w.emitted('sendChannelChat')).toEqual([[1, 'channel msg']])
   })
 
-  it('emits openSettings from UserControls', async () => {
+  it('emits openSettings from Sidebar', async () => {
     const w = mount(ChannelView, { props: baseProps })
     await flushPromises()
-    const controls = w.findComponent({ name: 'UserControls' })
-    controls.vm.$emit('openSettings')
+    const sidebar = w.findComponent({ name: 'Sidebar' })
+    sidebar.vm.$emit('openSettings')
     await flushPromises()
     expect(w.emitted('openSettings')).toBeDefined()
   })

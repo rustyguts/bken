@@ -40,17 +40,18 @@ describe('AppearanceSettings', () => {
   it('highlights the default density option', async () => {
     const w = mount(AppearanceSettings)
     await flushPromises()
-    const defaultBtn = w.findAll('button').find(b => b.text().includes('Default') && b.text().includes('name above'))
-    expect(defaultBtn?.classes()).toContain('border-primary')
+    const defaultLabel = w.findAll('label').find(b => b.text().includes('Default') && b.text().includes('name above'))
+    expect(defaultLabel?.classes()).toContain('btn-primary')
   })
 
   it('changes density on click', async () => {
     const w = mount(AppearanceSettings)
     await flushPromises()
-    const compactBtn = w.findAll('button').find(b => b.text().includes('Compact'))
-    await compactBtn!.trigger('click')
+    const compactLabel = w.findAll('label').find(b => b.text().includes('Compact'))
+    const radio = compactLabel!.find('input[type="radio"]')
+    await radio.trigger('change')
     await flushPromises()
-    expect(compactBtn!.classes()).toContain('border-primary')
+    expect(compactLabel!.classes()).toContain('btn-primary')
   })
 
   it('renders Chat section with system messages toggle', async () => {

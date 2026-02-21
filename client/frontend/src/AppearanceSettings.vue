@@ -44,19 +44,25 @@ async function toggleSystemMessages(): Promise<void> {
       <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Message Density</span>
     </div>
 
-    <div class="space-y-1.5">
-      <button
+    <div class="join join-vertical w-full">
+      <label
         v-for="opt in densityOptions"
         :key="opt.value"
-        class="w-full rounded-lg px-3 py-2 text-left text-xs transition-all cursor-pointer border"
-        :class="density === opt.value
-          ? 'border-primary bg-primary/10 shadow-sm'
-          : 'border-base-content/10 hover:border-primary/40 hover:bg-base-200/60'"
-        @click="setDensity(opt.value)"
+        class="join-item btn btn-sm h-auto justify-start gap-3 px-3 py-2 text-left normal-case"
+        :class="density === opt.value ? 'btn-primary' : 'btn-ghost'"
       >
-        <span class="font-medium">{{ opt.label }}</span>
-        <span class="opacity-50 ml-2">{{ opt.desc }}</span>
-      </button>
+        <input
+          type="radio"
+          name="density"
+          class="radio radio-sm radio-primary"
+          :checked="density === opt.value"
+          @change="setDensity(opt.value)"
+        />
+        <span>
+          <span class="font-medium text-sm">{{ opt.label }}</span>
+          <span class="text-xs opacity-60 ml-2">{{ opt.desc }}</span>
+        </span>
+      </label>
     </div>
   </section>
 
@@ -66,14 +72,14 @@ async function toggleSystemMessages(): Promise<void> {
       <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Chat</span>
     </div>
 
-    <label class="flex items-center gap-2 cursor-pointer">
+    <label class="label cursor-pointer justify-start gap-3">
       <input
         type="checkbox"
         class="toggle toggle-sm toggle-primary"
         :checked="showSystemMessages"
         @change="toggleSystemMessages"
       />
-      <span class="text-xs">Show system messages</span>
+      <span class="label-text">Show system messages</span>
     </label>
   </section>
 </template>

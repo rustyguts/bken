@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, nextTick, watch } from 'vue'
 import { GetConfig, SaveConfig } from './config'
 import type { ServerEntry } from './config'
 import { BKEN_SCHEME } from './constants'
-import type { ConnectPayload } from './types'
-import { Server, Home } from 'lucide-vue-next'
+import { Home, Settings } from 'lucide-vue-next'
 
 const props = defineProps<{
   activeServerAddr: string
@@ -17,17 +16,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  connect: [payload: ConnectPayload]
   selectServer: [addr: string]
   goHome: []
+  renameUsername: [username: string]
+  openSettings: []
 }>()
-
-const browserOpen = ref(false)
-const connectingAddr = ref('')
-
-const newName = ref('')
-const newAddr = ref('')
-const browserError = ref('')
 
 // Confirmation dialog state (when switching servers while connected)
 const confirmDialog = ref(false)
@@ -53,7 +46,7 @@ function normalizeServers(entries: ServerEntry[]): ServerEntry[] {
       addr,
     })
   }
-  return out.length ? out : [{ name: 'Local Dev', addr: 'localhost:8080' }]
+  return out
 }
 
 async function loadConfig(): Promise<void> {
@@ -76,38 +69,29 @@ function initials(name: string): string {
   return first ? first.toUpperCase() : '?'
 }
 
-function nameHue(name: string): number {
+const avatarColors = [
+  'bg-primary text-primary-content',
+  'bg-secondary text-secondary-content',
+  'bg-accent text-accent-content',
+  'bg-info text-info-content',
+  'bg-success text-success-content',
+  'bg-warning text-warning-content',
+] as const
+
+function serverColorClass(name: string): string {
   let hash = 0
   for (const char of name.toLowerCase()) {
-    hash = (hash * 31 + char.charCodeAt(0)) % 360
+    hash = (hash * 31 + char.charCodeAt(0)) % avatarColors.length
   }
-  return hash
-}
-
-function serverButtonStyle(name: string, active: boolean): Record<string, string> {
-  const hue = nameHue(name)
-  if (active) {
-    return {
-      backgroundColor: `hsl(${hue} 65% 45%)`,
-      borderColor: `hsl(${hue} 70% 28%)`,
-      color: 'white',
-    }
-  }
-  return {
-    backgroundColor: `hsl(${hue} 65% 86%)`,
-    borderColor: `hsl(${hue} 45% 64%)`,
-    color: `hsl(${hue} 60% 24%)`,
-  }
+  return avatarColors[hash]
 }
 
 function selectServer(addr: string): void {
   const normalized = normalizeAddr(addr)
-  // If already connected to this server, just select it
   if (isServerConnected(normalized)) {
     emit('selectServer', normalized)
     return
   }
-  // If connected to a different server, show confirmation
   if (props.connected) {
     confirmTargetAddr.value = normalized
     confirmDialog.value = true
@@ -131,43 +115,11 @@ function isServerConnected(addr: string): boolean {
   return normalizeAddr(addr) === normalizeAddr(props.connectedAddr)
 }
 
-async function connectToNewServer(): Promise<void> {
-  const user = props.globalUsername.trim()
-  const addr = normalizeAddr(newAddr.value)
-  const name = newName.value.trim() || addr
-
-  if (!user) {
-    browserError.value = 'Set your global username in User Controls first.'
-    return
-  }
-  if (!addr) {
-    browserError.value = 'Server address is required'
-    return
-  }
-
-  const idx = servers.value.findIndex(s => s.addr === addr)
-  if (idx >= 0) {
-    const updated = [...servers.value]
-    updated[idx] = { ...updated[idx], name: updated[idx].name || name }
-    servers.value = updated
-  } else {
-    servers.value = [...servers.value, { name, addr }]
-  }
-
-  browserError.value = ''
-  connectingAddr.value = addr
-  await saveConfig()
-
-  emit('selectServer', addr)
-  emit('connect', { username: user, addr })
-}
-
 async function ensureStartupAddr(addr: string): Promise<void> {
   const clean = normalizeAddr(addr)
   if (!clean || servers.value.some(s => s.addr === clean)) return
   servers.value = [...servers.value, { name: 'Invited Server', addr: clean }]
   await saveConfig()
-  if (!newAddr.value.trim()) newAddr.value = clean
 }
 
 // Server context menu
@@ -186,25 +138,55 @@ async function removeServer(): Promise<void> {
   if (!serverContextMenu.value) return
   const addr = normalizeAddr(serverContextMenu.value.server.addr)
   servers.value = servers.value.filter(s => normalizeAddr(s.addr) !== addr)
-  if (!servers.value.length) {
-    servers.value = [{ name: 'Local Dev', addr: 'localhost:8080' }]
-  }
   closeServerContextMenu()
   await saveConfig()
-  // If the removed server was the active one, deselect it
   if (normalizeAddr(props.activeServerAddr) === addr) {
     emit('selectServer', servers.value[0].addr)
   }
 }
 
-watch(() => props.connectedAddr, () => {
-  connectingAddr.value = ''
-  browserOpen.value = false
-})
+// User menu (positioned above avatar, teleported to body)
+const userMenuOpen = ref(false)
+const avatarContainerEl = ref<HTMLElement | null>(null)
+const userMenuStyle = ref<Record<string, string>>({})
 
-watch(() => props.connectError, (msg) => {
-  if (msg) connectingAddr.value = ''
-})
+function toggleUserMenu(): void {
+  if (userMenuOpen.value) {
+    userMenuOpen.value = false
+    return
+  }
+  if (avatarContainerEl.value) {
+    const rect = avatarContainerEl.value.getBoundingClientRect()
+    userMenuStyle.value = {
+      left: rect.right + 4 + 'px',
+      bottom: (window.innerHeight - rect.bottom) + 'px',
+    }
+  }
+  userMenuOpen.value = true
+}
+
+// Username rename modal
+const renameModalOpen = ref(false)
+const renameInput = ref('')
+const renameInputEl = ref<HTMLInputElement | null>(null)
+
+async function openRenameModal(): Promise<void> {
+  renameInput.value = props.globalUsername?.trim() ?? ''
+  renameModalOpen.value = true
+  await nextTick()
+  renameInputEl.value?.focus()
+  renameInputEl.value?.select()
+}
+
+function confirmRename(): void {
+  const cleaned = renameInput.value.trim()
+  if (!cleaned || cleaned === (props.globalUsername?.trim() ?? '')) {
+    renameModalOpen.value = false
+    return
+  }
+  emit('renameUsername', cleaned)
+  renameModalOpen.value = false
+}
 
 watch(() => props.startupAddr, (addr) => {
   void ensureStartupAddr(addr)
@@ -212,6 +194,7 @@ watch(() => props.startupAddr, (addr) => {
 
 function handleGlobalClick(): void {
   closeServerContextMenu()
+  userMenuOpen.value = false
 }
 
 onMounted(async () => {
@@ -228,7 +211,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="h-full min-h-0">
     <aside class="relative flex flex-col items-center border-r border-base-content/10 bg-base-300 w-[64px] min-w-[64px] max-w-[64px] h-full overflow-x-hidden" @click="closeServerContextMenu()">
-      <div class="border-b border-base-content/10 min-h-11 w-full flex flex-col items-center justify-center gap-1 py-1 shrink-0">
+      <div class="border-b border-base-content/10 h-12 w-full flex items-center justify-center shrink-0">
         <button
           class="btn btn-ghost btn-square btn-sm"
           aria-label="Home"
@@ -237,100 +220,104 @@ onBeforeUnmount(() => {
         >
           <Home class="w-5 h-5" aria-hidden="true" />
         </button>
-        <button
-          class="btn btn-ghost btn-square btn-sm"
-          aria-label="Server browser"
-          :class="browserOpen ? 'text-primary' : 'opacity-70 hover:opacity-100'"
-          @click="browserOpen = true"
-        >
-          <Server class="w-5 h-5" aria-hidden="true" />
-        </button>
       </div>
 
       <div class="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden py-2 px-2">
         <div class="flex flex-col items-center gap-2">
-          <button
+          <div
             v-for="server in servers"
             :key="server.addr"
-            class="relative w-8 h-8 rounded-full border text-[9px] font-mono font-semibold transition-all hover:scale-105"
-            :style="serverButtonStyle(server.name, normalizeAddr(server.addr) === normalizeAddr(activeServerAddr))"
+            class="avatar placeholder cursor-pointer relative transition-transform hover:scale-105"
             :title="`${server.name} (${server.addr})`"
             :aria-label="`Open ${server.name}`"
-            :class="normalizeAddr(server.addr) === normalizeAddr(activeServerAddr) ? 'ring-2 ring-offset-1 ring-base-content/35' : ''"
             @click="selectServer(server.addr)"
             @contextmenu="openServerContextMenu($event, server)"
           >
-            {{ initials(server.name) }}
+            <div class="w-8 rounded-full" :class="serverColorClass(server.name)">
+              <span class="text-xs">{{ initials(server.name) }}</span>
+            </div>
             <span
               v-if="isServerConnected(server.addr)"
               class="absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full bg-success border border-base-100"
               aria-hidden="true"
             />
-          </button>
+          </div>
         </div>
+      </div>
+
+      <!-- User avatar at bottom -->
+      <div ref="avatarContainerEl" class="border-t border-base-content/10 p-2 shrink-0 flex items-center justify-center">
+        <button
+          class="avatar placeholder cursor-pointer hover:ring-2 hover:ring-primary/40 transition-shadow rounded-full"
+          :title="globalUsername || 'User menu'"
+          @click="toggleUserMenu"
+        >
+          <div class="bg-neutral text-neutral-content w-8 rounded-full">
+            <span class="text-xs">{{ initials(globalUsername) }}</span>
+          </div>
+        </button>
       </div>
     </aside>
 
     <!-- Server right-click context menu -->
     <Teleport to="body">
-      <div
+      <ul
         v-if="serverContextMenu"
-        class="fixed z-50 min-w-[140px] rounded-lg border border-base-content/15 bg-base-200 shadow-lg py-1"
+        class="menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 fixed z-50 min-w-[140px]"
         :style="{ left: serverContextMenu.x + 'px', top: serverContextMenu.y + 'px' }"
         @click.stop
       >
-        <div class="px-3 py-1 text-[10px] uppercase tracking-wider opacity-40 select-none truncate max-w-[180px]">
-          {{ serverContextMenu.server.name }}
-        </div>
-        <button
-          class="w-full text-left px-3 py-1.5 text-xs text-error hover:bg-error/10 transition-colors"
-          @click="removeServer"
-        >
-          Remove Server
-        </button>
-      </div>
+        <li class="menu-title text-[10px] truncate max-w-[180px]">{{ serverContextMenu.server.name }}</li>
+        <li><a class="text-error" @click="removeServer">Remove Server</a></li>
+      </ul>
     </Teleport>
 
-    <dialog class="modal" :class="{ 'modal-open': browserOpen }">
-      <div class="modal-box w-11/12 max-w-md">
-        <div class="flex items-center justify-between mb-2">
-          <h3 class="text-sm font-semibold uppercase tracking-wider opacity-70">Connect To New Server</h3>
-          <button class="btn btn-ghost btn-xs" aria-label="Close server browser" @click="browserOpen = false">✕</button>
-        </div>
+    <!-- User menu (teleported to body to avoid sidebar overflow clipping) -->
+    <Teleport to="body">
+      <ul
+        v-if="userMenuOpen"
+        data-testid="user-menu"
+        class="menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 fixed z-50 min-w-[160px]"
+        :style="userMenuStyle"
+        @click.stop
+      >
+        <li class="menu-title text-[10px]">{{ globalUsername }}</li>
+        <li><a @click="openRenameModal(); userMenuOpen = false">Rename Username</a></li>
+        <li>
+          <a @click="emit('openSettings'); userMenuOpen = false">
+            <Settings class="w-3.5 h-3.5" aria-hidden="true" />
+            User Settings
+          </a>
+        </li>
+      </ul>
+    </Teleport>
 
-        <p class="text-xs opacity-60 mb-3">Connects with your global username: <span class="font-semibold">{{ globalUsername || 'not set' }}</span></p>
-
-        <div class="space-y-2">
+    <!-- Username rename modal -->
+    <dialog class="modal" :class="{ 'modal-open': renameModalOpen }">
+      <div class="modal-box w-80">
+        <h3 class="text-lg font-bold">Set Username</h3>
+        <div class="py-4">
           <input
-            v-model="newName"
+            ref="renameInputEl"
+            v-model="renameInput"
             type="text"
-            placeholder="Server name (optional)"
-            class="input input-sm input-bordered w-full"
-          />
-          <input
-            v-model="newAddr"
-            type="text"
-            placeholder="host:port or bken:// link"
-            class="input input-sm input-bordered w-full font-mono"
-            @keydown.enter.prevent="connectToNewServer"
+            placeholder="Enter username"
+            class="input input-bordered w-full"
+            maxlength="32"
+            @keydown.enter.prevent="confirmRename"
           />
         </div>
-
-        <div v-if="connectError" class="alert alert-error py-2 text-sm mt-2">{{ connectError }}</div>
-        <div v-else-if="browserError" class="alert alert-error py-2 text-sm mt-2">{{ browserError }}</div>
-
-        <div class="mt-3 flex gap-2">
-          <button class="btn btn-soft btn-primary btn-sm flex-1" @click="connectToNewServer">
-            {{ connectingAddr ? 'Connecting…' : 'Connect' }}
-          </button>
-          <button class="btn btn-ghost btn-sm" @click="browserOpen = false">Close</button>
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="renameModalOpen = false">Cancel</button>
+          <button class="btn btn-soft btn-primary" :disabled="!renameInput.trim()" @click="confirmRename">Save</button>
         </div>
       </div>
-      <form method="dialog" class="modal-backdrop" @click="browserOpen = false">
+      <form method="dialog" class="modal-backdrop" @click="renameModalOpen = false">
         <button>close</button>
       </form>
     </dialog>
 
+    <!-- Switch server confirmation dialog -->
     <dialog class="modal" :class="{ 'modal-open': confirmDialog }">
       <div class="modal-box w-80">
         <h3 class="text-sm font-semibold mb-2">Switch Server?</h3>

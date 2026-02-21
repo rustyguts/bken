@@ -39,7 +39,7 @@ describe('KeyboardShortcuts', () => {
 
   it('emits close when clicking the backdrop', async () => {
     const w = mount(KeyboardShortcuts, mountOpts)
-    const backdrop = w.find('.fixed.inset-0')
+    const backdrop = w.find('.modal-backdrop')
     await backdrop.trigger('click')
     expect(w.emitted('close')).toHaveLength(1)
   })

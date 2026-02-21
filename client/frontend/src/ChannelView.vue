@@ -3,7 +3,6 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { SetMuted, SetDeafened } from '../wailsjs/go/main/App'
 import Sidebar from './Sidebar.vue'
 import ServerChannels from './ServerChannels.vue'
-import UserControls from './UserControls.vue'
 import ChannelChat from './ChannelChat.vue'
 import VideoGrid from './VideoGrid.vue'
 import WelcomePage from './WelcomePage.vue'
@@ -172,9 +171,9 @@ function handleSendMessage(message: string): void {
 </script>
 
 <template>
-  <div class="channel-grid h-full min-h-0 overflow-hidden">
+  <div class="grid grid-cols-[64px_minmax(220px,280px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 overflow-hidden">
     <Sidebar
-      class="channel-sidebar"
+      class="col-start-1 row-start-1 min-h-0"
       :active-server-addr="selectedServerAddr"
       :connected-addr="connectedAddr"
       :connected="connected"
@@ -182,14 +181,15 @@ function handleSendMessage(message: string): void {
       :connect-error="connectError"
       :startup-addr="startupAddr"
       :global-username="globalUsername"
-      @connect="emit('connect', $event)"
       @select-server="handleSelectServer"
       @go-home="emit('disconnect')"
+      @rename-username="emit('renameGlobalUsername', $event)"
+      @open-settings="emit('openSettings')"
     />
 
     <template v-if="connected">
       <ServerChannels
-        class="channel-channels border-r border-base-content/10 bg-base-100"
+        class="col-start-2 row-start-1 min-h-0 border-r border-base-content/10 bg-base-100"
         :channels="channels"
         :users="users"
         :user-channels="userChannels"
@@ -206,6 +206,8 @@ function handleSendMessage(message: string): void {
         :owner-id="ownerId"
         :unread-counts="unreadCounts"
         :recording-channels="recordingChannels"
+        :muted="muted"
+        :deafened="deafened"
         @join="handleJoinChannel"
         @select="handleSelectChannel"
         @create-channel="emit('createChannel', $event)"
@@ -216,9 +218,11 @@ function handleSendMessage(message: string): void {
         @video-toggle="handleVideoToggle"
         @screen-share-toggle="handleScreenShareToggle"
         @leave-voice="handleDisconnectVoice"
+        @mute-toggle="handleMuteToggle"
+        @deafen-toggle="handleDeafenToggle"
       />
 
-      <div class="channel-chat flex flex-col min-h-0">
+      <div class="col-start-3 row-start-1 min-h-0 flex flex-col">
         <VideoGrid
           :users="users"
           :video-states="videoStates"
@@ -255,61 +259,13 @@ function handleSendMessage(message: string): void {
 
     <WelcomePage
       v-else
-      class="channel-welcome"
+      class="col-[2/span_2] row-start-1 min-h-0"
       :servers="servers"
       :global-username="globalUsername"
+      :connect-error="connectError"
+      :startup-addr="startupAddr"
       @connect="emit('connect', $event)"
-    />
-
-    <UserControls
-      class="channel-controls border-r border-base-content/10"
-      :username="globalUsername"
-      :muted="muted"
-      :deafened="deafened"
-      :connected="connected"
-      :voice-connected="voiceConnected"
-      @rename-username="emit('renameGlobalUsername', $event)"
-      @open-settings="emit('openSettings')"
-      @mute-toggle="handleMuteToggle"
-      @deafen-toggle="handleDeafenToggle"
     />
   </div>
 </template>
 
-<style scoped>
-.channel-grid {
-  display: grid;
-  grid-template-columns: 64px minmax(220px, 280px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-
-.channel-sidebar {
-  grid-column: 1;
-  grid-row: 1;
-  min-height: 0;
-}
-
-.channel-channels {
-  grid-column: 2;
-  grid-row: 1;
-  min-height: 0;
-}
-
-.channel-chat {
-  grid-column: 3;
-  grid-row: 1 / span 2;
-  min-height: 0;
-}
-
-.channel-controls {
-  grid-column: 1 / span 2;
-  grid-row: 2;
-  min-width: 0;
-}
-
-.channel-welcome {
-  grid-column: 2 / span 2;
-  grid-row: 1 / span 2;
-  min-height: 0;
-}
-</style>

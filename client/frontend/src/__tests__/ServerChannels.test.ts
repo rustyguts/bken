@@ -25,6 +25,8 @@ describe('ServerChannels', () => {
     voiceConnected: false,
     videoActive: false,
     screenSharing: false,
+    muted: false,
+    deafened: false,
   }
 
   it('mounts without errors', () => {

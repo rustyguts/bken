@@ -680,7 +680,7 @@ func (a *App) DisconnectVoice() string {
 		}
 	}
 	a.connected.Store(false)
-	a.audio.PlayNotification(SoundUserLeft)
+	a.audio.PlayNotification(SoundDisconnect)
 	log.Printf("[app] disconnected voice from %s (control session still active)", addr)
 	return ""
 }

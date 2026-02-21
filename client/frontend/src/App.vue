@@ -765,19 +765,10 @@ onMounted(async () => {
   const [auto, startupAddr] = await Promise.all([GetAutoLogin(), GetStartupAddr()])
   if (auto.username) globalUsername.value = auto.username
 
-  if (auto.username) {
+  // Only auto-connect for explicit auto-login (CLI arg / protocol handler).
+  // Otherwise show WelcomePage and let the user choose.
+  if (auto.username && auto.addr) {
     await connectToServer(auto.addr, auto.username)
-  } else if (startupAddr && globalUsername.value) {
-    await connectToServer(startupAddr, globalUsername.value)
-  } else if (globalUsername.value) {
-    const lastAddr = getLastConnectedAddr()
-    if (lastAddr) {
-      const ok = await connectToServer(lastAddr, globalUsername.value)
-      if (ok) return
-    }
-    if (cfg.servers?.length) {
-      await connectToServer(cfg.servers[0].addr, globalUsername.value)
-    }
   } else if (startupAddr) {
     startupAddrHint.value = startupAddr
   }
@@ -795,11 +786,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="app-grid h-full">
-    <TitleBar class="app-title" :server-name="serverName" :is-owner="ownerID !== 0 && ownerID === myID" :server-addr="connectedAddr" />
+  <main class="grid grid-rows-[auto_auto_minmax(0,1fr)] h-full">
+    <TitleBar :server-name="serverName" :is-owner="ownerID !== 0 && ownerID === myID" :server-addr="connectedAddr" :voice-connected="voiceConnected" />
 
-    <div class="app-banner">
-      <Transition name="slide-down">
+    <div>
+      <Transition
+        enter-active-class="transition-all duration-200 ease-out"
+        enter-from-class="-translate-y-full opacity-0"
+        leave-active-class="transition-all duration-200 ease-out overflow-hidden"
+        leave-to-class="-translate-y-full opacity-0"
+      >
         <ReconnectBanner
           v-if="reconnecting"
           :attempt="reconnectAttempt"
@@ -810,8 +806,14 @@ onBeforeUnmount(() => {
       </Transition>
     </div>
 
-    <div class="app-content min-h-0">
-      <Transition name="fade" mode="out-in">
+    <div class="min-h-0">
+      <Transition
+        mode="out-in"
+        enter-active-class="transition-opacity duration-150 ease-in-out"
+        enter-from-class="opacity-0"
+        leave-active-class="transition-opacity duration-150 ease-in-out"
+        leave-to-class="opacity-0"
+      >
         <SettingsPage
           v-if="currentRoute === 'settings'"
           key="settings"
@@ -877,21 +879,3 @@ onBeforeUnmount(() => {
   </main>
 </template>
 
-<style scoped>
-.app-grid {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
-.app-title {
-  grid-row: 1;
-}
-
-.app-banner {
-  grid-row: 2;
-}
-
-.app-content {
-  grid-row: 3;
-}
-</style>

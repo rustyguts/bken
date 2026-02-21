@@ -15,10 +15,8 @@ const emit = defineEmits<{
   spotlight: [userId: number | null]
 }>()
 
-/** Tracks the selected quality per user (defaults to "high"). */
 const selectedQuality = ref<Record<number, string>>({})
 
-/** Users who currently have video or screen share active. */
 const activeVideoUsers = computed(() => {
   return props.users.filter(u => {
     const vs = props.videoStates[u.id]
@@ -26,10 +24,8 @@ const activeVideoUsers = computed(() => {
   })
 })
 
-/** Whether any user has an active video feed. */
 const hasVideo = computed(() => activeVideoUsers.value.length > 0)
 
-/** Grid column class based on number of video tiles. */
 const gridClass = computed(() => {
   const n = activeVideoUsers.value.length
   if (n <= 1) return 'grid-cols-1'
@@ -72,32 +68,29 @@ async function setQuality(userId: number, quality: string): Promise<void> {
 </script>
 
 <template>
-  <div v-if="hasVideo" class="video-grid-container bg-base-300 border-b border-base-content/10">
+  <div v-if="hasVideo" class="max-h-[40vh] overflow-y-auto bg-base-300 border-b border-base-content/10">
     <!-- Spotlight mode: single user full-width -->
     <div v-if="spotlightId !== null && videoStates[spotlightId]?.active" class="p-2">
       <div
-        class="video-tile relative bg-base-200 rounded-lg overflow-hidden aspect-video flex items-center justify-center cursor-pointer"
+        class="relative bg-base-200 rounded-lg overflow-hidden aspect-video flex items-center justify-center cursor-pointer"
         @dblclick="handleDoubleClick(spotlightId)"
       >
-        <div class="w-16 h-16 rounded-full bg-base-300 border-2 border-base-content/20 flex items-center justify-center text-2xl font-mono">
-          {{ initials(users.find(u => u.id === spotlightId)?.username ?? '?') }}
+        <div class="avatar placeholder">
+          <div class="bg-neutral text-neutral-content w-16 rounded-full">
+            <span class="text-2xl">{{ initials(users.find(u => u.id === spotlightId)?.username ?? '?') }}</span>
+          </div>
         </div>
         <div class="absolute bottom-2 left-2 flex items-center gap-1">
-          <span class="text-xs bg-black/60 text-white px-2 py-0.5 rounded">
+          <span class="badge badge-sm">
             {{ users.find(u => u.id === spotlightId)?.username ?? 'Unknown' }}
           </span>
-          <span v-if="isScreenShare(spotlightId)" class="text-xs bg-primary/80 text-primary-content px-2 py-0.5 rounded">
-            Screen
-          </span>
-          <span v-if="spotlightId === myId" class="text-xs bg-info/80 text-info-content px-2 py-0.5 rounded">
-            You
-          </span>
+          <span v-if="isScreenShare(spotlightId)" class="badge badge-sm badge-primary">Screen</span>
+          <span v-if="spotlightId === myId" class="badge badge-sm badge-info">You</span>
         </div>
         <div class="absolute top-2 right-2 flex items-center gap-1">
-          <!-- Simulcast quality selector -->
           <select
             v-if="hasLayers(spotlightId) && spotlightId !== myId"
-            class="select select-xs bg-black/40 text-white border-none focus:outline-none min-h-0 h-6"
+            class="select select-xs bg-black/40 text-white border-none min-h-0 h-6"
             :value="currentQuality(spotlightId)"
             @change="setQuality(spotlightId, ($event.target as HTMLSelectElement).value)"
             @click.stop
@@ -122,29 +115,23 @@ async function setQuality(userId: number, quality: string): Promise<void> {
       <div
         v-for="user in activeVideoUsers"
         :key="user.id"
-        class="video-tile relative bg-base-200 rounded-lg overflow-hidden aspect-video flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary/40 transition-shadow"
+        class="relative bg-base-200 rounded-lg overflow-hidden aspect-video flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary/40 transition-shadow"
         @dblclick="handleDoubleClick(user.id)"
         @contextmenu.prevent="emit('spotlight', user.id)"
       >
-        <!-- Placeholder avatar (actual video rendering requires native frame piping) -->
-        <div class="w-12 h-12 rounded-full bg-base-300 border-2 border-base-content/20 flex items-center justify-center text-xl font-mono">
-          {{ initials(user.username) }}
+        <div class="avatar placeholder">
+          <div class="bg-neutral text-neutral-content w-12 rounded-full">
+            <span class="text-xl">{{ initials(user.username) }}</span>
+          </div>
         </div>
         <div class="absolute bottom-1 left-1 flex items-center gap-1">
-          <span class="text-xs bg-black/60 text-white px-1.5 py-0.5 rounded">
-            {{ user.username }}
-          </span>
-          <span v-if="isScreenShare(user.id)" class="text-xs bg-primary/80 text-primary-content px-1.5 py-0.5 rounded">
-            Screen
-          </span>
-          <span v-if="user.id === myId" class="text-xs bg-info/80 text-info-content px-1.5 py-0.5 rounded">
-            You
-          </span>
+          <span class="badge badge-xs">{{ user.username }}</span>
+          <span v-if="isScreenShare(user.id)" class="badge badge-xs badge-primary">Screen</span>
+          <span v-if="user.id === myId" class="badge badge-xs badge-info">You</span>
         </div>
-        <!-- Simulcast quality selector (grid) -->
         <select
           v-if="hasLayers(user.id) && user.id !== myId"
-          class="absolute top-1 right-1 select select-xs bg-black/40 text-white border-none focus:outline-none min-h-0 h-5 text-[10px] opacity-0 hover:opacity-100 transition-opacity"
+          class="absolute top-1 right-1 select select-xs bg-black/40 text-white border-none min-h-0 h-5 text-[10px] opacity-0 hover:opacity-100 transition-opacity"
           :value="currentQuality(user.id)"
           @change="setQuality(user.id, ($event.target as HTMLSelectElement).value)"
           @click.stop
@@ -158,10 +145,3 @@ async function setQuality(userId: number, quality: string): Promise<void> {
     </div>
   </div>
 </template>
-
-<style scoped>
-.video-grid-container {
-  max-height: 40vh;
-  overflow-y: auto;
-}
-</style>

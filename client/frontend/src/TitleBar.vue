@@ -4,13 +4,15 @@ import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/r
 import { RenameServer } from './config'
 import { BKEN_SCHEME } from './constants'
 import { Check, Pencil, Link, Minus, Square, X } from 'lucide-vue-next'
+import MetricsBar from './MetricsBar.vue'
 
-const props = defineProps<{ serverName?: string; isOwner?: boolean; serverAddr?: string }>()
+const props = defineProps<{ serverName?: string; isOwner?: boolean; serverAddr?: string; voiceConnected?: boolean }>()
 
 const editing = ref(false)
 const draft = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const copied = ref(false)
+const showMetricsModal = ref(false)
 const COPY_FEEDBACK_MS = 2000
 
 async function copyInvite(): Promise<void> {
@@ -49,20 +51,25 @@ watch(() => props.serverName, () => { editing.value = false })
 </script>
 
 <template>
+  <div>
   <header
-    class="flex items-center h-8 shrink-0 bg-base-300 border-b border-base-content/10 select-none"
+    class="grid grid-cols-[64px_minmax(220px,280px)_minmax(0,1fr)] items-center h-8 shrink-0 bg-base-300 border-b border-base-content/10 select-none"
     style="--wails-draggable: drag"
   >
-    <!-- App name + optional server name -->
+    <!-- Column 1: App name (over sidebar) -->
     <div
-      class="px-3 flex items-center gap-1.5"
+      class="px-2 flex items-center justify-center"
       style="--wails-draggable: no-drag"
     >
       <span class="text-xs font-semibold tracking-widest opacity-40 pointer-events-none">bken</span>
+    </div>
 
+    <!-- Column 2: Server name + metrics (over channels list) -->
+    <div
+      class="flex items-center gap-1.5 px-2 min-w-0"
+      style="--wails-draggable: no-drag"
+    >
       <template v-if="serverName">
-        <span class="opacity-20 text-xs pointer-events-none">›</span>
-
         <!-- Editing: inline input + confirm button -->
         <template v-if="editing">
           <input
@@ -86,12 +93,12 @@ watch(() => props.serverName, () => { editing.value = false })
 
         <!-- Display: server name + action icons on hover (owner only) -->
         <template v-else>
-          <div class="group/name flex items-center gap-1">
-            <span class="text-xs opacity-60 truncate max-w-[160px] pointer-events-none">{{ serverName }}</span>
+          <div class="group/name flex items-center gap-1 min-w-0">
+            <span class="text-xs opacity-60 truncate max-w-[120px] pointer-events-none">{{ serverName }}</span>
             <!-- Rename server (pencil) -->
             <button
               v-if="isOwner"
-              class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity"
+              class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity shrink-0"
               title="Rename server"
               @click="startEdit"
             >
@@ -100,7 +107,7 @@ watch(() => props.serverName, () => { editing.value = false })
             <!-- Copy invite link (chain link / check) -->
             <button
               v-if="isOwner && serverAddr"
-              class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity"
+              class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity shrink-0"
               :class="{ 'opacity-100 text-success': copied }"
               :title="copied ? 'Copied!' : 'Copy invite link'"
               @click="copyInvite"
@@ -111,33 +118,35 @@ watch(() => props.serverName, () => { editing.value = false })
           </div>
         </template>
       </template>
+
+      <!-- Metrics pushed to right side of column 2 -->
+      <div class="flex-1" />
+      <MetricsBar
+        v-if="voiceConnected"
+        mode="compact"
+        class="shrink-0"
+        @click="showMetricsModal = true"
+      />
     </div>
 
-    <div class="flex-1" />
-
-    <!-- Window controls — not draggable -->
-    <div class="flex" style="--wails-draggable: no-drag">
-      <!-- Minimise -->
+    <!-- Column 3: Window controls (right-aligned, over chat area) -->
+    <div class="join flex justify-end" style="--wails-draggable: no-drag">
       <button
-        class="w-10 h-8 flex items-center justify-center opacity-50 hover:opacity-100 hover:bg-base-content/10 transition-colors"
+        class="btn btn-ghost btn-sm btn-square join-item opacity-50 hover:opacity-100"
         aria-label="Minimise window"
         @click="WindowMinimise()"
       >
         <Minus class="w-2.5 h-2.5" aria-hidden="true" />
       </button>
-
-      <!-- Maximise / restore -->
       <button
-        class="w-10 h-8 flex items-center justify-center opacity-50 hover:opacity-100 hover:bg-base-content/10 transition-colors"
+        class="btn btn-ghost btn-sm btn-square join-item opacity-50 hover:opacity-100"
         aria-label="Maximise window"
         @click="WindowToggleMaximise()"
       >
         <Square class="w-2.5 h-2.5" aria-hidden="true" />
       </button>
-
-      <!-- Close -->
       <button
-        class="w-10 h-8 flex items-center justify-center opacity-50 hover:opacity-100 hover:bg-error hover:text-error-content transition-colors"
+        class="btn btn-ghost btn-sm btn-square join-item opacity-50 hover:opacity-100 hover:btn-error"
         aria-label="Close window"
         @click="Quit()"
       >
@@ -145,4 +154,19 @@ watch(() => props.serverName, () => { editing.value = false })
       </button>
     </div>
   </header>
+
+  <!-- Connection details modal -->
+  <dialog class="modal" :class="{ 'modal-open': showMetricsModal }">
+    <div class="modal-box w-80">
+      <h3 class="text-sm font-semibold mb-3">Connection Details</h3>
+      <MetricsBar mode="expanded" />
+      <div class="modal-action">
+        <button class="btn btn-ghost btn-sm" @click="showMetricsModal = false">Close</button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop" @click="showMetricsModal = false">
+      <button>close</button>
+    </form>
+  </dialog>
+  </div>
 </template>

@@ -35,7 +35,7 @@ describe('ThemePicker', () => {
     await flushPromises()
     // Default theme is "dark"
     const darkBtn = w.findAll('button[role="radio"]').find(b => b.text() === 'Dark')
-    expect(darkBtn?.classes()).toContain('border-primary')
+    expect(darkBtn?.classes()).toContain('btn-primary')
   })
 
   it('has radiogroup role', async () => {

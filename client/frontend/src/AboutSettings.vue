@@ -68,39 +68,45 @@ onMounted(async () => {
       <span class="text-xs font-semibold uppercase tracking-wider opacity-60">About</span>
     </div>
 
-    <div class="card bg-base-200/40 border border-base-content/10 p-4">
-      <h3 class="text-sm font-semibold">Build Information</h3>
-      <div class="mt-3 grid gap-2 text-xs">
-        <div class="flex items-center justify-between gap-4">
-          <span class="opacity-60">Git Commit</span>
-          <span class="font-mono">{{ shortCommit(buildInfo.commit) }}<span v-if="buildInfo.dirty"> (modified)</span></span>
-        </div>
-        <div class="flex items-center justify-between gap-4">
-          <span class="opacity-60">Build Time</span>
-          <span class="font-mono">{{ buildInfo.build_time || 'unknown' }}</span>
-        </div>
-        <div class="flex items-center justify-between gap-4">
-          <span class="opacity-60">Go Version</span>
-          <span class="font-mono">{{ buildInfo.go_version || 'unknown' }}</span>
-        </div>
-        <div class="flex items-center justify-between gap-4">
-          <span class="opacity-60">Target</span>
-          <span class="font-mono">{{ buildInfo.goos || 'unknown' }}/{{ buildInfo.goarch || 'unknown' }}</span>
-        </div>
-        <div class="flex items-center justify-between gap-4">
-          <span class="opacity-60">Runtime</span>
-          <span class="font-mono">{{ envInfo.platform || 'unknown' }}/{{ envInfo.arch || 'unknown' }} ({{ envInfo.buildType || 'unknown' }})</span>
-        </div>
-        <div class="flex items-center justify-between gap-4">
-          <span class="opacity-60">Browser Engine</span>
-          <span class="font-mono">{{ browserInfo }}</span>
-        </div>
-      </div>
+    <div class="card bg-base-200/40 border border-base-content/10">
+      <div class="card-body p-4">
+        <h3 class="card-title text-sm">Build Information</h3>
+        <table class="table table-xs mt-2">
+          <tbody>
+            <tr>
+              <td class="opacity-60">Git Commit</td>
+              <td class="font-mono text-right">{{ shortCommit(buildInfo.commit) }}<span v-if="buildInfo.dirty"> (modified)</span></td>
+            </tr>
+            <tr>
+              <td class="opacity-60">Build Time</td>
+              <td class="font-mono text-right">{{ buildInfo.build_time || 'unknown' }}</td>
+            </tr>
+            <tr>
+              <td class="opacity-60">Go Version</td>
+              <td class="font-mono text-right">{{ buildInfo.go_version || 'unknown' }}</td>
+            </tr>
+            <tr>
+              <td class="opacity-60">Target</td>
+              <td class="font-mono text-right">{{ buildInfo.goos || 'unknown' }}/{{ buildInfo.goarch || 'unknown' }}</td>
+            </tr>
+            <tr>
+              <td class="opacity-60">Runtime</td>
+              <td class="font-mono text-right">{{ envInfo.platform || 'unknown' }}/{{ envInfo.arch || 'unknown' }} ({{ envInfo.buildType || 'unknown' }})</td>
+            </tr>
+            <tr>
+              <td class="opacity-60">Browser Engine</td>
+              <td class="font-mono text-right">{{ browserInfo }}</td>
+            </tr>
+          </tbody>
+        </table>
 
-      <details class="mt-3 text-xs">
-        <summary class="cursor-pointer opacity-70">User Agent</summary>
-        <p class="mt-2 break-all font-mono opacity-60">{{ userAgent }}</p>
-      </details>
+        <details class="collapse collapse-arrow bg-base-100 mt-3">
+          <summary class="collapse-title text-xs py-2 min-h-0">User Agent</summary>
+          <div class="collapse-content">
+            <p class="break-all font-mono text-xs opacity-60">{{ userAgent }}</p>
+          </div>
+        </details>
+      </div>
     </div>
   </section>
 </template>

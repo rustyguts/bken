@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, withDefaults } from 'vue'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { GetMetrics } from '../wailsjs/go/main/App'
-import { ChevronDown } from 'lucide-vue-next'
 
 const METRICS_POLL_MS = 5000
 const LOSS_WARN_THRESHOLD = 0.05
@@ -18,6 +17,10 @@ interface QualityMetrics {
   playback_dropped: number
 }
 
+const props = withDefaults(defineProps<{
+  mode?: 'compact' | 'expanded'
+}>(), { mode: 'compact' })
+
 const m = ref<QualityMetrics>({
   rtt_ms: 0,
   packet_loss: 0,
@@ -29,15 +32,14 @@ const m = ref<QualityMetrics>({
   playback_dropped: 0,
 })
 
-const expanded = ref(false)
 const totalDrops = computed(() => (m.value.capture_dropped ?? 0) + (m.value.playback_dropped ?? 0))
 
 const qualityDot = computed(() => {
   switch (m.value.quality_level) {
-    case 'good': return { color: 'bg-success', label: 'Connected' }
-    case 'moderate': return { color: 'bg-warning', label: 'Moderate' }
-    case 'poor': return { color: 'bg-error', label: 'Poor' }
-    default: return { color: 'bg-base-content/30', label: 'Connecting' }
+    case 'good': return { color: 'badge-success', label: 'Connected' }
+    case 'moderate': return { color: 'badge-warning', label: 'Moderate' }
+    case 'poor': return { color: 'badge-error', label: 'Poor' }
+    default: return { color: 'badge-ghost', label: 'Connecting' }
   }
 })
 
@@ -56,10 +58,8 @@ function handleQualityEvent(data: QualityMetrics): void {
 onMounted(() => {
   EventsOn('voice:quality', handleQualityEvent)
 
-  // Fall back to polling in case events aren't flowing yet (e.g. initial render).
   interval = setInterval(async () => {
     const metrics = await GetMetrics()
-    // Only use poll data if no pushed data has arrived (quality_level unset).
     if (!m.value.quality_level && metrics) {
       m.value = {
         rtt_ms: metrics.rtt_ms ?? 0,
@@ -82,91 +82,63 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="text-xs font-mono" role="status" aria-label="Connection quality">
-    <!-- Compact bar -->
-    <div
-      class="flex items-center gap-2 cursor-pointer select-none"
-      title="Click to expand connection stats"
-      @click="expanded = !expanded"
+  <!-- Compact: badge-based metrics for the titlebar -->
+  <div v-if="props.mode === 'compact'" class="flex items-center gap-1 cursor-pointer select-none" role="status" aria-label="Connection quality">
+    <span class="badge badge-xs" :class="qualityDot.color">{{ qualityDot.label }}</span>
+    <span class="badge badge-xs badge-ghost font-mono" title="Round-trip latency">
+      {{ m.rtt_ms > 0 ? m.rtt_ms.toFixed(0) + 'ms' : '---' }}
+    </span>
+    <span
+      class="badge badge-xs font-mono"
+      :class="m.packet_loss > LOSS_WARN_THRESHOLD ? 'badge-error' : 'badge-ghost'"
+      title="Packet loss"
     >
-      <!-- Quality dot + status -->
-      <span
-        class="w-2 h-2 rounded-full shrink-0"
-        :class="qualityDot.color"
-        :title="qualityDot.label"
-      />
-      <span class="opacity-60 text-[10px]">{{ qualityDot.label }}</span>
-      <span class="opacity-40">|</span>
-      <span class="opacity-50" title="Round-trip latency">
-        {{ m.rtt_ms > 0 ? m.rtt_ms.toFixed(0) + 'ms' : '---' }}
-      </span>
-      <span
-        title="Packet loss"
-        :class="m.packet_loss > LOSS_WARN_THRESHOLD ? 'text-error' : 'opacity-50'"
-      >
-        {{ (m.packet_loss * 100).toFixed(0) }}%
-      </span>
-      <span class="opacity-50" title="Codec">{{ codecLabel }}</span>
-      <span
-        v-if="totalDrops > 0"
-        class="text-warning"
-        :title="`${m.capture_dropped ?? 0} capture + ${m.playback_dropped ?? 0} playback frames dropped`"
-      >
-        {{ totalDrops }}d
-      </span>
-      <!-- Expand chevron -->
-      <ChevronDown class="w-3 h-3 opacity-40 transition-transform ml-auto" :class="expanded ? 'rotate-180' : ''" aria-hidden="true" />
-    </div>
+      {{ (m.packet_loss * 100).toFixed(0) }}%
+    </span>
+    <span class="badge badge-xs badge-ghost font-mono" title="Codec">{{ codecLabel }}</span>
+    <span
+      v-if="totalDrops > 0"
+      class="badge badge-xs badge-warning font-mono"
+      :title="`${m.capture_dropped ?? 0} capture + ${m.playback_dropped ?? 0} playback frames dropped`"
+    >
+      {{ totalDrops }}d
+    </span>
+  </div>
 
-    <!-- Expanded stats panel -->
-    <Transition name="slide-stats">
-      <div v-if="expanded" class="mt-1.5 p-2 bg-base-300 rounded-md border border-base-content/10 space-y-1">
-        <div class="flex justify-between">
-          <span class="opacity-50">RTT</span>
-          <span>{{ m.rtt_ms > 0 ? m.rtt_ms.toFixed(1) + ' ms' : '---' }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="opacity-50">Packet Loss</span>
-          <span :class="m.packet_loss > LOSS_WARN_THRESHOLD ? 'text-error' : ''">{{ (m.packet_loss * 100).toFixed(1) }}%</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="opacity-50">Jitter</span>
-          <span>{{ m.jitter_ms > 0 ? m.jitter_ms.toFixed(1) + ' ms' : '---' }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="opacity-50">Bitrate</span>
-          <span>{{ m.bitrate_kbps > 0 ? m.bitrate_kbps.toFixed(0) + ' kbps' : '---' }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="opacity-50">Codec Target</span>
-          <span>{{ m.opus_target_kbps > 0 ? m.opus_target_kbps + ' kbps' : '---' }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="opacity-50">Capture Dropped</span>
-          <span :class="(m.capture_dropped ?? 0) > 0 ? 'text-warning' : ''">{{ m.capture_dropped ?? 0 }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="opacity-50">Playback Dropped</span>
-          <span :class="(m.playback_dropped ?? 0) > 0 ? 'text-warning' : ''">{{ m.playback_dropped ?? 0 }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="opacity-50">Quality</span>
-          <span class="capitalize">{{ m.quality_level || 'unknown' }}</span>
-        </div>
+  <!-- Expanded: DaisyUI stats for the modal -->
+  <div v-else class="stats stats-vertical shadow w-full" role="status" aria-label="Connection details">
+    <div class="stat py-2 px-3">
+      <div class="stat-title text-xs">Status</div>
+      <div class="stat-value text-sm flex items-center gap-1.5">
+        <span class="badge badge-xs" :class="qualityDot.color" />
+        <span class="capitalize">{{ m.quality_level || 'unknown' }}</span>
       </div>
-    </Transition>
+    </div>
+    <div class="stat py-2 px-3">
+      <div class="stat-title text-xs">RTT</div>
+      <div class="stat-value text-sm font-mono">{{ m.rtt_ms > 0 ? m.rtt_ms.toFixed(1) + ' ms' : '---' }}</div>
+    </div>
+    <div class="stat py-2 px-3">
+      <div class="stat-title text-xs">Packet Loss</div>
+      <div class="stat-value text-sm font-mono" :class="m.packet_loss > LOSS_WARN_THRESHOLD ? 'text-error' : ''">{{ (m.packet_loss * 100).toFixed(1) }}%</div>
+    </div>
+    <div class="stat py-2 px-3">
+      <div class="stat-title text-xs">Jitter</div>
+      <div class="stat-value text-sm font-mono">{{ m.jitter_ms > 0 ? m.jitter_ms.toFixed(1) + ' ms' : '---' }}</div>
+    </div>
+    <div class="stat py-2 px-3">
+      <div class="stat-title text-xs">Bitrate</div>
+      <div class="stat-value text-sm font-mono">{{ m.bitrate_kbps > 0 ? m.bitrate_kbps.toFixed(0) + ' kbps' : '---' }}</div>
+    </div>
+    <div class="stat py-2 px-3">
+      <div class="stat-title text-xs">Codec Target</div>
+      <div class="stat-value text-sm font-mono">{{ m.opus_target_kbps > 0 ? m.opus_target_kbps + ' kbps' : '---' }}</div>
+    </div>
+    <div class="stat py-2 px-3">
+      <div class="stat-title text-xs">Frames Dropped</div>
+      <div class="stat-value text-sm font-mono" :class="totalDrops > 0 ? 'text-warning' : ''">
+        {{ m.capture_dropped ?? 0 }} capture / {{ m.playback_dropped ?? 0 }} playback
+      </div>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.slide-stats-enter-active,
-.slide-stats-leave-active {
-  transition: all 0.15s ease;
-}
-.slide-stats-enter-from,
-.slide-stats-leave-to {
-  opacity: 0;
-  max-height: 0;
-  margin-top: 0;
-}
-</style>

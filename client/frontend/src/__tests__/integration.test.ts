@@ -15,7 +15,6 @@ import ChannelView from '../ChannelView.vue'
 import ChannelChat from '../ChannelChat.vue'
 import SettingsPage from '../SettingsPage.vue'
 import KeyboardShortcuts from '../KeyboardShortcuts.vue'
-import UserControls from '../UserControls.vue'
 import ServerChannels from '../ServerChannels.vue'
 import UserProfilePopup from '../UserProfilePopup.vue'
 import ReconnectBanner from '../ReconnectBanner.vue'
@@ -105,6 +104,8 @@ const defaultServerChannelsProps = () => ({
   unreadCounts: {} as Record<number, number>,
   ownerId: 0,
   recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
+  muted: false,
+  deafened: false,
 })
 
 beforeEach(() => {
@@ -112,41 +113,21 @@ beforeEach(() => {
 })
 
 // ===========================================================================
-// 1. Server Connection Flow
+// 1. Server Connection Flow (via WelcomePage)
 // ===========================================================================
 describe('Server Connection Flow', () => {
-  it('emits connect event with addr and username when sidebar connects', async () => {
-    const wrapper = mount(Sidebar, {
-      props: {
-        activeServerAddr: '',
-        connectedAddr: '',
-        connected: false,
-        voiceConnected: false,
-        connectError: '',
-        startupAddr: '',
-        globalUsername: 'TestUser',
-      },
+  it('ChannelView emits connect when WelcomePage connects', async () => {
+    const wrapper = mount(ChannelView, {
+      props: defaultChannelViewProps(),
     })
     await flush()
 
-    // Click the server browser button to open the dialog
-    const browserBtn = wrapper.find('button[aria-label="Server browser"]')
-    await browserBtn.trigger('click')
-    await nextTick()
+    // When not connected, WelcomePage is rendered
+    const welcomePage = wrapper.findComponent({ name: 'WelcomePage' })
+    expect(welcomePage.exists()).toBe(true)
 
-    // The dialog should be open -- fill in address
-    const inputs = wrapper.findAll('.modal input')
-    const addrInput = inputs.find(i => i.attributes('placeholder')?.includes('host:port'))
-    expect(addrInput).toBeTruthy()
-    await addrInput!.setValue('192.168.1.10:8080')
-
-    // Also set a name
-    const nameInput = inputs.find(i => i.attributes('placeholder')?.includes('Server name'))
-    if (nameInput) await nameInput.setValue('My Server')
-
-    // Click Connect
-    const connectBtn = wrapper.find('.modal .btn-primary')
-    await connectBtn.trigger('click')
+    // Emit connect from WelcomePage
+    welcomePage.vm.$emit('connect', { username: 'TestUser', addr: '192.168.1.10:8080' })
     await flush()
 
     const emitted = wrapper.emitted('connect')
@@ -156,43 +137,18 @@ describe('Server Connection Flow', () => {
     )
   })
 
-  it('shows connect error when passed as prop', async () => {
-    const wrapper = mount(Sidebar, {
-      props: {
-        activeServerAddr: 'localhost:8080',
-        connectedAddr: '',
-        connected: false,
-        voiceConnected: false,
-        connectError: 'Connection refused',
-        startupAddr: '',
-        globalUsername: 'TestUser',
-      },
-    })
-    await flush()
-
-    // Open browser to see error
-    const browserBtn = wrapper.find('button[aria-label="Server browser"]')
-    await browserBtn.trigger('click')
-    await nextTick()
-
-    const alert = wrapper.find('.alert-error')
-    expect(alert.exists()).toBe(true)
-    expect(alert.text()).toContain('Connection refused')
-  })
-
   it('ChannelView emits disconnect when disconnect is requested', async () => {
     const wrapper = mount(ChannelView, {
       props: { ...defaultChannelViewProps(), connected: true, voiceConnected: true, connectedAddr: 'localhost:8080' },
     })
     await flush()
 
-    // UserControls leave-voice button triggers disconnectVoice
-    const leaveBtn = wrapper.find('button[title="DisconnectVoice"]')
-    if (leaveBtn.exists()) {
-      await leaveBtn.trigger('click')
-      const emitted = wrapper.emitted('disconnectVoice')
-      expect(emitted).toBeTruthy()
-    }
+    // Leave Voice button triggers disconnectVoice via ServerChannels
+    const sc = wrapper.findComponent({ name: 'ServerChannels' })
+    sc.vm.$emit('leave-voice')
+    await flush()
+    const emitted = wrapper.emitted('disconnectVoice')
+    expect(emitted).toBeTruthy()
   })
 })
 
@@ -220,7 +176,7 @@ describe('Channel Navigation', () => {
 
     expect(wrapper.text()).toContain('Lobby msg')
 
-    const channelRows = wrapper.findAll('.channel-channels ul.menu > li')
+    const channelRows = wrapper.findAll('ul.menu > li')
     const generalRow = channelRows.find(row => row.text().includes('General'))
     expect(generalRow).toBeTruthy()
     await generalRow!.trigger('click')
@@ -369,14 +325,26 @@ describe('Chat Flow', () => {
 // 4. Voice Flow
 // ===========================================================================
 describe('Voice Flow', () => {
-  it('mute toggle updates button state', async () => {
-    const wrapper = mount(UserControls, {
+  it('mute toggle emits event from ServerChannels', async () => {
+    const wrapper = mount(ServerChannels, {
       props: {
-        username: 'TestUser',
+        channels: [makeChannel({ id: 1, name: 'General' })],
+        users: [makeUser({ id: 1, username: 'TestUser' })],
+        userChannels: { 1: 1 },
+        myId: 1,
+        selectedChannelId: 1,
+        serverName: 'Test Server',
+        speakingUsers: new Set<number>(),
+        voiceConnected: true,
+        videoActive: false,
+        screenSharing: false,
+        connectError: '',
+        isOwner: false,
+        unreadCounts: {},
+        ownerId: 0,
+        recordingChannels: {},
         muted: false,
         deafened: false,
-        connected: true,
-        voiceConnected: true,
       },
     })
     await flush()
@@ -389,14 +357,26 @@ describe('Voice Flow', () => {
     expect(emitted).toBeTruthy()
   })
 
-  it('deafen toggle emits event', async () => {
-    const wrapper = mount(UserControls, {
+  it('deafen toggle emits event from ServerChannels', async () => {
+    const wrapper = mount(ServerChannels, {
       props: {
-        username: 'TestUser',
+        channels: [makeChannel({ id: 1, name: 'General' })],
+        users: [makeUser({ id: 1, username: 'TestUser' })],
+        userChannels: { 1: 1 },
+        myId: 1,
+        selectedChannelId: 1,
+        serverName: 'Test Server',
+        speakingUsers: new Set<number>(),
+        voiceConnected: true,
+        videoActive: false,
+        screenSharing: false,
+        connectError: '',
+        isOwner: false,
+        unreadCounts: {},
+        ownerId: 0,
+        recordingChannels: {},
         muted: false,
         deafened: false,
-        connected: true,
-        voiceConnected: true,
       },
     })
     await flush()
@@ -426,6 +406,8 @@ describe('Voice Flow', () => {
         unreadCounts: {},
         ownerId: 0,
         recordingChannels: {},
+        muted: false,
+        deafened: false,
       },
     })
     await flush()
@@ -437,22 +419,35 @@ describe('Voice Flow', () => {
     expect(wrapper.emitted('leave-voice')).toBeTruthy()
   })
 
-  it('mute/deafen buttons are disabled when not voice connected', async () => {
-    const wrapper = mount(UserControls, {
+  it('mute/deafen buttons are not shown when not voice connected', async () => {
+    const wrapper = mount(ServerChannels, {
       props: {
-        username: 'TestUser',
+        channels: [makeChannel({ id: 1, name: 'General' })],
+        users: [makeUser({ id: 1, username: 'TestUser' })],
+        userChannels: { 1: 1 },
+        myId: 1,
+        selectedChannelId: 1,
+        serverName: 'Test Server',
+        speakingUsers: new Set<number>(),
+        voiceConnected: false,
+        videoActive: false,
+        screenSharing: false,
+        connectError: '',
+        isOwner: false,
+        unreadCounts: {},
+        ownerId: 0,
+        recordingChannels: {},
         muted: false,
         deafened: false,
-        connected: true,
-        voiceConnected: false,
       },
     })
     await flush()
 
-    const muteBtn = wrapper.find('button[title="Mute"]')
-    const deafenBtn = wrapper.find('button[title="Deafen"]')
-    expect(muteBtn.attributes('disabled')).toBeDefined()
-    expect(deafenBtn.attributes('disabled')).toBeDefined()
+    // Mute/deafen buttons should not be rendered when not voice connected
+    const muteBtn = wrapper.findAll('button').find(b => b.attributes('title') === 'Mute')
+    const deafenBtn = wrapper.findAll('button').find(b => b.attributes('title') === 'Deafen')
+    expect(muteBtn).toBeUndefined()
+    expect(deafenBtn).toBeUndefined()
   })
 
   it('ChannelView emits activateChannel when joining voice on a channel', async () => {
@@ -586,7 +581,7 @@ describe('Mention Flow', () => {
     await nextTick()
 
     // Autocomplete popup should show Bob and Bobby (not Me)
-    const suggestions = wrapper.findAll('.z-40 button')
+    const suggestions = wrapper.findAll('.z-40 a')
     expect(suggestions.length).toBe(2)
     expect(suggestions[0].text()).toContain('Bob')
     expect(suggestions[1].text()).toContain('Bobby')
@@ -611,7 +606,7 @@ describe('Mention Flow', () => {
     await nextTick()
 
     // Click the suggestion
-    const suggestion = wrapper.findAll('.z-40 button').find(b => b.text().includes('Bob'))
+    const suggestion = wrapper.findAll('.z-40 a').find(b => b.text().includes('Bob'))
     expect(suggestion).toBeTruthy()
     await suggestion!.trigger('click')
     await nextTick()
@@ -634,9 +629,9 @@ describe('Mention Flow', () => {
     })
     await flush()
 
-    // The message article should have the mention highlight class
-    const article = wrapper.find('article')
-    expect(article.classes()).toContain('bg-warning/10')
+    // The message chat div should have the mention highlight class
+    const chatDiv = wrapper.find('.chat')
+    expect(chatDiv.classes()).toContain('bg-warning/10')
   })
 })
 
@@ -688,12 +683,8 @@ describe('Reply Flow', () => {
 
     expect(wrapper.text()).toContain('Replying to')
 
-    // Click close button on reply bar
-    const closeBtn = wrapper.findAll('.btn-square').find(
-      b => b.element.closest('.bg-base-200\\/50') !== null
-    )
     // Use the x button in the reply bar
-    const replyBar = wrapper.find('.bg-base-200\\/50')
+    const replyBar = wrapper.find('.alert-info')
     const xBtn = replyBar.find('.btn-square')
     await xBtn.trigger('click')
     await nextTick()
@@ -750,8 +741,8 @@ describe('Search Flow', () => {
     await searchInput.trigger('input')
     await nextTick()
 
-    // Results should appear
-    const results = wrapper.findAll('.bg-base-200\\/50 .hover\\:bg-base-300')
+    // Results should appear (menu items in search results)
+    const results = wrapper.findAll('.menu.bg-base-200 li')
     expect(results.length).toBe(2)
   })
 
@@ -956,7 +947,7 @@ describe('Keyboard Shortcuts', () => {
     expect(wrapper.text()).toContain('Ctrl + /')
 
     // Close button
-    const closeBtn = wrapper.find('.btn-square')
+    const closeBtn = wrapper.find('.btn-ghost')
     await closeBtn.trigger('click')
 
     expect(wrapper.emitted('close')).toBeTruthy()
@@ -1120,6 +1111,8 @@ describe('User Management', () => {
         ownerId: 1,
         unreadCounts: {},
         recordingChannels: {},
+        muted: false,
+        deafened: false,
       },
       global: {
         stubs: { Teleport: true },
@@ -1134,10 +1127,10 @@ describe('User Management', () => {
     await bobLink!.trigger('contextmenu', { clientX: 100, clientY: 100 })
     await flush()
 
-    // Kick button should appear
-    const kickBtn = wrapper.findAll('button').find(b => b.text().includes('Kick'))
-    expect(kickBtn).toBeTruthy()
-    await kickBtn!.trigger('click')
+    // Kick link should appear in context menu
+    const kickLink = wrapper.findAll('a').find(a => a.text().includes('Kick'))
+    expect(kickLink).toBeTruthy()
+    await kickLink!.trigger('click')
 
     const emitted = wrapper.emitted('kickUser')
     expect(emitted).toBeTruthy()
@@ -1170,6 +1163,8 @@ describe('User Management', () => {
         ownerId: 1,
         unreadCounts: {},
         recordingChannels: {},
+        muted: false,
+        deafened: false,
       },
       global: {
         stubs: { Teleport: true },
@@ -1184,10 +1179,11 @@ describe('User Management', () => {
     await bobLink!.trigger('contextmenu', { clientX: 100, clientY: 100 })
     await flush()
 
-    // Move to Random
-    const moveBtn = wrapper.findAll('button').find(b => b.text().includes('Random'))
-    expect(moveBtn).toBeTruthy()
-    await moveBtn!.trigger('click')
+    // Move to Random (use last matching link since context menu renders after channel list)
+    const matchingLinks = wrapper.findAll('a').filter(a => a.text().includes('Random'))
+    const moveLink = matchingLinks[matchingLinks.length - 1]
+    expect(moveLink).toBeTruthy()
+    await moveLink!.trigger('click')
 
     const emitted = wrapper.emitted('moveUser')
     expect(emitted).toBeTruthy()
@@ -1536,6 +1532,8 @@ describe('ServerChannels - Create Channel', () => {
         ownerId: 1,
         unreadCounts: {},
         recordingChannels: {},
+        muted: false,
+        deafened: false,
       },
     })
     await flush()
@@ -1580,6 +1578,8 @@ describe('ServerChannels - Create Channel', () => {
         ownerId: 2,
         unreadCounts: {},
         recordingChannels: {},
+        muted: false,
+        deafened: false,
       },
     })
     await flush()
@@ -1590,43 +1590,60 @@ describe('ServerChannels - Create Channel', () => {
   })
 })
 
-describe('UserControls - Settings', () => {
-  it('opens settings when gear button is clicked', async () => {
-    const wrapper = mount(UserControls, {
+describe('Sidebar - Settings', () => {
+  it('opens settings from sidebar user menu', async () => {
+    const wrapper = mount(Sidebar, {
       props: {
-        username: 'TestUser',
-        muted: false,
-        deafened: false,
+        activeServerAddr: '',
+        connectedAddr: '',
         connected: true,
         voiceConnected: true,
+        connectError: '',
+        startupAddr: '',
+        globalUsername: 'TestUser',
       },
+      global: { stubs: { Teleport: true } },
     })
     await flush()
 
-    const settingsBtn = wrapper.find('button[title="Open Settings"]')
-    expect(settingsBtn.exists()).toBe(true)
-    await settingsBtn.trigger('click')
+    // Click avatar to open user menu
+    const avatar = wrapper.find('button[title="TestUser"]')
+    await avatar.trigger('click')
+    await nextTick()
 
-    expect(wrapper.emitted('open-settings')).toBeTruthy()
+    const menuBtns = wrapper.findAll('[data-testid="user-menu"] a')
+    const settingsItem = menuBtns.find(b => b.text().includes('User Settings'))
+    expect(settingsItem).toBeTruthy()
+    await settingsItem!.trigger('click')
+
+    expect(wrapper.emitted('openSettings')).toBeTruthy()
   })
 })
 
-describe('UserControls - Username Rename', () => {
-  it('opens rename modal on right-click and emits new username', async () => {
-    const wrapper = mount(UserControls, {
+describe('Sidebar - Username Rename', () => {
+  it('opens rename modal from user menu and emits new username', async () => {
+    const wrapper = mount(Sidebar, {
       props: {
-        username: 'OldName',
-        muted: false,
-        deafened: false,
+        activeServerAddr: '',
+        connectedAddr: '',
         connected: true,
         voiceConnected: true,
+        connectError: '',
+        startupAddr: '',
+        globalUsername: 'OldName',
       },
+      global: { stubs: { Teleport: true } },
     })
     await flush()
 
-    // Right-click on avatar to open rename modal
-    const avatar = wrapper.find('.rounded-full')
-    await avatar.trigger('contextmenu', { preventDefault: vi.fn() })
+    // Click avatar to open user menu, then click "Rename Username"
+    const avatar = wrapper.find('button[title="OldName"]')
+    await avatar.trigger('click')
+    await nextTick()
+    const menuBtns = wrapper.findAll('[data-testid="user-menu"] a')
+    const renameItem = menuBtns.find(b => b.text().includes('Rename Username'))
+    expect(renameItem).toBeTruthy()
+    await renameItem!.trigger('click')
     await nextTick()
 
     // Modal should be open, find input
@@ -1639,7 +1656,7 @@ describe('UserControls - Username Rename', () => {
     expect(saveBtn).toBeTruthy()
     await saveBtn!.trigger('click')
 
-    const emitted = wrapper.emitted('rename-username')
+    const emitted = wrapper.emitted('renameUsername')
     expect(emitted).toBeTruthy()
     expect(emitted![0][0]).toBe('NewName')
   })
@@ -1669,12 +1686,14 @@ describe('ServerChannels - Speaking Users', () => {
         ownerId: 0,
         unreadCounts: {},
         recordingChannels: {},
+        muted: false,
+        deafened: false,
       },
     })
     await flush()
 
-    // Bob should have a speaking indicator dot (animate-pulse bg-success)
-    const speakingDot = wrapper.find('.bg-success.animate-pulse')
+    // Bob should have a speaking indicator badge (animate-pulse badge-success)
+    const speakingDot = wrapper.find('.badge-success.animate-pulse')
     expect(speakingDot.exists()).toBe(true)
 
     // Bob's user entry should be in the list
@@ -1703,6 +1722,8 @@ describe('Connected state channel indicators', () => {
         ownerId: 0,
         unreadCounts: {} as Record<number, number>,
         recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
+        muted: false,
+        deafened: false,
       },
       global: {
         stubs: { Teleport: true },

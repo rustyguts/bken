@@ -4,7 +4,7 @@ import type { Channel, User } from './types'
 import UserProfilePopup from './UserProfilePopup.vue'
 import { SetUserVolume, GetUserVolume, StartRecording, StopRecording, RenameServer } from './config'
 import { BKEN_SCHEME } from './constants'
-import { Volume2, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor, PhoneOff } from 'lucide-vue-next'
+import { Volume2, VolumeX, Mic, MicOff, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor, PhoneOff } from 'lucide-vue-next'
 
 const props = defineProps<{
   channels: Channel[]
@@ -23,6 +23,8 @@ const props = defineProps<{
   unreadCounts: Record<number, number>
   ownerId: number
   recordingChannels: Record<number, { recording: boolean; startedBy: string }>
+  muted: boolean
+  deafened: boolean
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +38,8 @@ const emit = defineEmits<{
   'video-toggle': []
   'screen-share-toggle': []
   'leave-voice': []
+  'mute-toggle': []
+  'deafen-toggle': []
 }>()
 
 const myChannelId = computed(() => props.userChannels[props.myId] ?? 0)
@@ -344,7 +348,7 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
 
 <template>
   <section class="flex flex-col h-full min-h-0 " @click="closeContextMenu(); closeUserContextMenu()">
-    <div class="border-b border-base-content/10 px-2 py-1.5 min-h-11">
+    <div class="border-b border-base-content/10 px-2 h-12 flex items-center shrink-0">
       <div class="dropdown dropdown-bottom w-full">
         <div tabindex="0" role="button" class="btn btn-ghost btn-sm w-full justify-between px-2 normal-case">
           <span class="text-xs font-semibold uppercase tracking-widest opacity-60 truncate">
@@ -372,7 +376,7 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
       </div>
     </div>
 
-    <div v-if="connectError" class="mx-2 mt-2 rounded-md bg-error/10 border border-error/30 px-3 py-2 text-xs text-error">
+    <div v-if="connectError" role="alert" class="alert alert-error alert-sm mx-2 mt-2 text-xs py-2">
       {{ connectError }}
     </div>
 
@@ -491,16 +495,18 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
               @click.stop="openProfilePopup($event, user)"
               @contextmenu="openUserContextMenu($event, user, channel.id)"
             >
-              <span
-                class="w-5 h-5 rounded-full border text-[9px] font-mono flex items-center justify-center shrink-0 transition-all duration-150"
-                :class="speakingUsers.has(user.id) ? 'bg-success/20 border-success ring-1 ring-success/50' : 'bg-base-300 border-base-content/20'"
-              >
-                {{ initials(user.username) }}
-              </span>
+              <div class="avatar placeholder">
+                <div
+                  class="w-5 rounded-full text-[9px] transition-all duration-150"
+                  :class="speakingUsers.has(user.id) ? 'bg-success/20 ring-1 ring-success/50' : 'bg-neutral text-neutral-content'"
+                >
+                  <span>{{ initials(user.username) }}</span>
+                </div>
+              </div>
               <span class="text-xs truncate">{{ user.username }}</span>
               <span
                 v-if="speakingUsers.has(user.id)"
-                class="w-1.5 h-1.5 rounded-full bg-success animate-pulse ml-auto shrink-0"
+                class="badge badge-xs badge-success animate-pulse ml-auto"
               />
             </a>
           </li>
@@ -509,10 +515,34 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
     </ul>
 
     <div v-if="voiceConnected" class="border-t border-base-content/10 p-2 shrink-0 space-y-1">
-      <p class="px-1 text-[10px] font-semibold uppercase tracking-wider opacity-50">Voice Actions</p>
-      <div class="flex items-center gap-1">
+      <p class="px-1 text-[10px] font-semibold uppercase tracking-wider opacity-50">Channel Actions</p>
+      <div class="join join-horizontal w-full">
         <button
-          class="btn btn-ghost btn-sm flex-1 justify-start gap-2"
+          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
+          :class="muted ? 'text-error' : ''"
+          :aria-pressed="muted"
+          :title="muted ? 'Unmute' : 'Mute'"
+          @click="emit('mute-toggle')"
+        >
+          <Mic v-if="!muted" class="w-4 h-4" aria-hidden="true" />
+          <MicOff v-else class="w-4 h-4" aria-hidden="true" />
+          <span class="text-xs">{{ muted ? 'Unmute' : 'Mute' }}</span>
+        </button>
+        <button
+          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
+          :class="deafened ? 'text-error' : ''"
+          :aria-pressed="deafened"
+          :title="deafened ? 'Undeafen' : 'Deafen'"
+          @click="emit('deafen-toggle')"
+        >
+          <Volume2 v-if="!deafened" class="w-4 h-4" aria-hidden="true" />
+          <VolumeX v-else class="w-4 h-4" aria-hidden="true" />
+          <span class="text-xs">{{ deafened ? 'Undeafen' : 'Deafen' }}</span>
+        </button>
+      </div>
+      <div class="join join-horizontal w-full">
+        <button
+          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
           :class="videoActive ? 'text-success' : ''"
           :disabled="true"
           title="Video is not available yet"
@@ -522,7 +552,7 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
           <span class="text-xs">{{ videoActive ? 'Video On' : 'Video' }}</span>
         </button>
         <button
-          class="btn btn-ghost btn-sm flex-1 justify-start gap-2"
+          class="btn btn-ghost btn-sm join-item flex-1 gap-2"
           :class="screenSharing ? 'text-success' : ''"
           :disabled="true"
           title="Screen sharing is not available yet"
@@ -542,41 +572,31 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
 
     <!-- Context menu (owner right-click on channel) -->
     <Teleport to="body">
-      <div
+      <ul
         v-if="contextMenu"
-        class="fixed z-50 min-w-[140px] rounded-lg border border-base-content/15 bg-base-200 shadow-lg py-1"
+        class="menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 fixed z-50 min-w-[140px]"
         :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
         @click.stop
       >
-        <button
-          class="w-full text-left px-3 py-1.5 text-xs hover:bg-base-content/10 transition-colors"
-          @click="startRename"
-        >
-          Rename Channel
-        </button>
-        <button
-          class="w-full text-left px-3 py-1.5 text-xs text-error hover:bg-error/10 transition-colors"
-          @click="startDelete"
-        >
-          Delete Channel
-        </button>
-      </div>
+        <li><a @click="startRename">Rename Channel</a></li>
+        <li><a class="text-error" @click="startDelete">Delete Channel</a></li>
+      </ul>
     </Teleport>
 
     <!-- User context menu (right-click on user: volume for all, move/kick for owner) -->
     <Teleport to="body">
       <div
         v-if="userContextMenu"
-        class="fixed z-50 min-w-[180px] rounded-lg border border-base-content/15 bg-base-200 shadow-lg py-1"
+        class="bg-base-200 rounded-box shadow-lg border border-base-content/10 fixed z-50 min-w-[180px]"
         :style="{ left: userContextMenu.x + 'px', top: userContextMenu.y + 'px' }"
         @click.stop
       >
-        <div class="px-3 py-1 text-[10px] uppercase tracking-wider opacity-40 select-none">
-          {{ userContextMenu.user.username }}
-        </div>
+        <ul class="menu menu-sm">
+          <li class="menu-title text-[10px]">{{ userContextMenu.user.username }}</li>
+        </ul>
 
         <!-- Per-user volume slider -->
-        <div class="px-3 py-1.5">
+        <fieldset class="fieldset px-3 py-1.5">
           <div class="flex items-center justify-between mb-1">
             <span class="text-[10px] opacity-50">Volume</span>
             <span class="text-[10px] font-mono font-medium tabular-nums">{{ userVolume }}%</span>
@@ -590,28 +610,20 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
             class="range range-xs range-primary w-full"
             @input="handleUserVolumeChange"
           />
-        </div>
+        </fieldset>
 
         <template v-if="isOwner">
-          <div class="divider my-0.5 opacity-20"></div>
-          <button
-            class="w-full text-left px-3 py-1.5 text-xs text-error hover:bg-error/10 transition-colors"
-            @click="kickUser"
-          >
-            Kick
-          </button>
-          <div class="divider my-0.5 opacity-20"></div>
-          <div class="px-3 py-1 text-[10px] uppercase tracking-wider opacity-40 select-none">
-            Move to
-          </div>
-          <button
-            v-for="target in moveTargets"
-            :key="target.id"
-            class="w-full text-left px-3 py-1.5 text-xs hover:bg-base-content/10 transition-colors"
-            @click="moveUserToChannel(target.id)"
-          >
-            {{ target.name }}
-          </button>
+          <div class="divider my-0.5"></div>
+          <ul class="menu menu-sm">
+            <li><a class="text-error" @click="kickUser">Kick</a></li>
+          </ul>
+          <div class="divider my-0.5"></div>
+          <ul class="menu menu-sm">
+            <li class="menu-title text-[10px]">Move to</li>
+            <li v-for="target in moveTargets" :key="target.id">
+              <a @click="moveUserToChannel(target.id)">{{ target.name }}</a>
+            </li>
+          </ul>
         </template>
       </div>
     </Teleport>

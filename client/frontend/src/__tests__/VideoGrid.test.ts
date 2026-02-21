@@ -37,7 +37,7 @@ describe('VideoGrid', () => {
         },
       },
     })
-    expect(w.find('.video-grid-container').exists()).toBe(true)
+    expect(w.find('.grid').exists()).toBe(true)
   })
 
   it('shows username on video tile', () => {
@@ -100,7 +100,7 @@ describe('VideoGrid', () => {
         videoStates: { 2: { active: true, screenShare: false } },
       },
     })
-    const tile = w.find('.video-tile')
+    const tile = w.find('.aspect-video')
     await tile.trigger('dblclick')
     expect(w.emitted('spotlight')).toEqual([[2]])
   })
@@ -128,7 +128,7 @@ describe('VideoGrid', () => {
         spotlightId: 2,
       },
     })
-    const tile = w.find('.video-tile')
+    const tile = w.find('.aspect-video')
     await tile.trigger('dblclick')
     expect(w.emitted('spotlight')).toEqual([[null]])
   })

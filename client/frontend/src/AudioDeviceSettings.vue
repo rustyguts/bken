@@ -152,23 +152,23 @@ onBeforeUnmount(async () => {
       <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Input</span>
     </div>
 
-    <div class="card bg-base-200/40 border border-base-content/10 p-4 flex flex-col gap-4">
-      <label class="form-control w-full">
-        <div class="label pb-1 pt-0"><span class="label-text text-xs opacity-70">Microphone</span></div>
-        <select
-          v-model.number="selectedInput"
-          class="select select-bordered select-sm w-full"
-          aria-label="Microphone device"
-          @change="handleInputChange"
-        >
-          <option :value="-1">Default</option>
-          <option v-for="dev in inputDevices" :key="dev.id" :value="dev.id">{{ dev.name }}</option>
-        </select>
-      </label>
+    <div class="card bg-base-200/40 border border-base-content/10">
+      <div class="card-body gap-4 p-4">
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend text-xs">Microphone</legend>
+          <select
+            v-model.number="selectedInput"
+            class="select select-sm w-full"
+            aria-label="Microphone device"
+            @change="handleInputChange"
+          >
+            <option :value="-1">Default</option>
+            <option v-for="dev in inputDevices" :key="dev.id" :value="dev.id">{{ dev.name }}</option>
+          </select>
+        </fieldset>
 
-      <div class="flex gap-2 items-end">
         <button
-          class="btn btn-sm flex-1 transition-all"
+          class="btn btn-sm w-full"
           :class="testing ? 'btn-info' : 'btn-outline'"
           :disabled="testBusy"
           :aria-label="testing ? 'Stop microphone test' : 'Test microphone loopback'"
@@ -178,19 +178,20 @@ onBeforeUnmount(async () => {
           <Square v-else class="w-3.5 h-3.5" aria-hidden="true" />
           {{ testing ? 'Stop' : 'Test Mic' }}
         </button>
-      </div>
 
-      <div class="rounded-lg border border-base-content/10 bg-base-100/60 p-3">
-        <div class="mb-2 flex items-center justify-between text-xs">
-          <span class="opacity-70">Mic level</span>
-          <span class="font-mono tabular-nums">{{ inputDb.toFixed(1) }} dB</span>
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend text-xs">Mic Level</legend>
+          <div class="flex items-center justify-between text-xs mb-1">
+            <span class="opacity-70">Level</span>
+            <span class="font-mono tabular-nums">{{ inputDb.toFixed(1) }} dB</span>
+          </div>
+          <progress class="progress progress-primary w-full" :value="Math.max(0, 100 + (inputDb * (100 / 60)))" max="100"></progress>
+          <div class="mt-1 text-[11px] opacity-60">Peak: {{ peakDb.toFixed(1) }} dB</div>
+        </fieldset>
+
+        <div v-if="testError" role="alert" class="alert alert-error text-xs py-1.5">
+          {{ testError }}
         </div>
-        <progress class="progress progress-primary w-full" :value="Math.max(0, 100 + (inputDb * (100 / 60)))" max="100"></progress>
-        <div class="mt-1 text-[11px] opacity-60">Peak: {{ peakDb.toFixed(1) }} dB</div>
-      </div>
-
-      <div v-if="testError" role="alert" class="alert alert-error text-xs py-1.5">
-        {{ testError }}
       </div>
     </div>
   </section>
@@ -202,51 +203,55 @@ onBeforeUnmount(async () => {
       <span class="text-xs font-semibold uppercase tracking-wider opacity-60">Output</span>
     </div>
 
-    <div class="card bg-base-200/40 border border-base-content/10 p-4 flex flex-col gap-4">
-      <label class="form-control w-full">
-        <div class="label pb-1 pt-0"><span class="label-text text-xs opacity-70">Speaker</span></div>
-        <select
-          v-model.number="selectedOutput"
-          class="select select-bordered select-sm w-full"
-          aria-label="Speaker device"
-          @change="handleOutputChange"
-        >
-          <option :value="-1">Default</option>
-          <option v-for="dev in outputDevices" :key="dev.id" :value="dev.id">{{ dev.name }}</option>
-        </select>
-      </label>
+    <div class="card bg-base-200/40 border border-base-content/10">
+      <div class="card-body gap-4 p-4">
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend text-xs">Speaker</legend>
+          <select
+            v-model.number="selectedOutput"
+            class="select select-sm w-full"
+            aria-label="Speaker device"
+            @change="handleOutputChange"
+          >
+            <option :value="-1">Default</option>
+            <option v-for="dev in outputDevices" :key="dev.id" :value="dev.id">{{ dev.name }}</option>
+          </select>
+        </fieldset>
 
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs opacity-70">Volume</span>
-          <span class="text-xs font-mono font-medium tabular-nums">{{ volume }}%</span>
-        </div>
-        <input
-          type="range"
-          v-model.number="volume"
-          min="0"
-          max="100"
-          class="range range-sm range-primary w-full"
-          aria-label="Playback volume"
-          @input="handleVolumeChange"
-        />
-      </div>
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend text-xs">Volume</legend>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs opacity-70">Level</span>
+            <span class="text-xs font-mono font-medium tabular-nums">{{ volume }}%</span>
+          </div>
+          <input
+            type="range"
+            v-model.number="volume"
+            min="0"
+            max="100"
+            class="range range-sm range-primary w-full"
+            aria-label="Playback volume"
+            @input="handleVolumeChange"
+          />
+        </fieldset>
 
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs opacity-70">Audio Quality</span>
-          <span class="text-xs font-mono font-medium tabular-nums">{{ bitrateKbps }} kbps</span>
-        </div>
-        <input
-          type="range"
-          v-model.number="bitrateKbps"
-          min="8"
-          max="96"
-          step="4"
-          class="range range-sm range-primary w-full"
-          aria-label="Audio bitrate"
-          @input="handleBitrateChange"
-        />
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend text-xs">Audio Quality</legend>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs opacity-70">Bitrate</span>
+            <span class="text-xs font-mono font-medium tabular-nums">{{ bitrateKbps }} kbps</span>
+          </div>
+          <input
+            type="range"
+            v-model.number="bitrateKbps"
+            min="8"
+            max="96"
+            step="4"
+            class="range range-sm range-primary w-full"
+            aria-label="Audio bitrate"
+            @input="handleBitrateChange"
+          />
+        </fieldset>
       </div>
     </div>
   </section>

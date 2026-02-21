@@ -362,7 +362,9 @@ function renderMessage(msg: ChatMessage): string {
       if (user) {
         const token = '@' + user.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         const isSelf = uid === props.myId
-        const cls = isSelf ? 'mention mention-self' : 'mention'
+        const cls = isSelf
+          ? 'text-warning font-semibold bg-warning/15 px-0.5 rounded'
+          : 'text-primary font-semibold bg-primary/10 px-0.5 rounded'
         text = text.replace(new RegExp(token, 'g'), `<span class="${cls}">@${user.username}</span>`)
       }
     }
@@ -380,7 +382,12 @@ function renderMessage(msg: ChatMessage): string {
     @drop="onDrop"
   >
     <!-- Drag overlay -->
-    <Transition name="fade">
+    <Transition
+      enter-active-class="transition-opacity duration-150 ease-in-out"
+      enter-from-class="opacity-0"
+      leave-active-class="transition-opacity duration-150 ease-in-out"
+      leave-to-class="opacity-0"
+    >
       <div
         v-if="dragging"
         class="absolute inset-0 z-50 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center"
@@ -389,312 +396,273 @@ function renderMessage(msg: ChatMessage): string {
       </div>
     </Transition>
 
-    <header class="border-b border-base-content/10 px-3 py-1.5 min-h-11 flex flex-col gap-1">
-      <div class="flex h-full items-center gap-2">
-        <h2 class="text-sm font-semibold"># {{ selectedChannelName }}</h2>
-        <div class="ml-auto flex gap-1">
-          <button
-            v-if="pinnedMessages.length > 0"
-            class="btn btn-ghost btn-xs"
-            :class="pinnedOpen ? 'btn-active' : ''"
-            title="Pinned messages"
-            @click="togglePinnedPanel"
-          >
-            <Pin class="w-3.5 h-3.5" aria-hidden="true" />
-            <span class="text-[10px]">{{ pinnedMessages.length }}</span>
-          </button>
-          <button
-            class="btn btn-ghost btn-xs"
-            :class="searchOpen ? 'btn-active' : ''"
-            title="Search messages"
-            @click="toggleSearch"
-          >
-            <Search class="w-3.5 h-3.5" aria-hidden="true" />
-          </button>
+    <header class="navbar min-h-0 h-auto border-b border-base-content/10 px-3 py-1 shrink-0">
+      <div class="flex-1 flex flex-col gap-1">
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold"># {{ selectedChannelName }}</h2>
+          <div class="ml-auto flex gap-1">
+            <button
+              v-if="pinnedMessages.length > 0"
+              class="btn btn-ghost btn-xs"
+              :class="pinnedOpen ? 'btn-active' : ''"
+              title="Pinned messages"
+              @click="togglePinnedPanel"
+            >
+              <Pin class="w-3.5 h-3.5" aria-hidden="true" />
+              <span class="badge badge-xs">{{ pinnedMessages.length }}</span>
+            </button>
+            <button
+              class="btn btn-ghost btn-xs"
+              :class="searchOpen ? 'btn-active' : ''"
+              title="Search messages"
+              @click="toggleSearch"
+            >
+              <Search class="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Search bar -->
+        <div v-if="searchOpen" class="join w-full">
+          <input
+            v-model="searchQuery"
+            type="text"
+            class="input input-xs join-item flex-1"
+            placeholder="Search messages..."
+            @input="doSearch"
+            @keydown.escape="toggleSearch"
+          />
+          <button class="btn btn-xs btn-ghost join-item" @click="toggleSearch">Close</button>
         </div>
       </div>
-
-      <!-- Search bar -->
-      <div v-if="searchOpen" class="flex gap-1 items-center">
-        <input
-          v-model="searchQuery"
-          type="text"
-          class="input input-xs input-bordered flex-1"
-          placeholder="Search messages..."
-          @input="doSearch"
-          @keydown.escape="toggleSearch"
-        />
-        <button class="btn btn-xs btn-ghost" @click="toggleSearch">Close</button>
-      </div>
-
     </header>
 
     <!-- Search results panel -->
-    <div v-if="searchOpen && searchResults.length > 0" class="border-b border-base-content/10 max-h-[200px] overflow-y-auto bg-base-200/50">
-      <div
+    <ul v-if="searchOpen && searchResults.length > 0" class="menu menu-sm bg-base-200 max-h-[200px] overflow-y-auto border-b border-base-content/10">
+      <li
         v-for="result in searchResults"
         :key="result.msgId"
-        class="px-3 py-1 hover:bg-base-300 cursor-pointer text-sm"
-        @click="scrollToMessage(result.msgId); toggleSearch()"
       >
-        <span class="text-xs font-semibold text-primary">{{ result.username }}</span>
-        <span class="text-[11px] opacity-40 ml-1">{{ formatTime(result.ts) }}</span>
-        <span class="ml-1 text-xs opacity-70 truncate">{{ result.message }}</span>
-      </div>
-    </div>
+        <a @click="scrollToMessage(result.msgId); toggleSearch()">
+          <span class="text-xs font-semibold text-primary">{{ result.username }}</span>
+          <time class="text-[11px] opacity-40">{{ formatTime(result.ts) }}</time>
+          <span class="text-xs opacity-70 truncate">{{ result.message }}</span>
+        </a>
+      </li>
+    </ul>
 
     <!-- Pinned messages panel -->
-    <div v-if="pinnedOpen" class="border-b border-base-content/10 max-h-[200px] overflow-y-auto bg-base-200/50">
+    <div v-if="pinnedOpen" class="bg-base-200 max-h-[200px] overflow-y-auto border-b border-base-content/10">
       <div class="px-3 py-1 text-[11px] font-semibold opacity-50 uppercase tracking-wider">Pinned Messages</div>
-      <div
-        v-for="msg in pinnedMessages"
-        :key="msg.msgId"
-        class="px-3 py-1 hover:bg-base-300 cursor-pointer text-sm"
-        @click="scrollToMessage(msg.msgId); pinnedOpen = false"
-      >
-        <span class="text-xs font-semibold text-primary">{{ msg.username }}</span>
-        <span class="text-[11px] opacity-40 ml-1">{{ formatTime(msg.ts) }}</span>
-        <span class="ml-1 text-xs opacity-70 truncate">{{ msg.message }}</span>
-      </div>
+      <ul class="menu menu-sm">
+        <li
+          v-for="msg in pinnedMessages"
+          :key="msg.msgId"
+        >
+          <a @click="scrollToMessage(msg.msgId); pinnedOpen = false">
+            <span class="text-xs font-semibold text-primary">{{ msg.username }}</span>
+            <time class="text-[11px] opacity-40">{{ formatTime(msg.ts) }}</time>
+            <span class="text-xs opacity-70 truncate">{{ msg.message }}</span>
+          </a>
+        </li>
+      </ul>
     </div>
 
-    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto px-3 py-1" :class="density === 'compact' ? 'space-y-0' : density === 'comfortable' ? 'space-y-2' : 'space-y-0.5'">
+    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto px-3 py-1">
       <div v-if="!connected" class="text-sm opacity-40 text-center pt-6">Connect to a server to start chatting</div>
       <div v-else-if="visibleMessages.length === 0" class="text-sm opacity-40 text-center pt-6">No messages in this channel yet</div>
 
-      <article
+      <div :class="[density === 'compact' ? 'space-y-0' : density === 'comfortable' ? 'space-y-2' : 'space-y-1']">
+      <div
         v-for="msg in visibleMessages"
         :key="msg.id"
         :data-msg-id="msg.msgId"
-        class="group rounded hover:bg-base-200 transition-colors relative"
-        :class="[
-          msg.system ? '' : (density === 'compact' ? 'py-0.5 px-1' : density === 'comfortable' ? 'py-2 px-2' : 'py-1 px-1.5'),
-          isMentioned(msg) ? 'bg-warning/10 border-l-2 border-warning' : '',
-          msg.pinned ? 'border-l-2 border-info/40' : '',
-        ]"
       >
         <!-- System message -->
         <div v-if="msg.system" class="text-center py-1">
-          <span class="text-[11px] opacity-40 italic">{{ msg.message }}</span>
+          <span class="badge badge-ghost badge-sm italic">{{ msg.message }}</span>
         </div>
 
-        <!-- Deleted message -->
-        <div v-else-if="msg.deleted" class="flex items-baseline gap-2">
-          <template v-if="density === 'comfortable'">
-            <span class="w-6 h-6 rounded-full bg-base-300 border border-base-content/20 text-[9px] font-mono flex items-center justify-center shrink-0">{{ initials(msg.username) }}</span>
-          </template>
-          <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
-          <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
-          <span class="text-sm italic opacity-40">message deleted</span>
-        </div>
-
-        <!-- Normal / edited message -->
-        <template v-else>
-          <!-- Reply preview -->
-          <div v-if="msg.replyPreview" class="flex items-center gap-1.5 mb-0.5 pl-3 border-l-2 border-base-content/20 opacity-60 cursor-pointer text-[11px]" @click="scrollToMessage(msg.replyPreview.msg_id)">
-            <span class="font-semibold text-primary">{{ msg.replyPreview.username }}</span>
-            <span v-if="msg.replyPreview.deleted" class="italic">message deleted</span>
-            <span v-else class="truncate max-w-[300px]">{{ msg.replyPreview.message }}</span>
-          </div>
-
-          <!-- Inline edit mode -->
-          <div v-if="editingMsgId === msg.msgId" class="flex items-center gap-2">
-            <input
-              ref="editInputEl"
-              v-model="editInput"
-              type="text"
-              maxlength="500"
-              class="input input-xs input-bordered flex-1"
-              @keydown.enter.prevent="submitEdit"
-              @keydown.escape.prevent="cancelEdit"
-            />
-            <button class="btn btn-xs btn-soft btn-primary" @click="submitEdit">Save</button>
-            <button class="btn btn-xs btn-ghost" @click="cancelEdit">Cancel</button>
-          </div>
-
-          <!-- Normal display -->
-          <div v-else>
-            <!-- Comfortable: avatar + name on separate line -->
-            <template v-if="density === 'comfortable'">
-              <div class="flex items-start gap-2">
-                <span class="w-6 h-6 rounded-full bg-base-300 border border-base-content/20 text-[9px] font-mono flex items-center justify-center shrink-0 mt-0.5">{{ initials(msg.username) }}</span>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-baseline gap-2">
-                    <span class="text-xs font-semibold text-primary">{{ msg.username }}</span>
-                    <span class="text-[11px] opacity-40">{{ formatTime(msg.ts) }}</span>
-                    <span v-if="msg.edited" class="text-[10px] opacity-30">(edited)</span>
-                    <span v-if="msg.pinned" class="text-[10px] opacity-40 text-info" title="Pinned">pinned</span>
-                    <!-- Hover action icons -->
-                    <span
-                      class="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
-                    >
-                      <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
-                        <Smile class="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
-                      <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
-                        <Reply class="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
-                      <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
-                        <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
-                      <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
-                        <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
-                    </span>
-                  </div>
-                  <p v-if="msg.message" class="text-sm break-words mt-0.5" v-html="renderMessage(msg)" />
-                </div>
+        <!-- Chat message (DaisyUI chat component) -->
+        <div
+          v-else
+          class="chat group"
+          :class="[
+            msg.senderId === myId ? 'chat-end' : 'chat-start',
+            isMentioned(msg) ? 'bg-warning/10 rounded border-l-2 border-warning' : '',
+            msg.pinned ? 'border-l-2 border-info/40 rounded' : '',
+          ]"
+        >
+          <!-- Avatar (hidden in compact density) -->
+          <div v-if="density !== 'compact'" class="chat-image">
+            <div class="avatar placeholder">
+              <div class="bg-neutral text-neutral-content rounded-full" :class="density === 'comfortable' ? 'w-10' : 'w-8'">
+                <span class="text-xs">{{ initials(msg.username) }}</span>
               </div>
-            </template>
-
-            <!-- Compact: everything inline, no avatar -->
-            <template v-else-if="density === 'compact'">
-              <div class="flex items-baseline gap-1.5">
-                <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
-                <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
-                <span v-if="msg.message" class="text-xs break-words" v-html="renderMessage(msg)" />
-                <span v-if="msg.edited" class="text-[9px] opacity-30 shrink-0">(edited)</span>
-                <span
-                  class="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
-                >
-                  <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
-                    <Smile class="w-3 h-3" aria-hidden="true" />
-                  </button>
-                  <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
-                    <Reply class="w-3 h-3" aria-hidden="true" />
-                  </button>
-                  <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
-                    <Pencil class="w-3 h-3" aria-hidden="true" />
-                  </button>
-                  <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
-                    <Trash2 class="w-3 h-3" aria-hidden="true" />
-                  </button>
-                </span>
-              </div>
-            </template>
-
-            <!-- Default density -->
-            <template v-else>
-              <div class="flex items-baseline gap-2">
-                <span class="text-xs font-semibold text-primary shrink-0">{{ msg.username }}</span>
-                <span class="text-[11px] opacity-40 shrink-0">{{ formatTime(msg.ts) }}</span>
-                <span v-if="msg.message" class="text-sm break-words" v-html="renderMessage(msg)" />
-                <span v-if="msg.edited" class="text-[10px] opacity-30 shrink-0">(edited)</span>
-                <span v-if="msg.pinned" class="text-[10px] opacity-40 text-info shrink-0" title="Pinned">pinned</span>
-
-                <!-- Hover action icons -->
-                <span
-                  class="ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
-                >
-                  <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
-                    <Smile class="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                  <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
-                    <Reply class="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                  <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
-                    <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                  <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
-                    <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                </span>
-              </div>
-            </template>
-          </div>
-
-          <!-- Reaction picker dropdown -->
-          <div v-if="reactionPickerMsgId === msg.msgId" class="flex gap-0.5 flex-wrap mt-1 p-1 bg-base-300 rounded-lg w-fit">
-            <button
-              v-for="emoji in commonEmojis"
-              :key="emoji"
-              class="btn btn-ghost btn-xs btn-square text-base"
-              @click="$emit('addReaction', msg.msgId, emoji); reactionPickerMsgId = null"
-            >
-              {{ emoji }}
-            </button>
-          </div>
-
-          <!-- Reactions display -->
-          <div v-if="msg.reactions && msg.reactions.length > 0" class="flex flex-wrap gap-1 mt-1" :class="density === 'comfortable' ? 'ml-8' : ''">
-            <button
-              v-for="rx in msg.reactions"
-              :key="rx.emoji"
-              class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] border transition-colors"
-              :class="rx.user_ids.includes(myId) ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-base-300 border-base-content/10 hover:bg-base-content/10'"
-              :title="rx.user_ids.map(id => users?.find(u => u.id === id)?.username ?? 'Unknown').join(', ')"
-              @click="rx.user_ids.includes(myId) ? $emit('removeReaction', msg.msgId, rx.emoji) : $emit('addReaction', msg.msgId, rx.emoji)"
-            >
-              <span>{{ rx.emoji }}</span>
-              <span class="font-mono">{{ rx.count }}</span>
-            </button>
-          </div>
-
-          <!-- File attachment -->
-          <div v-if="msg.fileUrl" class="mt-1" :class="density === 'comfortable' ? 'ml-8' : ''">
-            <!-- Image preview -->
-            <a
-              v-if="msg.fileName && isImageFile(msg.fileName)"
-              :href="msg.fileUrl"
-              target="_blank"
-              class="block"
-            >
-              <img
-                :src="msg.fileUrl"
-                :alt="msg.fileName"
-                class="max-w-[320px] max-h-[240px] rounded border border-base-content/10 object-contain"
-                loading="lazy"
-              />
-              <span class="text-[11px] opacity-50 mt-0.5 block">
-                {{ msg.fileName }} ({{ formatFileSize(msg.fileSize ?? 0) }})
-              </span>
-            </a>
-            <!-- Generic file download link -->
-            <a
-              v-else
-              :href="msg.fileUrl"
-              target="_blank"
-              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-base-300 hover:bg-base-content/10 transition-colors text-sm"
-            >
-              <FileText class="w-4 h-4 opacity-60 shrink-0" aria-hidden="true" />
-              <span class="truncate max-w-[200px]">{{ msg.fileName }}</span>
-              <span class="text-[11px] opacity-50 shrink-0">({{ formatFileSize(msg.fileSize ?? 0) }})</span>
-            </a>
-          </div>
-
-          <!-- Link preview -->
-          <a
-            v-if="msg.linkPreview"
-            :href="msg.linkPreview.url"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="mt-2 block max-w-[400px] rounded-lg border border-base-content/10 bg-base-300 overflow-hidden hover:border-primary/30 transition-colors no-underline"
-            :class="density === 'comfortable' ? 'ml-8' : ''"
-          >
-            <img
-              v-if="msg.linkPreview.image"
-              :src="msg.linkPreview.image"
-              :alt="msg.linkPreview.title"
-              class="w-full max-h-[200px] object-cover"
-              loading="lazy"
-            />
-            <div class="p-2">
-              <p v-if="msg.linkPreview.siteName" class="text-[10px] opacity-50 uppercase tracking-wide mb-0.5">{{ msg.linkPreview.siteName }}</p>
-              <p v-if="msg.linkPreview.title" class="text-sm font-semibold text-primary line-clamp-2">{{ msg.linkPreview.title }}</p>
-              <p v-if="msg.linkPreview.description" class="text-xs opacity-70 mt-0.5 line-clamp-2">{{ msg.linkPreview.description }}</p>
             </div>
-          </a>
-        </template>
-      </article>
+          </div>
+
+          <!-- Header: username + time -->
+          <div class="chat-header flex items-baseline gap-2">
+            {{ msg.username }}
+            <time class="text-xs opacity-50">{{ formatTime(msg.ts) }}</time>
+            <span v-if="msg.edited" class="text-[10px] opacity-30">(edited)</span>
+            <span v-if="msg.pinned" class="badge badge-info badge-xs">pinned</span>
+          </div>
+
+          <!-- Bubble -->
+          <div
+            v-if="msg.deleted"
+            class="chat-bubble chat-bubble-ghost opacity-40 italic text-sm"
+          >
+            message deleted
+          </div>
+          <template v-else>
+            <!-- Reply preview above bubble -->
+            <div v-if="msg.replyPreview" class="text-xs opacity-60 cursor-pointer mb-0.5 flex items-center gap-1" @click="scrollToMessage(msg.replyPreview.msg_id)">
+              <span class="font-semibold text-primary">{{ msg.replyPreview.username }}:</span>
+              <span v-if="msg.replyPreview.deleted" class="italic">message deleted</span>
+              <span v-else class="truncate max-w-[250px]">{{ msg.replyPreview.message }}</span>
+            </div>
+
+            <!-- Inline edit mode -->
+            <div v-if="editingMsgId === msg.msgId" class="chat-bubble flex items-center gap-2">
+              <input
+                ref="editInputEl"
+                v-model="editInput"
+                type="text"
+                maxlength="500"
+                class="input input-xs flex-1"
+                @keydown.enter.prevent="submitEdit"
+                @keydown.escape.prevent="cancelEdit"
+              />
+              <button class="btn btn-xs btn-primary" @click="submitEdit">Save</button>
+              <button class="btn btn-xs btn-ghost" @click="cancelEdit">Cancel</button>
+            </div>
+
+            <!-- Normal bubble -->
+            <div
+              v-else
+              class="chat-bubble text-sm"
+              :class="msg.senderId === myId ? 'chat-bubble-primary' : ''"
+            >
+              <span v-if="msg.message" v-html="renderMessage(msg)" />
+            </div>
+          </template>
+
+          <!-- Footer: action buttons + reactions -->
+          <div class="chat-footer">
+            <!-- Hover action icons -->
+            <span
+              v-if="!msg.deleted"
+              class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5"
+            >
+              <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
+                <Smile class="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+              <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
+                <Reply class="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+              <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
+                <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+              <button v-if="canDelete(msg)" class="btn btn-ghost btn-xs btn-square text-error/70 hover:text-error" title="Delete message" @click="confirmDelete(msg)">
+                <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            </span>
+
+            <!-- Reaction picker -->
+            <div v-if="reactionPickerMsgId === msg.msgId" class="flex gap-0.5 flex-wrap mt-1 p-1 bg-base-300 rounded-lg w-fit">
+              <button
+                v-for="emoji in commonEmojis"
+                :key="emoji"
+                class="btn btn-ghost btn-xs btn-square text-base"
+                @click="$emit('addReaction', msg.msgId, emoji); reactionPickerMsgId = null"
+              >
+                {{ emoji }}
+              </button>
+            </div>
+
+            <!-- Reactions display -->
+            <div v-if="msg.reactions && msg.reactions.length > 0" class="flex flex-wrap gap-1 mt-1">
+              <button
+                v-for="rx in msg.reactions"
+                :key="rx.emoji"
+                class="badge badge-sm cursor-pointer"
+                :class="rx.user_ids.includes(myId) ? 'badge-primary badge-outline' : 'badge-ghost'"
+                :title="rx.user_ids.map(id => users?.find(u => u.id === id)?.username ?? 'Unknown').join(', ')"
+                @click="rx.user_ids.includes(myId) ? $emit('removeReaction', msg.msgId, rx.emoji) : $emit('addReaction', msg.msgId, rx.emoji)"
+              >
+                {{ rx.emoji }} {{ rx.count }}
+              </button>
+            </div>
+
+            <!-- File attachment -->
+            <div v-if="msg.fileUrl" class="mt-1">
+              <a
+                v-if="msg.fileName && isImageFile(msg.fileName)"
+                :href="msg.fileUrl"
+                target="_blank"
+                class="block"
+              >
+                <img
+                  :src="msg.fileUrl"
+                  :alt="msg.fileName"
+                  class="max-w-[320px] max-h-[240px] rounded border border-base-content/10 object-contain"
+                  loading="lazy"
+                />
+                <span class="text-[11px] opacity-50 mt-0.5 block">
+                  {{ msg.fileName }} ({{ formatFileSize(msg.fileSize ?? 0) }})
+                </span>
+              </a>
+              <a
+                v-else
+                :href="msg.fileUrl"
+                target="_blank"
+                class="btn btn-ghost btn-sm gap-2 normal-case"
+              >
+                <FileText class="w-4 h-4 opacity-60" aria-hidden="true" />
+                <span class="truncate max-w-[200px]">{{ msg.fileName }}</span>
+                <span class="badge badge-ghost badge-xs">{{ formatFileSize(msg.fileSize ?? 0) }}</span>
+              </a>
+            </div>
+
+            <!-- Link preview -->
+            <a
+              v-if="msg.linkPreview"
+              :href="msg.linkPreview.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="card card-compact bg-base-300 mt-2 max-w-[400px] hover:border-primary/30 transition-colors no-underline"
+            >
+              <figure v-if="msg.linkPreview.image">
+                <img
+                  :src="msg.linkPreview.image"
+                  :alt="msg.linkPreview.title"
+                  class="w-full max-h-[200px] object-cover"
+                  loading="lazy"
+                />
+              </figure>
+              <div class="card-body">
+                <p v-if="msg.linkPreview.siteName" class="text-[10px] opacity-50 uppercase tracking-wide">{{ msg.linkPreview.siteName }}</p>
+                <h3 v-if="msg.linkPreview.title" class="card-title text-sm text-primary">{{ msg.linkPreview.title }}</h3>
+                <p v-if="msg.linkPreview.description" class="text-xs opacity-70 line-clamp-2">{{ msg.linkPreview.description }}</p>
+              </div>
+            </a>
+          </div>
+        </div>
+      </div>
+      </div>
     </div>
 
     <!-- Typing indicator -->
-    <div v-if="typingText" class="px-3 py-0.5 text-[11px] opacity-50 italic border-t border-base-content/5">
+    <div v-if="typingText" class="px-3 py-0.5 text-[11px] opacity-50 italic border-t border-base-content/5 flex items-center gap-1">
+      <span class="loading loading-dots loading-xs"></span>
       {{ typingText }}
     </div>
 
     <!-- Pasted image preview -->
-    <div v-if="pastedImage" class="border-t border-base-content/10 px-3 py-2 bg-base-200/50 flex items-center gap-3">
+    <div v-if="pastedImage" class="alert border-t border-base-content/10 rounded-none flex items-center gap-3">
       <img :src="pastedImage.dataUrl" alt="Pasted image" class="max-w-[120px] max-h-[80px] rounded border border-base-content/10 object-contain" />
       <div class="flex gap-1.5">
         <button class="btn btn-xs btn-primary" @click="sendPastedImage">Send</button>
@@ -703,82 +671,53 @@ function renderMessage(msg: ChatMessage): string {
     </div>
 
     <!-- Reply preview bar -->
-    <div v-if="replyingTo" class="px-3 py-1.5 bg-base-200/50 border-t border-base-content/10 flex items-center gap-2 text-xs">
+    <div v-if="replyingTo" class="alert alert-info rounded-none py-1 flex items-center gap-2 text-xs">
       <span class="opacity-50">Replying to</span>
-      <span class="font-semibold text-primary">{{ replyingTo.username }}</span>
+      <span class="font-semibold">{{ replyingTo.username }}</span>
       <span class="opacity-50 truncate max-w-[200px]">{{ replyingTo.message }}</span>
       <button class="btn btn-ghost btn-xs btn-square ml-auto" @click="cancelReply">
         <X class="w-3 h-3" aria-hidden="true" />
       </button>
     </div>
 
-    <footer class="border-t border-base-content/10 p-2 flex gap-2 relative">
+    <footer class="border-t border-base-content/10 p-2 relative">
       <!-- @mention autocomplete popup -->
-      <div v-if="mentionActive && mentionSuggestions.length > 0" class="absolute bottom-full left-0 right-0 mx-2 mb-1 bg-base-300 rounded-lg border border-base-content/10 shadow-lg max-h-[200px] overflow-y-auto z-40">
-        <button
+      <ul v-if="mentionActive && mentionSuggestions.length > 0" class="menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 absolute bottom-full left-0 right-0 mx-2 mb-1 max-h-[200px] overflow-y-auto z-40">
+        <li
           v-for="(user, idx) in mentionSuggestions"
           :key="user.id"
-          class="block w-full text-left px-3 py-1.5 text-sm hover:bg-base-content/10 transition-colors"
-          :class="idx === mentionIndex ? 'bg-primary/10 text-primary' : ''"
-          @click="selectMention(user.username)"
         >
-          @{{ user.username }}
-        </button>
-      </div>
+          <a
+            :class="idx === mentionIndex ? 'active' : ''"
+            @click="selectMention(user.username)"
+          >
+            @{{ user.username }}
+          </a>
+        </li>
+      </ul>
 
-      <button
-        class="btn btn-sm btn-ghost btn-square shrink-0"
-        :disabled="!connected || uploading"
-        title="Upload file"
-        @click="handleUploadClick"
-      >
-        <Plus class="w-4 h-4" aria-hidden="true" />
-      </button>
-      <input
-        ref="inputEl"
-        v-model="input"
-        type="text"
-        maxlength="500"
-        class="input input-sm input-bordered w-full"
-        :placeholder="connected ? `Message #${selectedChannelName}` : 'Disconnected'"
-        :disabled="!connected"
-        @keydown="handleKeydown"
-        @input="handleInput"
-        @paste="handlePaste"
-      />
+      <div class="join w-full">
+        <button
+          class="btn btn-sm btn-ghost join-item"
+          :disabled="!connected || uploading"
+          title="Upload file"
+          @click="handleUploadClick"
+        >
+          <Plus class="w-4 h-4" aria-hidden="true" />
+        </button>
+        <input
+          ref="inputEl"
+          v-model="input"
+          type="text"
+          maxlength="500"
+          class="input input-sm join-item flex-1"
+          :placeholder="connected ? `Message #${selectedChannelName}` : 'Disconnected'"
+          :disabled="!connected"
+          @keydown="handleKeydown"
+          @input="handleInput"
+          @paste="handlePaste"
+        />
+      </div>
     </footer>
   </section>
 </template>
-
-<style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-:deep(.mention) {
-  color: oklch(var(--p));
-  font-weight: 600;
-  background: oklch(var(--p) / 0.1);
-  padding: 0 2px;
-  border-radius: 3px;
-}
-
-:deep(.mention-self) {
-  background: oklch(var(--wa) / 0.15);
-  color: oklch(var(--wa));
-}
-
-.highlight-flash {
-  animation: flash-highlight 1.5s ease-out;
-}
-
-@keyframes flash-highlight {
-  0% { background-color: oklch(var(--p) / 0.2); }
-  100% { background-color: transparent; }
-}
-</style>
