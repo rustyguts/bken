@@ -214,19 +214,9 @@ func (a *App) SetAGC(enabled bool) {
 	a.audio.SetAGC(enabled)
 }
 
-// SetAGCLevel is retained as a no-op for backward compatibility.
-func (a *App) SetAGCLevel(level int) {
-	a.audio.SetAGCLevel(level)
-}
-
 // SetNoiseSuppression enables or disables noise suppression.
 func (a *App) SetNoiseSuppression(enabled bool) {
 	a.audio.SetNoiseSuppression(enabled)
-}
-
-// SetNoiseSuppressionLevel is retained as a no-op for backward compatibility.
-func (a *App) SetNoiseSuppressionLevel(level int) {
-	_ = level
 }
 
 // SetNotificationVolume sets the notification/soundboard volume (0.0-1.0).
@@ -366,21 +356,6 @@ func (a *App) Connect(addr, username string) string {
 	return ""
 }
 
-// wireCallbacks keeps legacy tests/builders working when they set app.transport
-// directly without creating named server sessions.
-func (a *App) wireCallbacks() {
-	if a.transport == nil {
-		return
-	}
-	a.mu.RLock()
-	serverAddr := a.serverAddr
-	a.mu.RUnlock()
-	if serverAddr == "" {
-		serverAddr = "legacy"
-	}
-	a.wireSessionCallbacks(serverAddr, a.transport)
-}
-
 // wireSessionCallbacks registers transport callbacks and tags each event with
 // its server address.
 func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
@@ -445,7 +420,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 		})
 		slog.Info("connection lost", "addr", serverAddr, "reason", reason)
 	})
-	tr.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
+	tr.SetOnChatMessage(func(msgID uint64, senderID uint16, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16) {
 		payload := map[string]any{
 			"server_addr": serverAddr,
 			"username":    username,
@@ -455,7 +430,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			"msg_id":      msgID,
 			"sender_id":   int(senderID),
 		}
-		if fileID != 0 {
+		if fileID != "" {
 			payload["file_id"] = fileID
 			payload["file_name"] = fileName
 			payload["file_size"] = fileSize
@@ -468,21 +443,10 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			}
 			payload["mentions"] = intMentions
 		}
-		if replyTo != 0 {
-			payload["reply_to"] = replyTo
-		}
-		if replyPreview != nil {
-			payload["reply_preview"] = map[string]any{
-				"msg_id":   replyPreview.MsgID,
-				"username": replyPreview.Username,
-				"message":  replyPreview.Message,
-				"deleted":  replyPreview.Deleted,
-			}
-		}
 		slog.Debug("emit chat:message", "addr", serverAddr, "msg_id", msgID, "sender_id", senderID)
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
 	})
-	tr.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview) {
+	tr.SetOnChannelChatMessage(func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16) {
 		payload := map[string]any{
 			"server_addr": serverAddr,
 			"username":    username,
@@ -492,7 +456,7 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			"msg_id":      msgID,
 			"sender_id":   int(senderID),
 		}
-		if fileID != 0 {
+		if fileID != "" {
 			payload["file_id"] = fileID
 			payload["file_name"] = fileName
 			payload["file_size"] = fileSize
@@ -504,17 +468,6 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 				intMentions[i] = int(m)
 			}
 			payload["mentions"] = intMentions
-		}
-		if replyTo != 0 {
-			payload["reply_to"] = replyTo
-		}
-		if replyPreview != nil {
-			payload["reply_preview"] = map[string]any{
-				"msg_id":   replyPreview.MsgID,
-				"username": replyPreview.Username,
-				"message":  replyPreview.Message,
-				"deleted":  replyPreview.Deleted,
-			}
 		}
 		slog.Debug("emit chat:message", "addr", serverAddr, "msg_id", msgID, "sender_id", senderID)
 		wailsrt.EventsEmit(a.ctx, "chat:message", payload)
@@ -648,15 +601,6 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			"msg_id":      msgID,
 		})
 	})
-	tr.SetOnRecordingState(func(channelID int64, recording bool, startedBy string) {
-		slog.Debug("emit recording:state", "addr", serverAddr, "channel_id", channelID, "recording", recording)
-		wailsrt.EventsEmit(a.ctx, "recording:state", map[string]any{
-			"server_addr": serverAddr,
-			"channel_id":  channelID,
-			"recording":   recording,
-			"started_by":  startedBy,
-		})
-	})
 	tr.SetOnVideoLayers(func(userID uint16, layers []VideoLayer) {
 		slog.Debug("emit video:layers", "addr", serverAddr, "user_id", userID)
 		wailsrt.EventsEmit(a.ctx, "video:layers", map[string]any{
@@ -665,20 +609,32 @@ func (a *App) wireSessionCallbacks(serverAddr string, tr Transporter) {
 			"layers":      layers,
 		})
 	})
-	tr.SetOnVideoQualityRequest(func(fromUserID uint16, quality string) {
-		slog.Debug("emit video:quality_request", "addr", serverAddr, "from_user_id", fromUserID, "quality", quality)
-		wailsrt.EventsEmit(a.ctx, "video:quality_request", map[string]any{
-			"server_addr": serverAddr,
-			"id":          int(fromUserID),
-			"quality":     quality,
-		})
-	})
 	tr.SetOnMessageHistory(func(channelID int64, messages []ChatHistoryMessage) {
 		slog.Debug("emit chat:history", "addr", serverAddr, "channel_id", channelID)
+		// Enrich messages with file URLs before emitting.
+		enriched := make([]map[string]any, len(messages))
+		for i, m := range messages {
+			item := map[string]any{
+				"msg_id":   m.MsgID,
+				"username": m.Username,
+				"message":  m.Message,
+				"ts":       m.TS,
+			}
+			if m.FileID != "" {
+				item["file_id"] = m.FileID
+				item["file_name"] = m.FileName
+				item["file_size"] = m.FileSize
+				item["file_url"] = fileURLForTransport(tr, m.FileID)
+			}
+			if len(m.Reactions) > 0 {
+				item["reactions"] = m.Reactions
+			}
+			enriched[i] = item
+		}
 		wailsrt.EventsEmit(a.ctx, "chat:history", map[string]any{
 			"server_addr": serverAddr,
 			"channel_id":  channelID,
-			"messages":    messages,
+			"messages":    enriched,
 		})
 	})
 	tr.SetOnUserVoiceFlags(func(userID uint16, muted, deafened bool) {
@@ -1089,19 +1045,6 @@ func (a *App) RemoveReaction(msgID int, emoji string) string {
 	return ""
 }
 
-// SendTyping notifies the server that the user is typing in a channel.
-// Returns an error message string or "" on success (Wails JS binding convention).
-func (a *App) SendTyping(channelID int) string {
-	tr, err := a.requireTransport()
-	if err != nil {
-		return err.Error()
-	}
-	if err := tr.SendTyping(int64(channelID)); err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
 // SendChat sends a chat message to the server for fan-out to all participants.
 // Returns an error message string or "" on success (Wails JS binding convention).
 func (a *App) SendChat(message string) string {
@@ -1117,19 +1060,19 @@ func (a *App) SendChat(message string) string {
 }
 
 // fileURL constructs a download URL for the given file ID using the API base URL.
-func fileURLForTransport(tr Transporter, fileID int64) string {
-	if tr == nil {
+func fileURLForTransport(tr Transporter, fileID string) string {
+	if tr == nil || fileID == "" {
 		return ""
 	}
 	base := tr.APIBaseURL()
 	if base == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/api/files/%d", base, fileID)
+	return fmt.Sprintf("%s/api/blobs/%s", base, fileID)
 }
 
 // fileURL constructs a download URL for the given file ID using the active server API base URL.
-func (a *App) fileURL(fileID int64) string {
+func (a *App) fileURL(fileID string) string {
 	tr, err := a.requireTransport()
 	if err != nil {
 		return ""
@@ -1166,10 +1109,10 @@ func (a *App) UploadFileFromPath(channelID int, path string) string {
 
 // uploadResponse mirrors the server's UploadResponse JSON.
 type uploadResponse struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
+	ID           string `json:"id"`
+	OriginalName string `json:"original_name"`
+	SizeBytes    int64  `json:"size_bytes"`
+	ContentType  string `json:"content_type"`
 }
 
 const maxFileSize = 10 * 1024 * 1024 // 10 MB
@@ -1228,7 +1171,7 @@ func (a *App) uploadFilePath(channelID int64, path string) string {
 	}
 
 	// Send a chat message with the file metadata.
-	if err := tr.SendFileChat(channelID, ur.ID, ur.Size, ur.Name, ""); err != nil {
+	if err := tr.SendFileChat(channelID, ur.ID, ur.SizeBytes, ur.OriginalName, ""); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -1431,36 +1374,6 @@ func (a *App) sendLoop() {
 			consecutiveErrors = 0
 		}
 	}
-}
-
-// StartRecording asks the server to start recording voice in a channel.
-// Only the channel owner can start recording; the server enforces the check.
-// Returns an error message string or "" on success (Wails JS binding convention).
-func (a *App) StartRecording(channelID int) string {
-	slog.Debug("StartRecording", "channel_id", channelID)
-	tr, err := a.requireTransport()
-	if err != nil {
-		return err.Error()
-	}
-	if err := tr.StartRecording(int64(channelID)); err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-// StopRecording asks the server to stop recording voice in a channel.
-// Only the channel owner can stop recording; the server enforces the check.
-// Returns an error message string or "" on success (Wails JS binding convention).
-func (a *App) StopRecording(channelID int) string {
-	slog.Debug("StopRecording", "channel_id", channelID)
-	tr, err := a.requireTransport()
-	if err != nil {
-		return err.Error()
-	}
-	if err := tr.StopRecording(int64(channelID)); err != nil {
-		return err.Error()
-	}
-	return ""
 }
 
 // RequestVideoQuality asks a remote video sender to switch to a different

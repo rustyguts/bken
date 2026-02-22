@@ -70,14 +70,6 @@ export interface ReactionInfo {
   count: number
 }
 
-/** Preview of the original message in a reply. */
-export interface ReplyPreview {
-  msg_id: number
-  username: string
-  message: string
-  deleted?: boolean
-}
-
 /** A search result from the server. */
 export interface SearchResult {
   msg_id: number
@@ -105,7 +97,7 @@ export interface ChatMessage {
   message: string
   ts: number         // Unix ms timestamp (server-stamped)
   channelId: number  // the channel this message belongs to
-  fileId?: number    // uploaded file DB id
+  fileId?: string    // uploaded file blob id
   fileName?: string  // original filename
   fileSize?: number  // file size in bytes
   fileUrl?: string   // download URL (constructed by Go layer)
@@ -116,7 +108,5 @@ export interface ChatMessage {
   system?: boolean   // true if this is a system event message (join/leave/kick/etc.)
   mentions?: number[] // user IDs mentioned via @DisplayName
   reactions?: ReactionInfo[] // emoji reactions on this message
-  replyTo?: number   // message ID being replied to
-  replyPreview?: ReplyPreview // preview of the replied-to message
   pinned?: boolean   // true if the message is pinned
 }

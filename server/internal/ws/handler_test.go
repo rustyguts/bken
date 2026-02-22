@@ -87,10 +87,12 @@ func TestCreateChannelBroadcastsChannelList(t *testing.T) {
 		return m.Type == protocol.TypeChannelList
 	})
 
-	if len(aliceList.Channels) != 1 || aliceList.Channels[0].Name != "general" {
+	// ConnectServer seeds a default "General" channel, so after creating
+	// "general" there should be 2 channels total.
+	if len(aliceList.Channels) != 2 || aliceList.Channels[1].Name != "general" {
 		t.Fatalf("alice channels: %#v", aliceList.Channels)
 	}
-	if len(bobList.Channels) != 1 || bobList.Channels[0].Name != "general" {
+	if len(bobList.Channels) != 2 || bobList.Channels[1].Name != "general" {
 		t.Fatalf("bob channels: %#v", bobList.Channels)
 	}
 }

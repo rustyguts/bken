@@ -10,7 +10,6 @@ const props = defineProps<{
   connectedAddr: string
   connected: boolean
   voiceConnected: boolean
-  connectError: string
   startupAddr: string
   globalUsername: string
 }>()

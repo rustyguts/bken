@@ -60,7 +60,7 @@ type ControlMsg struct {
 	Channels      []ChannelInfo   `json:"channels,omitempty"`        // channel_list: full list of channels
 	APIPort       int             `json:"api_port,omitempty"`        // user_list: HTTP API port for file uploads
 	ICEServers    []ICEServerInfo `json:"ice_servers,omitempty"`     // user_list: ICE servers for WebRTC
-	FileID        int64           `json:"file_id,omitempty"`         // chat: uploaded file DB id
+	FileID        string          `json:"file_id,omitempty"`         // chat: uploaded file blob id
 	FileName      string          `json:"file_name,omitempty"`       // chat: original filename
 	FileSize      int64           `json:"file_size,omitempty"`       // chat: file size in bytes
 	MsgID         uint64          `json:"msg_id,omitempty"`          // chat/link_preview: server-assigned message ID
@@ -77,20 +77,9 @@ type ControlMsg struct {
 	ScreenShare   *bool           `json:"screen_share,omitempty"`    // video_state: whether this is a screen share
 	Mentions      []uint16        `json:"mentions,omitempty"`        // chat: user IDs mentioned
 	Emoji         string          `json:"emoji,omitempty"`           // add_reaction/remove_reaction: emoji character
-	ReplyTo       uint64          `json:"reply_to,omitempty"`        // chat: message ID being replied to
-	ReplyPreview  *ReplyPreview   `json:"reply_preview,omitempty"`   // chat: preview of replied-to message
 	Pinned        *bool           `json:"pinned,omitempty"`          // message_pinned/message_unpinned
-	Recording     *bool           `json:"recording,omitempty"`       // recording_started/stopped
 	VideoLayers   []VideoLayer    `json:"video_layers,omitempty"`    // video_state: simulcast layers
 	VideoQuality  string          `json:"video_quality,omitempty"`   // set_video_quality: requested layer
-}
-
-// ReplyPreview is a compact preview of the original message in a reply.
-type ReplyPreview struct {
-	MsgID    uint64 `json:"msg_id"`
-	Username string `json:"username"`
-	Message  string `json:"message"`
-	Deleted  bool   `json:"deleted,omitempty"`
 }
 
 // UserInfo describes a connected peer.
@@ -110,10 +99,21 @@ type ChannelInfo struct {
 
 // ChatHistoryMessage is a single message in a channel's message history.
 type ChatHistoryMessage struct {
-	MsgID    int64  `json:"msg_id"`
-	Username string `json:"username"`
-	Message  string `json:"message"`
-	TS       int64  `json:"ts"`
+	MsgID     int64                `json:"msg_id"`
+	Username  string               `json:"username"`
+	Message   string               `json:"message"`
+	TS        int64                `json:"ts"`
+	FileID    string               `json:"file_id,omitempty"`
+	FileName  string               `json:"file_name,omitempty"`
+	FileSize  int64                `json:"file_size,omitempty"`
+	Reactions []ChatHistoryReaction `json:"reactions,omitempty"`
+}
+
+// ChatHistoryReaction describes a single emoji reaction in message history.
+type ChatHistoryReaction struct {
+	Emoji   string   `json:"emoji"`
+	UserIDs []uint16 `json:"user_ids"`
+	Count   int      `json:"count"`
 }
 
 // VideoLayer describes a simulcast video layer available from a sender.
@@ -152,6 +152,9 @@ type backendUserMsg struct {
 	MsgID     int64        `json:"msg_id,omitempty"`
 	Ts        int64        `json:"ts,omitempty"`
 	Error     string       `json:"error,omitempty"`
+	FileID    string       `json:"file_id,omitempty"`
+	FileName  string       `json:"file_name,omitempty"`
+	FileSize  int64        `json:"file_size,omitempty"`
 }
 
 // Metrics holds connection quality metrics shown in the UI.
@@ -285,8 +288,8 @@ type Transport struct {
 	onUserLeft           func(uint16)
 	onAudioReceived      func(uint16)
 	onDisconnected       func(reason string)
-	onChatMessage        func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)
-	onChannelChatMessage func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)
+	onChatMessage        func(msgID uint64, senderID uint16, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16)
+	onChannelChatMessage func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16)
 	onServerInfo         func(name string)
 	onKicked             func()
 	onOwnerChanged       func(ownerID uint16)
@@ -302,9 +305,7 @@ type Transport struct {
 	onUserTyping         func(userID uint16, username string, channelID int64)
 	onMessagePinned      func(msgID uint64, channelID int64, userID uint16)
 	onMessageUnpinned    func(msgID uint64)
-	onRecordingState     func(channelID int64, recording bool, startedBy string)
 	onVideoLayers        func(userID uint16, layers []VideoLayer)
-	onVideoQualityReq    func(fromUserID uint16, quality string)
 	onMessageHistory     func(channelID int64, messages []ChatHistoryMessage)
 	onUserVoiceFlags     func(userID uint16, muted, deafened bool)
 }
@@ -361,13 +362,13 @@ func (t *Transport) SetOnDisconnected(fn func(reason string)) {
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)) {
+func (t *Transport) SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16)) {
 	t.cbMu.Lock()
 	t.onChatMessage = fn
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview)) {
+func (t *Transport) SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16)) {
 	t.cbMu.Lock()
 	t.onChannelChatMessage = fn
 	t.cbMu.Unlock()
@@ -463,21 +464,9 @@ func (t *Transport) SetOnMessageUnpinned(fn func(msgID uint64)) {
 	t.cbMu.Unlock()
 }
 
-func (t *Transport) SetOnRecordingState(fn func(channelID int64, recording bool, startedBy string)) {
-	t.cbMu.Lock()
-	t.onRecordingState = fn
-	t.cbMu.Unlock()
-}
-
 func (t *Transport) SetOnVideoLayers(fn func(userID uint16, layers []VideoLayer)) {
 	t.cbMu.Lock()
 	t.onVideoLayers = fn
-	t.cbMu.Unlock()
-}
-
-func (t *Transport) SetOnVideoQualityRequest(fn func(fromUserID uint16, quality string)) {
-	t.cbMu.Lock()
-	t.onVideoQualityReq = fn
 	t.cbMu.Unlock()
 }
 
@@ -611,18 +600,6 @@ func (t *Transport) RequestVideoQuality(targetID uint16, quality string) error {
 	return t.writeCtrl(ControlMsg{Type: "set_video_quality", TargetID: targetID, VideoQuality: quality})
 }
 
-// StartRecording asks the server to start recording voice in a channel.
-// Only succeeds if the caller is the channel owner; the server enforces the check.
-func (t *Transport) StartRecording(channelID int64) error {
-	return t.writeCtrl(ControlMsg{Type: "start_recording", ChannelID: channelID})
-}
-
-// StopRecording asks the server to stop recording voice in a channel.
-// Only succeeds if the caller is the channel owner; the server enforces the check.
-func (t *Transport) StopRecording(channelID int64) error {
-	return t.writeCtrl(ControlMsg{Type: "stop_recording", ChannelID: channelID})
-}
-
 // RequestChannels asks the server to send the channel list for the connected server.
 func (t *Transport) RequestChannels() error {
 	return t.writeJSON(map[string]any{"type": "get_channels"})
@@ -665,13 +642,16 @@ func (t *Transport) APIBaseURL() string {
 
 // SendFileChat sends a chat message with a file attachment.
 // The file metadata must come from a prior upload to the server's API.
-func (t *Transport) SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error {
-	_ = channelID
-	_ = fileID
-	_ = fileSize
-	_ = fileName
-	_ = message
-	return fmt.Errorf("file chat is not supported by this backend")
+func (t *Transport) SendFileChat(channelID int64, fileID string, fileSize int64, fileName, message string) error {
+	return t.writeJSON(map[string]any{
+		"type":       "send_text",
+		"server_id":  t.backendServerID(),
+		"channel_id": t.wireChannelID(channelID),
+		"message":    message,
+		"file_id":    fileID,
+		"file_name":  fileName,
+		"file_size":  fileSize,
+	})
 }
 
 // SendChannelChat sends a channel-scoped chat message.
@@ -714,14 +694,6 @@ func (t *Transport) RemoveReaction(msgID uint64, emoji string) error {
 		return fmt.Errorf("emoji must not be empty")
 	}
 	return t.writeCtrl(ControlMsg{Type: "remove_reaction", MsgID: msgID, Emoji: emoji})
-}
-
-// SendTyping notifies the server that the user is typing in a channel.
-func (t *Transport) SendTyping(channelID int64) error {
-	if channelID == 0 {
-		return fmt.Errorf("channel_id must not be zero")
-	}
-	return nil
 }
 
 // validateChat returns an error if the message is empty or too long.
@@ -1629,9 +1601,7 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 		onUserTyping := t.onUserTyping
 		onMessagePinned := t.onMessagePinned
 		onMessageUnpinned := t.onMessageUnpinned
-		onRecordingState := t.onRecordingState
 		onVideoLayers := t.onVideoLayers
-		onVideoQualityReq := t.onVideoQualityReq
 		onMessageHistory := t.onMessageHistory
 		onUserVoiceFlags := t.onUserVoiceFlags
 		t.cbMu.RUnlock()
@@ -1761,19 +1731,55 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 			msgID := uint64(msg.MsgID)
 			if channelID != 0 {
 				if onChannelChat != nil {
-					onChannelChat(msgID, id, channelID, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
+					onChannelChat(msgID, id, channelID, msg.User.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, nil)
 				}
 			} else if onChat != nil {
-				onChat(msgID, id, msg.User.Username, msg.Message, msg.Ts, 0, "", 0, nil, 0, nil)
+				onChat(msgID, id, msg.User.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, nil)
+			}
+		case "reaction_added":
+			var msg struct {
+				MsgID  int64  `json:"msg_id"`
+				Emoji  string `json:"emoji"`
+				UserID string `json:"user_id"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil {
+				slog.Error("invalid reaction_added message", "err", err)
+				continue
+			}
+			id := t.localUserID(msg.UserID)
+			if onReactionAdded != nil {
+				onReactionAdded(uint64(msg.MsgID), msg.Emoji, id)
+			}
+		case "reaction_removed":
+			var msg struct {
+				MsgID  int64  `json:"msg_id"`
+				Emoji  string `json:"emoji"`
+				UserID string `json:"user_id"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil {
+				slog.Error("invalid reaction_removed message", "err", err)
+				continue
+			}
+			id := t.localUserID(msg.UserID)
+			if onReactionRemoved != nil {
+				onReactionRemoved(uint64(msg.MsgID), msg.Emoji, id)
 			}
 		case "message_history":
 			var msg struct {
 				ChannelID string `json:"channel_id"`
 				Messages  []struct {
-					MsgID    int64  `json:"msg_id"`
-					Username string `json:"username"`
-					Message  string `json:"message"`
-					TS       int64  `json:"ts"`
+					MsgID     int64  `json:"msg_id"`
+					Username  string `json:"username"`
+					Message   string `json:"message"`
+					TS        int64  `json:"ts"`
+					FileID    string `json:"file_id"`
+					FileName  string `json:"file_name"`
+					FileSize  int64  `json:"file_size"`
+					Reactions []struct {
+						Emoji   string   `json:"emoji"`
+						UserIDs []string `json:"user_ids"`
+						Count   int      `json:"count"`
+					} `json:"reactions"`
 				} `json:"messages"`
 			}
 			if err := json.Unmarshal(data, &msg); err != nil {
@@ -1788,6 +1794,20 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 					Username: m.Username,
 					Message:  m.Message,
 					TS:       m.TS,
+					FileID:   m.FileID,
+					FileName: m.FileName,
+					FileSize: m.FileSize,
+				}
+				for _, rx := range m.Reactions {
+					localIDs := make([]uint16, len(rx.UserIDs))
+					for j, uid := range rx.UserIDs {
+						localIDs[j] = t.localUserID(uid)
+					}
+					msgs[i].Reactions = append(msgs[i].Reactions, ChatHistoryReaction{
+						Emoji:   rx.Emoji,
+						UserIDs: localIDs,
+						Count:   rx.Count,
+					})
 				}
 			}
 			if onMessageHistory != nil {
@@ -1907,11 +1927,11 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 			case "chat":
 				if msg.ChannelID != 0 {
 					if onChannelChat != nil {
-						onChannelChat(msg.MsgID, msg.ID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
+						onChannelChat(msg.MsgID, msg.ID, msg.ChannelID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions)
 					}
 				} else {
 					if onChat != nil {
-						onChat(msg.MsgID, msg.ID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions, msg.ReplyTo, msg.ReplyPreview)
+						onChat(msg.MsgID, msg.ID, msg.Username, msg.Message, msg.Ts, msg.FileID, msg.FileName, msg.FileSize, msg.Mentions)
 					}
 				}
 			case "link_preview":
@@ -1982,18 +2002,6 @@ func (t *Transport) readControl(ctx context.Context, conn *websocket.Conn) {
 				}
 				if onVideoLayers != nil && len(msg.VideoLayers) > 0 {
 					onVideoLayers(msg.ID, msg.VideoLayers)
-				}
-			case "set_video_quality":
-				if onVideoQualityReq != nil && msg.VideoQuality != "" {
-					onVideoQualityReq(msg.ID, msg.VideoQuality)
-				}
-			case "recording_started":
-				if onRecordingState != nil {
-					onRecordingState(msg.ChannelID, true, msg.Username)
-				}
-			case "recording_stopped":
-				if onRecordingState != nil {
-					onRecordingState(msg.ChannelID, false, "")
 				}
 			case "webrtc_offer":
 				t.handleOffer(msg.ID, msg.SDP)

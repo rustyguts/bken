@@ -29,8 +29,8 @@ type Transporter interface {
 	SetOnUserLeft(fn func(uint16))
 	SetOnAudioReceived(fn func(uint16))
 	SetOnDisconnected(fn func(reason string))
-	SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview))
-	SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID int64, fileName string, fileSize int64, mentions []uint16, replyTo uint64, replyPreview *ReplyPreview))
+	SetOnChatMessage(fn func(msgID uint64, senderID uint16, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16))
+	SetOnChannelChatMessage(fn func(msgID uint64, senderID uint16, channelID int64, username, message string, ts int64, fileID string, fileName string, fileSize int64, mentions []uint16))
 	SetOnLinkPreview(fn func(msgID uint64, channelID int64, url, title, desc, image, siteName string))
 	SetOnServerInfo(fn func(name string))
 	SetOnKicked(fn func())
@@ -46,9 +46,7 @@ type Transporter interface {
 	SetOnUserTyping(fn func(userID uint16, username string, channelID int64))
 	SetOnMessagePinned(fn func(msgID uint64, channelID int64, userID uint16))
 	SetOnMessageUnpinned(fn func(msgID uint64))
-	SetOnRecordingState(fn func(channelID int64, recording bool, startedBy string))
 	SetOnVideoLayers(fn func(userID uint16, layers []VideoLayer))
-	SetOnVideoQualityRequest(fn func(fromUserID uint16, quality string))
 	SetOnMessageHistory(fn func(channelID int64, messages []ChatHistoryMessage))
 	SetOnUserVoiceFlags(fn func(userID uint16, muted, deafened bool))
 
@@ -57,12 +55,11 @@ type Transporter interface {
 
 	// Chat.
 	SendChat(message string) error
-	SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error
+	SendFileChat(channelID int64, fileID string, fileSize int64, fileName, message string) error
 	EditMessage(msgID uint64, message string) error
 	DeleteMessage(msgID uint64) error
 	AddReaction(msgID uint64, emoji string) error
 	RemoveReaction(msgID uint64, emoji string) error
-	SendTyping(channelID int64) error
 
 	// File API.
 	APIBaseURL() string
@@ -91,10 +88,6 @@ type Transporter interface {
 
 	// Video.
 	SendVideoState(active bool, screenShare bool) error
-
-	// Recording.
-	StartRecording(channelID int64) error
-	StopRecording(channelID int64) error
 
 	// Simulcast / Video Quality.
 	RequestVideoQuality(targetID uint16, quality string) error

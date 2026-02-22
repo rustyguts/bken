@@ -180,8 +180,8 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 			h.sendError(userID, "server_id and channel_id are required")
 			return
 		}
-		if strings.TrimSpace(in.Message) == "" {
-			h.sendError(userID, "message is required")
+		if strings.TrimSpace(in.Message) == "" && strings.TrimSpace(in.FileID) == "" {
+			h.sendError(userID, "message or file is required")
 			return
 		}
 		if !h.channelState.CanSendText(userID, in.ServerID) {
@@ -197,7 +197,7 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 		ts := time.Now().UnixMilli()
 		var msgID int64
 		if h.store != nil {
-			id, err := h.store.InsertMessage(context.Background(), in.ServerID, in.ChannelID, userID, user.Username, in.Message, ts)
+			id, err := h.store.InsertMessage(context.Background(), in.ServerID, in.ChannelID, userID, user.Username, in.Message, ts, in.FileID, in.FileName, in.FileSize)
 			if err != nil {
 				slog.Error("persist message", "user_id", userID, "err", err)
 			} else {
@@ -213,6 +213,9 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 			MsgID:     msgID,
 			TS:        ts,
 			User:      &user,
+			FileID:    in.FileID,
+			FileName:  in.FileName,
+			FileSize:  in.FileSize,
 		}, "")
 
 	case protocol.TypeCreateChannel:
@@ -298,6 +301,50 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 			Channels: channels,
 		})
 
+	case protocol.TypeAddReaction:
+		if in.MsgID <= 0 || strings.TrimSpace(in.Emoji) == "" {
+			h.sendError(userID, "msg_id and emoji are required")
+			return
+		}
+		serverID, err := h.channelState.UserServer(userID)
+		if err != nil {
+			h.sendError(userID, err.Error())
+			return
+		}
+		if h.store != nil {
+			if err := h.store.AddReaction(context.Background(), in.MsgID, userID, in.Emoji); err != nil {
+				slog.Error("add reaction", "user_id", userID, "msg_id", in.MsgID, "err", err)
+			}
+		}
+		h.channelState.BroadcastToServer(serverID, protocol.Message{
+			Type:   protocol.TypeReactionAdded,
+			MsgID:  in.MsgID,
+			Emoji:  in.Emoji,
+			UserID: userID,
+		}, "")
+
+	case protocol.TypeRemoveReaction:
+		if in.MsgID <= 0 || strings.TrimSpace(in.Emoji) == "" {
+			h.sendError(userID, "msg_id and emoji are required")
+			return
+		}
+		serverID, err := h.channelState.UserServer(userID)
+		if err != nil {
+			h.sendError(userID, err.Error())
+			return
+		}
+		if h.store != nil {
+			if err := h.store.RemoveReaction(context.Background(), in.MsgID, userID, in.Emoji); err != nil {
+				slog.Error("remove reaction", "user_id", userID, "msg_id", in.MsgID, "err", err)
+			}
+		}
+		h.channelState.BroadcastToServer(serverID, protocol.Message{
+			Type:   protocol.TypeReactionRemoved,
+			MsgID:  in.MsgID,
+			Emoji:  in.Emoji,
+			UserID: userID,
+		}, "")
+
 	case protocol.TypeGetMessages:
 		if h.store == nil {
 			h.sendError(userID, "message history not available")
@@ -319,6 +366,7 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 			return
 		}
 		msgs := make([]protocol.TextMessage, len(rows))
+		msgIDs := make([]int64, len(rows))
 		for i, r := range rows {
 			msgs[i] = protocol.TextMessage{
 				MsgID:     r.ID,
@@ -327,6 +375,41 @@ func (h *Handler) handleInbound(userID string, in protocol.Message) {
 				ChannelID: r.ChannelID,
 				Message:   r.Message,
 				TS:        r.TS,
+				FileID:    r.FileID,
+				FileName:  r.FileName,
+				FileSize:  r.FileSize,
+			}
+			msgIDs[i] = r.ID
+		}
+		// Attach reactions to messages.
+		if len(msgIDs) > 0 {
+			reactionMap, err := h.store.GetReactionsForMessages(context.Background(), msgIDs)
+			if err != nil {
+				slog.Error("get reactions for messages", "err", err)
+			} else {
+				for i := range msgs {
+					rxRows := reactionMap[msgs[i].MsgID]
+					if len(rxRows) == 0 {
+						continue
+					}
+					// Group by emoji.
+					emojiMap := make(map[string][]string)
+					var order []string
+					for _, rx := range rxRows {
+						if _, seen := emojiMap[rx.Emoji]; !seen {
+							order = append(order, rx.Emoji)
+						}
+						emojiMap[rx.Emoji] = append(emojiMap[rx.Emoji], rx.UserID)
+					}
+					for _, emoji := range order {
+						uids := emojiMap[emoji]
+						msgs[i].Reactions = append(msgs[i].Reactions, protocol.ReactionInfo{
+							Emoji:   emoji,
+							UserIDs: uids,
+							Count:   len(uids),
+						})
+					}
+				}
 			}
 		}
 		slog.Debug("get_messages", "user_id", userID, "server_id", serverID, "channel_id", in.ChannelID, "count", len(msgs))

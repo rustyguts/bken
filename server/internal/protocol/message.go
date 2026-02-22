@@ -33,6 +33,10 @@ const (
 	TypeGetServerInfo         = "get_server_info"
 	TypeServerInfo            = "server_info"
 	TypeSetVoiceState         = "set_voice_state"
+	TypeAddReaction           = "add_reaction"
+	TypeRemoveReaction        = "remove_reaction"
+	TypeReactionAdded         = "reaction_added"
+	TypeReactionRemoved       = "reaction_removed"
 )
 
 // Message is the JSON control envelope exchanged over websocket.
@@ -53,16 +57,32 @@ type Message struct {
 	Messages   []TextMessage `json:"messages,omitempty"`
 	Muted      *bool         `json:"muted,omitempty"`
 	Deafened   *bool         `json:"deafened,omitempty"`
+	Emoji      string        `json:"emoji,omitempty"`
+	UserID     string        `json:"user_id,omitempty"`
+	FileID     string        `json:"file_id,omitempty"`
+	FileName   string        `json:"file_name,omitempty"`
+	FileSize   int64         `json:"file_size,omitempty"`
 }
 
 // TextMessage is a persisted chat message returned in history queries.
 type TextMessage struct {
-	MsgID     int64  `json:"msg_id"`
-	UserID    string `json:"user_id"`
-	Username  string `json:"username"`
-	ChannelID string `json:"channel_id"`
-	Message   string `json:"message"`
-	TS        int64  `json:"ts"`
+	MsgID     int64          `json:"msg_id"`
+	UserID    string         `json:"user_id"`
+	Username  string         `json:"username"`
+	ChannelID string         `json:"channel_id"`
+	Message   string         `json:"message"`
+	TS        int64          `json:"ts"`
+	FileID    string         `json:"file_id,omitempty"`
+	FileName  string         `json:"file_name,omitempty"`
+	FileSize  int64          `json:"file_size,omitempty"`
+	Reactions []ReactionInfo `json:"reactions,omitempty"`
+}
+
+// ReactionInfo describes a single emoji reaction and who placed it.
+type ReactionInfo struct {
+	Emoji   string   `json:"emoji"`
+	UserIDs []string `json:"user_ids"`
+	Count   int      `json:"count"`
 }
 
 // UnmarshalJSON handles channel_id being either a JSON string or number.

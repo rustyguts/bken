@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import type { ChatMessage, Channel, User, ReactionInfo } from './types'
-import { Pin, Search, Smile, Reply, Pencil, Trash2, FileText, X, Plus } from 'lucide-vue-next'
+import { Pin, Search, Smile, Pencil, Trash2, FileText, Plus } from 'lucide-vue-next'
 
 const props = defineProps<{
   messages: ChatMessage[]
@@ -47,9 +47,6 @@ const mentionQuery = ref('')
 const mentionActive = ref(false)
 const mentionIndex = ref(0)
 const inputEl = ref<HTMLInputElement | null>(null)
-
-// Reply state
-const replyingTo = ref<ChatMessage | null>(null)
 
 // Search state
 const searchOpen = ref(false)
@@ -158,15 +155,6 @@ function confirmDelete(msg: ChatMessage): void {
   emit('deleteMessage', msg.msgId)
 }
 
-function startReply(msg: ChatMessage): void {
-  replyingTo.value = msg
-  nextTick(() => inputEl.value?.focus())
-}
-
-function cancelReply(): void {
-  replyingTo.value = null
-}
-
 function scrollToMessage(msgId: number): void {
   if (!scrollEl.value) return
   const el = scrollEl.value.querySelector(`[data-msg-id="${msgId}"]`)
@@ -183,7 +171,6 @@ function send(): void {
   emit('send', text)
   input.value = ''
   mentionActive.value = false
-  replyingTo.value = null
 }
 
 function handleInput(e: Event): void {
@@ -516,9 +503,6 @@ function renderMessage(msg: ChatMessage): string {
             <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
               <Smile class="w-3 h-3" aria-hidden="true" />
             </button>
-            <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
-              <Reply class="w-3 h-3" aria-hidden="true" />
-            </button>
             <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit" @click="startEdit(msg)">
               <Pencil class="w-3 h-3" aria-hidden="true" />
             </button>
@@ -574,9 +558,6 @@ function renderMessage(msg: ChatMessage): string {
                 <button class="btn btn-ghost btn-xs btn-square" title="React" @click.stop="toggleReactionPicker(msg.msgId)">
                   <Smile class="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
-                <button class="btn btn-ghost btn-xs btn-square" title="Reply" @click="startReply(msg)">
-                  <Reply class="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
                 <button v-if="canEdit(msg)" class="btn btn-ghost btn-xs btn-square" title="Edit message" @click="startEdit(msg)">
                   <Pencil class="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
@@ -584,13 +565,6 @@ function renderMessage(msg: ChatMessage): string {
                   <Trash2 class="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
               </span>
-            </div>
-
-            <!-- Reply preview -->
-            <div v-if="msg.replyPreview" class="text-xs opacity-60 cursor-pointer mb-0.5 flex items-center gap-1 border-l-2 border-base-content/20 pl-2" @click="scrollToMessage(msg.replyPreview.msg_id)">
-              <span class="font-semibold text-primary">{{ msg.replyPreview.username }}:</span>
-              <span v-if="msg.replyPreview.deleted" class="italic">message deleted</span>
-              <span v-else class="truncate max-w-[250px]">{{ msg.replyPreview.message }}</span>
             </div>
 
             <!-- Message content -->
@@ -713,17 +687,7 @@ function renderMessage(msg: ChatMessage): string {
       </div>
     </div>
 
-    <!-- Reply preview bar -->
-    <div v-if="replyingTo" class="alert alert-info rounded-none py-1 flex items-center gap-2 text-xs">
-      <span class="opacity-50">Replying to</span>
-      <span class="font-semibold">{{ replyingTo.username }}</span>
-      <span class="opacity-50 truncate max-w-[200px]">{{ replyingTo.message }}</span>
-      <button class="btn btn-ghost btn-xs btn-square ml-auto" @click="cancelReply">
-        <X class="w-3 h-3" aria-hidden="true" />
-      </button>
-    </div>
-
-    <footer class="border-t border-base-content/10 px-2 py-1 relative">
+    <footer class="px-2 py-1 relative">
       <!-- @mention autocomplete popup -->
       <ul v-if="mentionActive && mentionSuggestions.length > 0" class="menu menu-sm bg-base-200 rounded-box shadow-lg border border-base-content/10 absolute bottom-full left-0 right-0 mx-2 mb-1 max-h-[200px] overflow-y-auto z-40">
         <li
@@ -739,9 +703,9 @@ function renderMessage(msg: ChatMessage): string {
         </li>
       </ul>
 
-      <div class="join w-full">
+      <div class="flex w-full">
         <button
-          class="btn btn-sm btn-ghost join-item"
+          class="btn btn-soft mr-2"
           :disabled="!connected || uploading"
           title="Upload file"
           @click="handleUploadClick"
@@ -752,8 +716,8 @@ function renderMessage(msg: ChatMessage): string {
           ref="inputEl"
           v-model="input"
           type="text"
-          maxlength="500"
-          class="input input-sm join-item flex-1"
+          maxlength="1024"
+          class="input w-full"
           :placeholder="connected ? `Message #${selectedChannelName}` : 'Disconnected'"
           :disabled="!connected"
           @keydown="handleKeydown"

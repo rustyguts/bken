@@ -3,10 +3,13 @@ import { ref, watch, nextTick } from 'vue'
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../wailsjs/runtime/runtime'
 import { RenameServer } from './config'
 import { BKEN_SCHEME } from './constants'
+import { usePanelWidth } from './composables/usePanelWidth'
 import { Check, Pencil, Link, Minus, Square, X } from 'lucide-vue-next'
 import MetricsBar from './MetricsBar.vue'
 
 const props = defineProps<{ serverName?: string; isOwner?: boolean; serverAddr?: string; voiceConnected?: boolean }>()
+
+const { gridCols } = usePanelWidth()
 
 const editing = ref(false)
 const draft = ref('')
@@ -53,7 +56,8 @@ watch(() => props.serverName, () => { editing.value = false })
 <template>
   <div>
   <header
-    class="grid grid-cols-[64px_minmax(220px,280px)_minmax(0,1fr)] items-center h-8 shrink-0 bg-base-300 border-b border-base-content/10 select-none"
+    class="grid items-center h-8 shrink-0 bg-base-300 border-b border-base-content/10 select-none"
+    :style="{ gridTemplateColumns: gridCols }"
     style="--wails-draggable: drag"
   >
     <!-- Column 1: App name (over sidebar) -->

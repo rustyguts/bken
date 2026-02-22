@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Connect, Disconnect, DisconnectVoice, GetAutoLogin, EventsOn, EventsOff, ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, SendTyping, StartVideo, StopVideo, StartScreenShare, StopScreenShare, RequestChannels, RequestMessages, RequestServerInfo } from './config'
+import { Connect, Disconnect, DisconnectVoice, GetAutoLogin, EventsOn, EventsOff, ApplyConfig, SendChat, SendChannelChat, GetStartupAddr, GetConfig, SaveConfig, JoinChannel, ConnectVoice, CreateChannel, RenameChannel, DeleteChannel, MoveUserToChannel, KickUser, UploadFile, UploadFileFromPath, PTTKeyDown, PTTKeyUp, RenameUser, EditMessage, DeleteMessage, AddReaction, RemoveReaction, StartVideo, StopVideo, StartScreenShare, StopScreenShare, RequestChannels, RequestMessages, RequestServerInfo } from './config'
 import type { ServerEntry } from './config'
 import { log } from './logger'
 import ChannelView from './ChannelView.vue'
@@ -9,6 +9,8 @@ import ReconnectBanner from './ReconnectBanner.vue'
 import TitleBar from './TitleBar.vue'
 import KeyboardShortcuts from './KeyboardShortcuts.vue'
 import { useSpeakingUsers } from './composables/useSpeakingUsers'
+import { useToast } from './composables/useToast'
+import ToastContainer from './ToastContainer.vue'
 import { BKEN_SCHEME, LAST_CONNECTED_ADDR_KEY } from './constants'
 import type { User, ConnectPayload, ChatMessage, Channel, VideoState, ReactionInfo } from './types'
 
@@ -26,15 +28,14 @@ interface ServerState {
   viewedChannelId: number
   unreadCounts: Record<number, number>
   videoStates: Record<number, VideoState>
-  recordingChannels: Record<number, { recording: boolean; startedBy: string }>
   typingUsers: Record<number, { username: string; channelId: number; expiresAt: number }>
-  connectError: string
   userVoiceFlags: Record<number, { muted: boolean; deafened: boolean }>
 }
 
 const reconnecting = ref(false)
 const reconnectAttempt = ref(0)
 const reconnectSecondsLeft = ref(0)
+const disconnectReason = ref('')
 
 const startupAddrHint = ref('')
 const currentRoute = ref<AppRoute>('channel')
@@ -54,6 +55,7 @@ let chatIdCounter = 0
 let typingCleanupInterval: ReturnType<typeof setInterval> | null = null
 
 const { speakingUsers, setSpeaking, clearSpeaking, cleanup: cleanupSpeaking } = useSpeakingUsers()
+const { addToast, clearToasts } = useToast()
 
 // Push-to-Talk state
 const pttEnabled = ref(false)
@@ -73,9 +75,7 @@ function emptyServerState(): ServerState {
     viewedChannelId: 0,
     unreadCounts: {},
     videoStates: {},
-    recordingChannels: {},
     typingUsers: {},
-    connectError: '',
     userVoiceFlags: {},
   }
 }
@@ -100,13 +100,11 @@ const channels = computed(() => serverState.value.channels)
 const userChannels = computed(() => serverState.value.userChannels)
 const unreadCounts = computed(() => serverState.value.unreadCounts)
 const videoStates = computed(() => serverState.value.videoStates)
-const recordingChannels = computed(() => serverState.value.recordingChannels)
 const typingUsers = computed(() => serverState.value.typingUsers)
-const connectError = computed(() => serverState.value.connectError)
 const userVoiceFlags = computed(() => serverState.value.userVoiceFlags)
 
 function setActiveError(message: string): void {
-  serverState.value = { ...serverState.value, connectError: message }
+  if (message) addToast(message, 'error')
 }
 
 function parseRoute(hash: string): AppRoute {
@@ -219,13 +217,14 @@ async function connectToServer(addr: string, username: string): Promise<boolean>
   const err = await Connect(targetAddr, user)
   if (err) {
     log.warn('app', 'connect failed', { addr: targetAddr, error: err })
-    serverState.value = { ...serverState.value, connectError: err, connected: false }
+    addToast(err, 'error')
+    serverState.value = { ...serverState.value, connected: false }
     return false
   }
 
   log.info('app', 'connected to server', { addr: targetAddr })
   serverAddr.value = targetAddr
-  serverState.value = { ...serverState.value, connected: true, connectError: '' }
+  serverState.value = { ...serverState.value, connected: true }
   setLastConnectedAddr(targetAddr)
   startupAddrHint.value = ''
 
@@ -428,6 +427,7 @@ async function handleDisconnect(): Promise<void> {
   await Disconnect()
   voiceConnected.value = false
   clearSpeaking()
+  clearToasts()
   serverAddr.value = ''
   serverState.value = emptyServerState()
 }
@@ -447,14 +447,20 @@ onMounted(async () => {
 
   EventsOn('server:disconnected', (data: { server_addr: string; reason?: string }) => {
     log.info('event', 'server:disconnected', { reason: data?.reason })
-    serverState.value = { ...serverState.value, connected: false, connectError: data?.reason || '' }
+    const reason = data?.reason || ''
+    if (reason) addToast(reason, 'error')
+    disconnectReason.value = reason
+    serverState.value = { ...serverState.value, connected: false }
     voiceConnected.value = false
     clearSpeaking()
   })
 
   EventsOn('connection:lost', (data: { server_addr: string; reason: string } | null) => {
     log.warn('event', 'connection:lost', { reason: data?.reason })
-    serverState.value = { ...serverState.value, connected: false, connectError: data?.reason || 'Connection lost' }
+    const reason = data?.reason || 'Connection lost'
+    addToast(reason, 'error')
+    disconnectReason.value = reason
+    serverState.value = { ...serverState.value, connected: false }
     voiceConnected.value = false
     clearSpeaking()
   })
@@ -561,8 +567,6 @@ onMounted(async () => {
         fileSize: data.file_size,
         fileUrl: data.file_url,
         mentions: data.mentions,
-        replyTo: data.reply_to,
-        replyPreview: data.reply_preview,
       }]
       if (data.sender_id && state.typingUsers[data.sender_id]) {
         const { [data.sender_id]: _, ...rest } = state.typingUsers
@@ -576,7 +580,7 @@ onMounted(async () => {
 
   EventsOn('chat:history', (data: any) => {
     const channelId = data.channel_id ?? 0
-    const msgs = (data.messages ?? []) as Array<{ msg_id: number; username: string; message: string; ts: number }>
+    const msgs = (data.messages ?? []) as Array<{ msg_id: number; username: string; message: string; ts: number; reactions?: Array<{ emoji: string; user_ids: number[]; count: number }>; file_id?: string; file_name?: string; file_size?: number; file_url?: string }>
     log.debug('event', 'chat:history', { channel_id: channelId, count: msgs.length })
     if (msgs.length === 0) return
     updateState(state => {
@@ -593,6 +597,11 @@ onMounted(async () => {
           message: m.message,
           ts: m.ts,
           channelId,
+          reactions: m.reactions,
+          fileId: m.file_id,
+          fileName: m.file_name,
+          fileSize: m.file_size,
+          fileUrl: m.file_url,
         })
       }
       if (newMsgs.length > 0) {
@@ -756,21 +765,11 @@ onMounted(async () => {
     })
   })
 
-  EventsOn('recording:state', (data: any) => {
-    log.debug('event', 'recording:state', { channel_id: data.channel_id, recording: data.recording })
-    updateState(state => {
-      if (data.recording) {
-        state.recordingChannels = { ...state.recordingChannels, [data.channel_id]: { recording: true, startedBy: data.started_by } }
-      } else {
-        const { [data.channel_id]: _, ...rest } = state.recordingChannels
-        state.recordingChannels = rest
-      }
-    })
-  })
-
   EventsOn('connection:kicked', (_data: any) => {
     log.warn('event', 'connection:kicked')
-    serverState.value = { ...serverState.value, connectError: 'Disconnected by server owner', connected: false }
+    addToast('Disconnected by server owner', 'error')
+    disconnectReason.value = 'Disconnected by server owner'
+    serverState.value = { ...serverState.value, connected: false }
     voiceConnected.value = false
     clearSpeaking()
   })
@@ -850,7 +849,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalShortcuts)
   window.removeEventListener('keydown', handlePTTKeyDown)
   window.removeEventListener('keyup', handlePTTKeyUp)
-  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:history', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'channel:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'channel:user_voice_flags', 'audio:speaking', 'video:state', 'video:layers', 'recording:state', 'file:dropped')
+  EventsOff('connection:lost', 'server:connected', 'server:disconnected', 'user:list', 'user:joined', 'user:left', 'user:renamed', 'chat:message', 'chat:history', 'chat:message_edited', 'chat:message_deleted', 'chat:link_preview', 'chat:reaction_added', 'chat:reaction_removed', 'chat:user_typing', 'chat:message_pinned', 'chat:message_unpinned', 'server:info', 'channel:owner', 'user:me', 'connection:kicked', 'channel:list', 'channel:user_moved', 'channel:user_voice_flags', 'audio:speaking', 'video:state', 'video:layers', 'file:dropped')
   cleanupSpeaking()
   if (typingCleanupInterval) clearInterval(typingCleanupInterval)
 })
@@ -871,7 +870,7 @@ onBeforeUnmount(() => {
           v-if="reconnecting"
           :attempt="reconnectAttempt"
           :seconds-until-retry="reconnectSecondsLeft"
-          :reason="connectError"
+          :reason="disconnectReason"
           @cancel="handleCancelReconnect"
         />
       </Transition>
@@ -900,7 +899,6 @@ onBeforeUnmount(() => {
           :voice-connected="voiceConnected"
           :reconnecting="reconnecting"
           :connected-addr="connectedAddr"
-          :connect-error="connectError"
           :startup-addr="startupAddrHint"
           :global-username="globalUsername"
           :server-name="serverName"
@@ -913,7 +911,6 @@ onBeforeUnmount(() => {
           :speaking-users="speakingUsers"
           :unread-counts="unreadCounts"
           :video-states="videoStates"
-          :recording-channels="recordingChannels"
           :typing-users="typingUsers"
           :message-density="messageDensity"
           :show-system-messages="showSystemMessages"
@@ -948,6 +945,7 @@ onBeforeUnmount(() => {
       </Transition>
     </div>
     <KeyboardShortcuts v-if="showShortcutsHelp" @close="showShortcutsHelp = false" />
+    <ToastContainer />
   </main>
 </template>
 

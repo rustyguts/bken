@@ -163,10 +163,6 @@ export function SetAGC(enabled: boolean): Promise<void> {
   return bridge()['SetAGC'](enabled)
 }
 
-export function SetAGCLevel(level: number): Promise<void> {
-  return bridge()['SetAGCLevel'](level)
-}
-
 // --- Audio bitrate bindings ---
 
 export function SetAudioBitrate(kbps: number): Promise<void> {
@@ -251,10 +247,6 @@ export function AddReaction(msgID: number, emoji: string): Promise<string> {
 
 export function RemoveReaction(msgID: number, emoji: string): Promise<string> {
   return bridge()['RemoveReaction'](msgID, emoji)
-}
-
-export function SendTyping(channelID: number): Promise<string> {
-  return bridge()['SendTyping'](channelID)
 }
 
 // --- Moderation bindings ---
@@ -346,16 +338,6 @@ export function StartScreenShare(): Promise<string> {
 
 export function StopScreenShare(): Promise<string> {
   return bridge()['StopScreenShare']()
-}
-
-// --- Recording bindings ---
-
-export function StartRecording(channelID: number): Promise<string> {
-  return bridge()['StartRecording'](channelID)
-}
-
-export function StopRecording(channelID: number): Promise<string> {
-  return bridge()['StopRecording'](channelID)
 }
 
 // --- Video quality bindings ---

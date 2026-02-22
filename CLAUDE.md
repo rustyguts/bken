@@ -71,7 +71,7 @@ No CGO. No TLS (plain HTTP). Alpine Docker build.
 ### Client (`client/`)
 
 **Go layer:**
-- `transport.go` — dials WebSocket, manages per-peer WebRTC connections via `pion/webrtc/v4`, fires `runtime.EventsEmit` callbacks so the frontend sees `user:list`, `user:joined`, `user:left`, chat events, etc. The client supports a richer protocol than the current server (WebRTC signaling, channels, reactions, video, recording).
+- `transport.go` — dials WebSocket, manages per-peer WebRTC connections via `pion/webrtc/v4`, fires `runtime.EventsEmit` callbacks so the frontend sees `user:list`, `user:joined`, `user:left`, chat events, etc. The client supports a richer protocol than the current server (WebRTC signaling, channels, reactions, video).
 - `audio.go` — PortAudio capture (48 kHz, mono, 960-sample / 20 ms frames) → Opus encode → WebRTC track; remote tracks → Opus decode → jitter buffer → PortAudio playback.
 - `app.go` — `App`: Wails-bound methods (`Connect`, `Disconnect`, `SetMuted`, `SetDeafened`, etc.); bridges transport callbacks to frontend events. Supports multiple simultaneous server connections (`sessions` map).
 - `interfaces.go` — `Transporter` interface covering all transport operations.

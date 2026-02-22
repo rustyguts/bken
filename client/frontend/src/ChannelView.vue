@@ -7,6 +7,7 @@ import ChannelChat from './ChannelChat.vue'
 import VideoGrid from './VideoGrid.vue'
 import WelcomePage from './WelcomePage.vue'
 import { BKEN_SCHEME } from './constants'
+import { usePanelWidth } from './composables/usePanelWidth'
 import type { ServerEntry } from './config'
 import type { User, ChatMessage, Channel, ConnectPayload, VideoState } from './types'
 
@@ -15,7 +16,6 @@ const props = defineProps<{
   voiceConnected: boolean
   reconnecting: boolean
   connectedAddr: string
-  connectError: string
   startupAddr: string
   globalUsername: string
   serverName: string
@@ -28,7 +28,6 @@ const props = defineProps<{
   speakingUsers: Set<number>
   unreadCounts: Record<number, number>
   videoStates: Record<number, VideoState>
-  recordingChannels: Record<number, { recording: boolean; startedBy: string }>
   typingUsers: Record<number, { username: string; channelId: number; expiresAt: number }>
   messageDensity: 'compact' | 'default' | 'comfortable'
   showSystemMessages: boolean
@@ -64,6 +63,8 @@ const emit = defineEmits<{
   startScreenShare: []
   stopScreenShare: []
 }>()
+
+const { gridCols, setPanelWidth } = usePanelWidth()
 
 const muted = ref(false)
 const deafened = ref(false)
@@ -190,17 +191,37 @@ onBeforeUnmount(() => {
 function handleSendMessage(message: string): void {
   emit('sendChannelChat', selectedChannelId.value, message)
 }
+
+// --- Panel resize ---
+const SIDEBAR_WIDTH = 64
+const resizing = ref(false)
+
+function onResizeStart(e: MouseEvent): void {
+  e.preventDefault()
+  resizing.value = true
+  document.addEventListener('mousemove', onResizeMove)
+  document.addEventListener('mouseup', onResizeEnd)
+}
+
+function onResizeMove(e: MouseEvent): void {
+  setPanelWidth(e.clientX - SIDEBAR_WIDTH)
+}
+
+function onResizeEnd(): void {
+  resizing.value = false
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+}
 </script>
 
 <template>
-  <div class="grid grid-cols-[64px_minmax(220px,280px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0">
+  <div class="grid grid-rows-[minmax(0,1fr)] h-full min-h-0" :style="{ gridTemplateColumns: gridCols }">
     <Sidebar
       class="col-start-1 row-start-1 min-h-0"
       :active-server-addr="selectedServerAddr"
       :connected-addr="connectedAddr"
       :connected="connected"
       :voice-connected="voiceConnected"
-      :connect-error="connectError"
       :startup-addr="startupAddr"
       :global-username="globalUsername"
       @select-server="handleSelectServer"
@@ -211,7 +232,7 @@ function handleSendMessage(message: string): void {
 
     <template v-if="connected">
       <ServerChannels
-        class="col-start-2 row-start-1 min-h-0 border-r border-base-content/10 bg-base-100"
+        class="col-start-2 row-start-1 min-h-0 bg-base-100"
         :channels="channels"
         :users="users"
         :user-channels="userChannels"
@@ -223,11 +244,9 @@ function handleSendMessage(message: string): void {
         :voice-connected="voiceConnected"
         :video-active="videoActive"
         :screen-sharing="screenSharing"
-        :connect-error="connectError"
         :is-owner="isOwner"
         :owner-id="ownerId"
         :unread-counts="unreadCounts"
-        :recording-channels="recordingChannels"
         :muted="muted"
         :deafened="deafened"
         :user-voice-flags="userVoiceFlags"
@@ -243,6 +262,13 @@ function handleSendMessage(message: string): void {
         @leave-voice="handleDisconnectVoice"
         @mute-toggle="handleMuteToggle"
         @deafen-toggle="handleDeafenToggle"
+      />
+
+      <!-- Resize handle between columns 2 and 3 -->
+      <div
+        class="col-start-2 row-start-1 w-1 justify-self-end z-10 cursor-col-resize transition-colors hover:bg-primary/30"
+        :class="{ 'bg-primary/30': resizing }"
+        @mousedown="onResizeStart"
       />
 
       <div class="col-start-3 row-start-1 min-h-0 flex flex-col">
@@ -285,7 +311,6 @@ function handleSendMessage(message: string): void {
       class="col-[2/span_2] row-start-1 min-h-0"
       :servers="servers"
       :global-username="globalUsername"
-      :connect-error="connectError"
       :startup-addr="startupAddr"
       @connect="emit('connect', $event)"
     />

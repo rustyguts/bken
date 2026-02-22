@@ -17,11 +17,9 @@ describe('ServerChannels', () => {
     selectedChannelId: 1,
     serverName: 'Test Server',
     speakingUsers: new Set<number>(),
-    connectError: '',
     isOwner: false,
     ownerId: 0,
     unreadCounts: {} as Record<number, number>,
-    recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
     voiceConnected: false,
     videoActive: false,
     screenSharing: false,
@@ -100,14 +98,6 @@ describe('ServerChannels', () => {
     const channelLink = w.find('a.group')
     await channelLink.trigger('click')
     expect(w.emitted('select')).toBeDefined()
-  })
-
-  it('shows connect error when present', () => {
-    const w = mount(ServerChannels, {
-      props: { ...baseProps, connectError: 'Connection failed' },
-      ...stubs,
-    })
-    expect(w.text()).toContain('Connection failed')
   })
 
   it('keeps channel text basic and shows green audio icon when channel has users', () => {
@@ -215,17 +205,6 @@ describe('ServerChannels', () => {
       ...stubs,
     })
     expect(w.text()).toContain('3')
-  })
-
-  it('shows recording indicator', () => {
-    const w = mount(ServerChannels, {
-      props: {
-        ...baseProps,
-        recordingChannels: { 1: { recording: true, startedBy: 'Admin' } },
-      },
-      ...stubs,
-    })
-    expect(w.text()).toContain('REC')
   })
 
   it('emits join when Join button is clicked', async () => {

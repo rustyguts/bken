@@ -52,7 +52,6 @@ const defaultChannelViewProps = () => ({
   voiceConnected: false,
   reconnecting: false,
   connectedAddr: '',
-  connectError: '',
   startupAddr: '',
   globalUsername: 'TestUser',
   serverName: 'Test Server',
@@ -65,7 +64,6 @@ const defaultChannelViewProps = () => ({
   speakingUsers: new Set<number>(),
   unreadCounts: {} as Record<number, number>,
   videoStates: {} as Record<number, VideoState>,
-  recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
   typingUsers: {} as Record<number, { username: string; channelId: number; expiresAt: number }>,
   messageDensity: 'default' as const,
   showSystemMessages: true,
@@ -100,11 +98,9 @@ const defaultServerChannelsProps = () => ({
   voiceConnected: false,
   videoActive: false,
   screenSharing: false,
-  connectError: '',
   isOwner: false,
   unreadCounts: {} as Record<number, number>,
   ownerId: 0,
-  recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
   muted: false,
   deafened: false,
   userVoiceFlags: {} as Record<number, { muted: boolean; deafened: boolean }>,
@@ -340,11 +336,10 @@ describe('Voice Flow', () => {
         voiceConnected: true,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: false,
         unreadCounts: {},
         ownerId: 0,
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -373,11 +368,10 @@ describe('Voice Flow', () => {
         voiceConnected: true,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: false,
         unreadCounts: {},
         ownerId: 0,
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -405,11 +399,10 @@ describe('Voice Flow', () => {
         voiceConnected: true,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: false,
         unreadCounts: {},
         ownerId: 0,
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -437,11 +430,10 @@ describe('Voice Flow', () => {
         voiceConnected: false,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: false,
         unreadCounts: {},
         ownerId: 0,
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -642,83 +634,7 @@ describe('Mention Flow', () => {
 })
 
 // ===========================================================================
-// 7. Reply Flow
-// ===========================================================================
-describe('Reply Flow', () => {
-  it('shows reply bar when Reply is clicked and sends with reply context', async () => {
-    const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 2, username: 'Bob', message: 'Reply to me' })
-    const wrapper = mount(ChannelChat, {
-      props: { ...defaultChannelChatProps(), messages: [msg] },
-    })
-    await flush()
-
-    // Click Reply button
-    const replyBtn = wrapper.find('button[title="Reply"]')
-    expect(replyBtn.exists()).toBe(true)
-    await replyBtn.trigger('click')
-    await nextTick()
-
-    // Reply bar should appear
-    expect(wrapper.text()).toContain('Replying to')
-    expect(wrapper.text()).toContain('Bob')
-
-    // Type and send a reply
-    const input = wrapper.find('footer input[type="text"]')
-    await input.setValue('My reply')
-    await input.trigger('keydown', { key: 'Enter' })
-
-    const sent = wrapper.emitted('send')
-    expect(sent).toBeTruthy()
-    expect(sent![0][0]).toBe('My reply')
-
-    // Reply bar should be dismissed after sending
-    await nextTick()
-    expect(wrapper.text()).not.toContain('Replying to')
-  })
-
-  it('cancel reply hides the reply bar', async () => {
-    const msg = makeChatMsg({ id: 1, msgId: 10, senderId: 2, username: 'Bob', message: 'Reply target' })
-    const wrapper = mount(ChannelChat, {
-      props: { ...defaultChannelChatProps(), messages: [msg] },
-    })
-    await flush()
-
-    const replyBtn = wrapper.find('button[title="Reply"]')
-    await replyBtn.trigger('click')
-    await nextTick()
-
-    expect(wrapper.text()).toContain('Replying to')
-
-    // Use the x button in the reply bar
-    const replyBar = wrapper.find('.alert-info')
-    const xBtn = replyBar.find('.btn-square')
-    await xBtn.trigger('click')
-    await nextTick()
-
-    expect(wrapper.text()).not.toContain('Replying to')
-  })
-
-  it('shows reply preview above replied message', async () => {
-    const msg = makeChatMsg({
-      id: 1,
-      msgId: 10,
-      senderId: 2,
-      username: 'Bob',
-      message: 'My reply',
-      replyPreview: { msg_id: 5, username: 'Alice', message: 'Original text' },
-    })
-    const wrapper = mount(ChannelChat, {
-      props: { ...defaultChannelChatProps(), messages: [msg] },
-    })
-    await flush()
-
-    expect(wrapper.text()).toContain('Alice')
-    expect(wrapper.text()).toContain('Original text')
-  })
-})
-
-// ===========================================================================
-// 8. Search Flow
+// 7. Search Flow (renumbered from 8)
 // ===========================================================================
 describe('Search Flow', () => {
   it('opens search, filters messages, and shows results', async () => {
@@ -1112,11 +1028,10 @@ describe('User Management', () => {
         voiceConnected: false,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: true,
         ownerId: 1,
         unreadCounts: {},
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -1165,11 +1080,10 @@ describe('User Management', () => {
         voiceConnected: false,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: true,
         ownerId: 1,
         unreadCounts: {},
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -1535,11 +1449,10 @@ describe('ServerChannels - Create Channel', () => {
         voiceConnected: false,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: true,
         ownerId: 1,
         unreadCounts: {},
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -1582,11 +1495,10 @@ describe('ServerChannels - Create Channel', () => {
         voiceConnected: false,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: false,
         ownerId: 2,
         unreadCounts: {},
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -1608,7 +1520,7 @@ describe('Sidebar - Settings', () => {
         connectedAddr: '',
         connected: true,
         voiceConnected: true,
-        connectError: '',
+
         startupAddr: '',
         globalUsername: 'TestUser',
       },
@@ -1638,7 +1550,7 @@ describe('Sidebar - Username Rename', () => {
         connectedAddr: '',
         connected: true,
         voiceConnected: true,
-        connectError: '',
+
         startupAddr: '',
         globalUsername: 'OldName',
       },
@@ -1691,11 +1603,10 @@ describe('ServerChannels - Speaking Users', () => {
         voiceConnected: false,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: false,
         ownerId: 0,
         unreadCounts: {},
-        recordingChannels: {},
         muted: false,
         deafened: false,
         userVoiceFlags: {},
@@ -1728,11 +1639,10 @@ describe('Connected state channel indicators', () => {
         voiceConnected: false,
         videoActive: false,
         screenSharing: false,
-        connectError: '',
+
         isOwner: false,
         ownerId: 0,
         unreadCounts: {} as Record<number, number>,
-        recordingChannels: {} as Record<number, { recording: boolean; startedBy: string }>,
         muted: false,
         deafened: false,
         userVoiceFlags: {},

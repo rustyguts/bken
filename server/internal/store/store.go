@@ -93,11 +93,31 @@ CREATE TABLE IF NOT EXISTS messages (
 	ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(server_id, channel_id, ts);
+
+CREATE TABLE IF NOT EXISTS reactions (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	msg_id INTEGER NOT NULL,
+	user_id TEXT NOT NULL,
+	emoji TEXT NOT NULL,
+	created_at_unix_ms INTEGER NOT NULL,
+	UNIQUE(msg_id, user_id, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_msg ON reactions(msg_id);
 `
 
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("run sqlite migrations: %w", err)
 	}
+
+	// Add file columns to messages (idempotent — ignore errors for already-existing columns).
+	for _, stmt := range []string{
+		`ALTER TABLE messages ADD COLUMN file_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN file_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0`,
+	} {
+		_, _ = s.db.ExecContext(ctx, stmt)
+	}
+
 	slog.Debug("sqlite migrations applied")
 	return nil
 }
@@ -158,12 +178,15 @@ type MessageRow struct {
 	Username  string
 	Message   string
 	TS        int64
+	FileID    string
+	FileName  string
+	FileSize  int64
 }
 
 // InsertMessage persists a chat message and returns the assigned ID.
-func (s *Store) InsertMessage(ctx context.Context, serverID, channelID, userID, username, message string, ts int64) (int64, error) {
-	const q = `INSERT INTO messages (server_id, channel_id, user_id, username, message, ts) VALUES (?, ?, ?, ?, ?, ?)`
-	result, err := s.db.ExecContext(ctx, q, serverID, channelID, userID, username, message, ts)
+func (s *Store) InsertMessage(ctx context.Context, serverID, channelID, userID, username, message string, ts int64, fileID, fileName string, fileSize int64) (int64, error) {
+	const q = `INSERT INTO messages (server_id, channel_id, user_id, username, message, ts, file_id, file_name, file_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	result, err := s.db.ExecContext(ctx, q, serverID, channelID, userID, username, message, ts, fileID, fileName, fileSize)
 	if err != nil {
 		return 0, fmt.Errorf("insert message: %w", err)
 	}
@@ -178,7 +201,7 @@ func (s *Store) GetMessages(ctx context.Context, serverID, channelID string, lim
 		limit = 50
 	}
 	const q = `
-SELECT id, server_id, channel_id, user_id, username, message, ts
+SELECT id, server_id, channel_id, user_id, username, message, ts, file_id, file_name, file_size
 FROM messages
 WHERE server_id = ? AND channel_id = ?
 ORDER BY ts DESC, id DESC
@@ -193,7 +216,7 @@ LIMIT ?
 	var msgs []MessageRow
 	for rows.Next() {
 		var m MessageRow
-		if err := rows.Scan(&m.ID, &m.ServerID, &m.ChannelID, &m.UserID, &m.Username, &m.Message, &m.TS); err != nil {
+		if err := rows.Scan(&m.ID, &m.ServerID, &m.ChannelID, &m.UserID, &m.Username, &m.Message, &m.TS, &m.FileID, &m.FileName, &m.FileSize); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		msgs = append(msgs, m)
@@ -204,6 +227,62 @@ LIMIT ?
 	}
 	slog.Debug("messages loaded", "server_id", serverID, "channel_id", channelID, "count", len(msgs))
 	return msgs, rows.Err()
+}
+
+// ReactionRow is a single reaction record.
+type ReactionRow struct {
+	MsgID  int64
+	UserID string
+	Emoji  string
+}
+
+// AddReaction persists a reaction (idempotent — duplicate is ignored).
+func (s *Store) AddReaction(ctx context.Context, msgID int64, userID, emoji string) error {
+	const q = `INSERT OR IGNORE INTO reactions (msg_id, user_id, emoji, created_at_unix_ms) VALUES (?, ?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, q, msgID, userID, emoji, time.Now().UnixMilli())
+	if err != nil {
+		return fmt.Errorf("insert reaction: %w", err)
+	}
+	return nil
+}
+
+// RemoveReaction deletes a reaction.
+func (s *Store) RemoveReaction(ctx context.Context, msgID int64, userID, emoji string) error {
+	const q = `DELETE FROM reactions WHERE msg_id = ? AND user_id = ? AND emoji = ?`
+	_, err := s.db.ExecContext(ctx, q, msgID, userID, emoji)
+	if err != nil {
+		return fmt.Errorf("delete reaction: %w", err)
+	}
+	return nil
+}
+
+// GetReactionsForMessages returns reactions grouped by message ID.
+func (s *Store) GetReactionsForMessages(ctx context.Context, msgIDs []int64) (map[int64][]ReactionRow, error) {
+	if len(msgIDs) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(msgIDs))
+	args := make([]any, len(msgIDs))
+	for i, id := range msgIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := `SELECT msg_id, user_id, emoji FROM reactions WHERE msg_id IN (` + strings.Join(placeholders, ",") + `) ORDER BY id`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query reactions: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[int64][]ReactionRow)
+	for rows.Next() {
+		var r ReactionRow
+		if err := rows.Scan(&r.MsgID, &r.UserID, &r.Emoji); err != nil {
+			return nil, fmt.Errorf("scan reaction: %w", err)
+		}
+		result[r.MsgID] = append(result[r.MsgID], r)
+	}
+	return result, rows.Err()
 }
 
 // BlobByID returns blob metadata by UUID.

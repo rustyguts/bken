@@ -2,9 +2,9 @@
 import { computed, ref, nextTick } from 'vue'
 import type { Channel, User } from './types'
 import UserProfilePopup from './UserProfilePopup.vue'
-import { SetUserVolume, GetUserVolume, StartRecording, StopRecording, RenameServer } from './config'
+import { SetUserVolume, GetUserVolume, RenameServer } from './config'
 import { BKEN_SCHEME } from './constants'
-import { Volume2, VolumeX, Mic, MicOff, Plus, Settings, Check, Square, Circle, ChevronDown, Video, Monitor, PhoneOff, AudioLines } from 'lucide-vue-next'
+import { Volume2, VolumeX, Mic, MicOff, Plus, Settings, Check, ChevronDown, Video, Monitor, PhoneOff, AudioLines, Hash } from 'lucide-vue-next'
 
 const props = defineProps<{
   channels: Channel[]
@@ -18,11 +18,9 @@ const props = defineProps<{
   voiceConnected: boolean
   videoActive: boolean
   screenSharing: boolean
-  connectError: string
   isOwner: boolean
   unreadCounts: Record<number, number>
   ownerId: number
-  recordingChannels: Record<number, { recording: boolean; startedBy: string }>
   muted: boolean
   deafened: boolean
   userVoiceFlags: Record<number, { muted: boolean; deafened: boolean }>
@@ -332,23 +330,10 @@ function handleDragEnd(): void {
   dragOverChannelId.value = null
 }
 
-// Recording
-function isChannelRecording(channelId: number): boolean {
-  return !!props.recordingChannels[channelId]?.recording
-}
-
-async function toggleRecording(channelId: number, event: MouseEvent): Promise<void> {
-  event.stopPropagation()
-  if (isChannelRecording(channelId)) {
-    await StopRecording(channelId)
-  } else {
-    await StartRecording(channelId)
-  }
-}
 </script>
 
 <template>
-  <section class="flex flex-col h-full min-h-0 " @click="closeContextMenu(); closeUserContextMenu()">
+  <section class="flex flex-col h-full min-h-0 border-r border-base-content/10" @click="closeContextMenu(); closeUserContextMenu()">
     <div class="border-b border-base-content/10 px-2 h-12 flex items-center shrink-0">
       <div class="dropdown dropdown-bottom w-full">
         <div tabindex="0" role="button" class="btn btn-ghost btn-sm w-full justify-between px-2 normal-case">
@@ -375,10 +360,6 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
           </li>
         </ul>
       </div>
-    </div>
-
-    <div v-if="connectError" role="alert" class="alert alert-error alert-sm mx-2 mt-2 text-xs py-2">
-      {{ connectError }}
     </div>
 
     <ul class="w-full menu menu-sm flex-1 min-h-0 overflow-y-auto px-2 py-1 gap-0.5">
@@ -433,30 +414,13 @@ async function toggleRecording(channelId: number, event: MouseEvent): Promise<vo
               class="w-3.5 h-3.5 shrink-0 text-success"
               aria-hidden="true"
             />
-            <span v-else class="text-base-content/40 font-bold text-xs shrink-0">#</span>
+            <Hash
+              v-else 
+              class="w-3.5 h-3.5 shrink-0"
+              aria-hidden="true"
+            />
 
             <span class="truncate flex-1">{{ channel.name }}</span>
-
-            <!-- Recording indicator -->
-            <span
-              v-if="isChannelRecording(channel.id)"
-              class="badge badge-xs badge-error gap-0.5 animate-pulse"
-              title="Recording in progress"
-            >
-              REC
-            </span>
-
-            <!-- Recording toggle (owner only) -->
-            <button
-              v-if="isOwner"
-              class="btn btn-ghost btn-xs p-0 w-4 h-4 transition-opacity"
-              :class="isChannelRecording(channel.id) ? 'text-error opacity-100' : 'opacity-0 group-hover:opacity-40 hover:!opacity-100'"
-              :title="isChannelRecording(channel.id) ? 'Stop recording' : 'Start recording'"
-              @click="toggleRecording(channel.id, $event)"
-            >
-              <Square v-if="isChannelRecording(channel.id)" class="w-3 h-3" aria-hidden="true" />
-              <Circle v-else class="w-3 h-3" aria-hidden="true" />
-            </button>
 
             <span
               v-if="unreadCounts[channel.id]"

@@ -123,7 +123,7 @@ describe('ChannelChat', () => {
 
   it('emits send when Enter is pressed in the input', async () => {
     const w = mount(ChannelChat, { props: baseProps })
-    const input = w.find('input[type="text"][maxlength="500"]')
+    const input = w.find('input[type="text"][maxlength="1024"]')
     await input.setValue('Hello')
     await input.trigger('keydown', { key: 'Enter' })
     expect(w.emitted('send')).toEqual([['Hello']])
@@ -131,7 +131,7 @@ describe('ChannelChat', () => {
 
   it('does not emit send for empty input', async () => {
     const w = mount(ChannelChat, { props: baseProps })
-    const input = w.find('input[type="text"][maxlength="500"]')
+    const input = w.find('input[type="text"][maxlength="1024"]')
     await input.setValue('  ')
     await input.trigger('keydown', { key: 'Enter' })
     expect(w.emitted('send')).toBeUndefined()
@@ -139,7 +139,7 @@ describe('ChannelChat', () => {
 
   it('clears input after sending', async () => {
     const w = mount(ChannelChat, { props: baseProps })
-    const input = w.find('input[type="text"][maxlength="500"]')
+    const input = w.find('input[type="text"][maxlength="1024"]')
     await input.setValue('Hello')
     await input.trigger('keydown', { key: 'Enter' })
     expect((input.element as HTMLInputElement).value).toBe('')
@@ -147,13 +147,13 @@ describe('ChannelChat', () => {
 
   it('disables input when not connected', () => {
     const w = mount(ChannelChat, { props: { ...baseProps, connected: false } })
-    const input = w.find('input[type="text"][maxlength="500"]')
+    const input = w.find('input[type="text"][maxlength="1024"]')
     expect(input.attributes('disabled')).toBeDefined()
   })
 
   it('shows placeholder with channel name', () => {
     const w = mount(ChannelChat, { props: baseProps })
-    const input = w.find('input[type="text"][maxlength="500"]')
+    const input = w.find('input[type="text"][maxlength="1024"]')
     expect(input.attributes('placeholder')).toContain('Message #General')
   })
 
@@ -285,18 +285,6 @@ describe('ChannelChat', () => {
     // The mention highlight adds a bg-warning class container
     const mentionArticle = w.find('.bg-warning\\/10')
     expect(mentionArticle.exists()).toBe(true)
-  })
-
-  it('reply preview shows original message info', () => {
-    const messages = [
-      makeMsg({
-        replyTo: 50,
-        replyPreview: { msg_id: 50, username: 'Bob', message: 'Original msg' },
-      }),
-    ]
-    const w = mount(ChannelChat, { props: { ...baseProps, messages } })
-    expect(w.text()).toContain('Bob')
-    expect(w.text()).toContain('Original msg')
   })
 
   it('respects compact density', () => {

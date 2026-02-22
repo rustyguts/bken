@@ -9,7 +9,6 @@ import { Server, X } from 'lucide-vue-next'
 const props = defineProps<{
   servers: ServerEntry[]
   globalUsername: string
-  connectError: string
   startupAddr: string
 }>()
 
@@ -92,9 +91,6 @@ watch(() => props.startupAddr, (addr) => {
   }
 }, { immediate: true })
 
-watch(() => props.connectError, (msg) => {
-  if (msg) connectingAddr.value = ''
-})
 </script>
 
 <template>
@@ -161,8 +157,7 @@ watch(() => props.connectError, (msg) => {
           </button>
         </fieldset>
 
-        <div v-if="connectError" role="alert" class="alert alert-error text-sm">{{ connectError }}</div>
-        <div v-else-if="error" role="alert" class="alert alert-error text-sm">{{ error }}</div>
+        <div v-if="error" role="alert" class="alert alert-error text-sm">{{ error }}</div>
       </div>
     </div>
   </div>

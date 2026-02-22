@@ -309,8 +309,8 @@ export class BrowserTransport {
         const senderId = msg.user?.id
           ? this.translateId(msg.user.id)
           : 0
-        this.eventBus.EventsEmit('chat:message', {
-          username: msg.username,
+        const payload: Record<string, any> = {
+          username: msg.user?.username || msg.username,
           message: msg.message,
           ts: msg.ts,
           channel_id: msg.channel_id
@@ -318,6 +318,33 @@ export class BrowserTransport {
             : 0,
           msg_id: msg.msg_id || 0,
           sender_id: senderId,
+        }
+        if (msg.file_id) {
+          payload.file_id = msg.file_id
+          payload.file_name = msg.file_name
+          payload.file_size = msg.file_size
+          payload.file_url = `/api/blobs/${msg.file_id}`
+        }
+        this.eventBus.EventsEmit('chat:message', payload)
+        break
+      }
+
+      case 'reaction_added': {
+        const localId = msg.user_id ? this.translateId(msg.user_id) : 0
+        this.eventBus.EventsEmit('chat:reaction_added', {
+          msg_id: msg.msg_id,
+          emoji: msg.emoji,
+          id: localId,
+        })
+        break
+      }
+
+      case 'reaction_removed': {
+        const localId = msg.user_id ? this.translateId(msg.user_id) : 0
+        this.eventBus.EventsEmit('chat:reaction_removed', {
+          msg_id: msg.msg_id,
+          emoji: msg.emoji,
+          id: localId,
         })
         break
       }
@@ -331,6 +358,15 @@ export class BrowserTransport {
           username: m.username,
           message: m.message,
           ts: m.ts,
+          reactions: m.reactions?.map((rx: any) => ({
+            emoji: rx.emoji,
+            user_ids: (rx.user_ids || []).map((uid: string) => this.translateId(uid)),
+            count: rx.count,
+          })),
+          file_id: m.file_id,
+          file_name: m.file_name,
+          file_size: m.file_size,
+          file_url: m.file_id ? `/api/blobs/${m.file_id}` : undefined,
         }))
         this.eventBus.EventsEmit('chat:history', {
           channel_id: channelId,
@@ -454,7 +490,6 @@ export class BrowserTransport {
       SetDeafened: () => Promise.resolve(),
       SetAEC: () => Promise.resolve(),
       SetAGC: () => Promise.resolve(),
-      SetAGCLevel: () => Promise.resolve(),
       SetAudioBitrate: () => Promise.resolve(),
       GetAudioBitrate: () => Promise.resolve(32),
       GetInputLevel: () => Promise.resolve(0),
@@ -474,19 +509,51 @@ export class BrowserTransport {
       RenameChannel: () => Promise.resolve(''),
       DeleteChannel: () => Promise.resolve(''),
       MoveUserToChannel: () => Promise.resolve(''),
-      UploadFile: () => Promise.resolve(''),
+      UploadFile: (channelID: number) => {
+        return new Promise<string>((resolve) => {
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.onchange = async () => {
+            const file = input.files?.[0]
+            if (!file) { resolve(''); return }
+            const form = new FormData()
+            form.append('file', file)
+            try {
+              const resp = await fetch(`http://${self.serverAddr}/api/upload`, { method: 'POST', body: form })
+              if (!resp.ok) { resolve(`upload failed (${resp.status})`); return }
+              const data = await resp.json()
+              self.send({
+                type: 'send_text',
+                server_id: self.serverAddr,
+                channel_id: String(channelID),
+                message: '',
+                file_id: data.id,
+                file_name: data.original_name,
+                file_size: data.size_bytes,
+              })
+              resolve('')
+            } catch (e: any) {
+              resolve(e.message || 'upload failed')
+            }
+          }
+          input.click()
+        })
+      },
       UploadFileFromPath: () => Promise.resolve(''),
       EditMessage: () => Promise.resolve(''),
       DeleteMessage: () => Promise.resolve(''),
-      AddReaction: () => Promise.resolve(''),
-      RemoveReaction: () => Promise.resolve(''),
-      SendTyping: () => Promise.resolve(''),
+      AddReaction: (msgID: number, emoji: string) => {
+        self.send({ type: 'add_reaction', msg_id: msgID, emoji })
+        return Promise.resolve('')
+      },
+      RemoveReaction: (msgID: number, emoji: string) => {
+        self.send({ type: 'remove_reaction', msg_id: msgID, emoji })
+        return Promise.resolve('')
+      },
       StartVideo: () => Promise.resolve(''),
       StopVideo: () => Promise.resolve(''),
       StartScreenShare: () => Promise.resolve(''),
       StopScreenShare: () => Promise.resolve(''),
-      StartRecording: () => Promise.resolve(''),
-      StopRecording: () => Promise.resolve(''),
       RequestVideoQuality: () => Promise.resolve(''),
       GetInputDevices: () => Promise.resolve([]),
       GetOutputDevices: () => Promise.resolve([]),
@@ -502,7 +569,6 @@ export class BrowserTransport {
           self.ws !== null && self.ws.readyState === WebSocket.OPEN,
         ),
       SetNoiseSuppression: () => Promise.resolve(),
-      SetNoiseSuppressionLevel: () => Promise.resolve(),
     }
   }
 }

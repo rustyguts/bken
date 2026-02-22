@@ -157,6 +157,14 @@ func (r *ChannelState) ConnectServer(userID, serverID string) (protocol.User, bo
 	_, existed := u.connected[serverID]
 	u.connected[serverID] = struct{}{}
 
+	// Seed a default "General" channel when the first user connects to a
+	// server that has no channels yet.
+	if len(r.channels[serverID]) == 0 {
+		id := r.nextChID.Add(1)
+		r.channels[serverID] = []protocol.Channel{{ID: id, Name: "General"}}
+		slog.Info("default channel created", "server_id", serverID, "channel_id", id)
+	}
+
 	slog.Debug("server connected", "user_id", userID, "server_id", serverID, "new", !existed)
 	return toProtocolUser(u), !existed, nil
 }

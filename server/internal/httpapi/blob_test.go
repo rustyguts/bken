@@ -39,18 +39,18 @@ func TestBlobUploadAndDownload(t *testing.T) {
 	ts := httptest.NewServer(api.Echo())
 	t.Cleanup(ts.Close)
 
-	wantBytes := []byte("blob-bytes-for-recording")
+	wantBytes := []byte("blob-bytes-for-test")
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	filePart, err := writer.CreateFormFile("file", "recording.ogg")
+	filePart, err := writer.CreateFormFile("file", "test.bin")
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
 	if _, err := filePart.Write(wantBytes); err != nil {
 		t.Fatalf("write multipart bytes: %v", err)
 	}
-	if err := writer.WriteField("kind", "recording"); err != nil {
+	if err := writer.WriteField("kind", "attachment"); err != nil {
 		t.Fatalf("write kind field: %v", err)
 	}
 	if err := writer.Close(); err != nil {
@@ -80,8 +80,8 @@ func TestBlobUploadAndDownload(t *testing.T) {
 	if uploaded.ID == "" {
 		t.Fatal("expected uploaded id")
 	}
-	if uploaded.Kind != "recording" {
-		t.Fatalf("expected kind=recording, got %q", uploaded.Kind)
+	if uploaded.Kind != "attachment" {
+		t.Fatalf("expected kind=attachment, got %q", uploaded.Kind)
 	}
 	if uploaded.SizeBytes != int64(len(wantBytes)) {
 		t.Fatalf("expected size=%d, got %d", len(wantBytes), uploaded.SizeBytes)
@@ -94,7 +94,7 @@ func TestBlobUploadAndDownload(t *testing.T) {
 	if meta.DiskName != uploaded.ID {
 		t.Fatalf("expected uuid disk filename %q, got %q", uploaded.ID, meta.DiskName)
 	}
-	if meta.OriginalName != "recording.ogg" {
+	if meta.OriginalName != "test.bin" {
 		t.Fatalf("unexpected original name %q", meta.OriginalName)
 	}
 

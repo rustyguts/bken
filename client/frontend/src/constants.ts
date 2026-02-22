@@ -10,3 +10,6 @@ export const LAST_CONNECTED_ADDR_KEY = 'bken:last-connected-addr'
 
 /** localStorage key for the currently-applied DaisyUI theme name. */
 export const THEME_STORAGE_KEY = 'bken-theme'
+
+/** localStorage key for the resizable server-channels panel width. */
+export const PANEL_WIDTH_KEY = 'bken:panel-width'

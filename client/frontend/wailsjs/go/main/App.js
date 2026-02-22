@@ -162,20 +162,12 @@ export function SendChat(arg1) {
   return window['go']['main']['App']['SendChat'](arg1);
 }
 
-export function SendTyping(arg1) {
-  return window['go']['main']['App']['SendTyping'](arg1);
-}
-
 export function SetAEC(arg1) {
   return window['go']['main']['App']['SetAEC'](arg1);
 }
 
 export function SetAGC(arg1) {
   return window['go']['main']['App']['SetAGC'](arg1);
-}
-
-export function SetAGCLevel(arg1) {
-  return window['go']['main']['App']['SetAGCLevel'](arg1);
 }
 
 export function SetAudioBitrate(arg1) {
@@ -198,10 +190,6 @@ export function SetNoiseSuppression(arg1) {
   return window['go']['main']['App']['SetNoiseSuppression'](arg1);
 }
 
-export function SetNoiseSuppressionLevel(arg1) {
-  return window['go']['main']['App']['SetNoiseSuppressionLevel'](arg1);
-}
-
 export function SetNotificationVolume(arg1) {
   return window['go']['main']['App']['SetNotificationVolume'](arg1);
 }
@@ -222,10 +210,6 @@ export function SetVolume(arg1) {
   return window['go']['main']['App']['SetVolume'](arg1);
 }
 
-export function StartRecording(arg1) {
-  return window['go']['main']['App']['StartRecording'](arg1);
-}
-
 export function StartScreenShare() {
   return window['go']['main']['App']['StartScreenShare']();
 }
@@ -236,10 +220,6 @@ export function StartTest() {
 
 export function StartVideo() {
   return window['go']['main']['App']['StartVideo']();
-}
-
-export function StopRecording(arg1) {
-  return window['go']['main']['App']['StopRecording'](arg1);
 }
 
 export function StopScreenShare() {

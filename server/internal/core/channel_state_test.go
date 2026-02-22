@@ -167,19 +167,16 @@ func TestCreateChannelLifecycle(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 
-	// Create a channel.
-	chs, err := r.CreateChannel("srv-1", "general")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if len(chs) != 1 || chs[0].Name != "general" {
-		t.Fatalf("unexpected channels after create: %#v", chs)
+	// ConnectServer seeds a default "General" channel.
+	chs := r.Channels("srv-1")
+	if len(chs) != 1 || chs[0].Name != "General" {
+		t.Fatalf("expected seeded General channel, got %#v", chs)
 	}
 
-	// Create a second channel.
+	// Create an additional channel.
 	chs, err = r.CreateChannel("srv-1", "voice")
 	if err != nil {
-		t.Fatalf("create second: %v", err)
+		t.Fatalf("create: %v", err)
 	}
 	if len(chs) != 2 {
 		t.Fatalf("expected 2 channels, got %d", len(chs))
@@ -348,6 +345,41 @@ func TestDisconnectVoice_ResetsFlags(t *testing.T) {
 	}
 	if user.Voice.Muted || user.Voice.Deafened {
 		t.Fatalf("expected flags reset after disconnect, got muted=%v deafened=%v", user.Voice.Muted, user.Voice.Deafened)
+	}
+}
+
+func TestConnectServerSeedsDefaultChannel(t *testing.T) {
+	r := NewChannelState("")
+	s, _, err := r.Add("alice", 8)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	// Before connecting, no channels exist.
+	if chs := r.Channels("srv-1"); len(chs) != 0 {
+		t.Fatalf("expected no channels before connect, got %d", len(chs))
+	}
+
+	// First connection to a server seeds a default "General" channel.
+	if _, _, err := r.ConnectServer(s.UserID, "srv-1"); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	chs := r.Channels("srv-1")
+	if len(chs) != 1 || chs[0].Name != "General" {
+		t.Fatalf("expected one General channel, got %#v", chs)
+	}
+
+	// A second user connecting to the same server does not duplicate.
+	s2, _, err := r.Add("bob", 8)
+	if err != nil {
+		t.Fatalf("add bob: %v", err)
+	}
+	if _, _, err := r.ConnectServer(s2.UserID, "srv-1"); err != nil {
+		t.Fatalf("bob connect: %v", err)
+	}
+	chs = r.Channels("srv-1")
+	if len(chs) != 1 {
+		t.Fatalf("expected still one channel after second connect, got %d", len(chs))
 	}
 }
 

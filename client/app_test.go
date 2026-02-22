@@ -46,7 +46,6 @@ type mockTransport struct {
 		msgID uint64
 		emoji string
 	}
-	typingSent      []int64
 	kickedUsers     []uint16
 	renamedUsers    []string
 	renamedServers  []string
@@ -62,15 +61,15 @@ type mockTransport struct {
 		channelID int64
 	}
 	videoStates      []struct{ active, screenShare bool }
-	recordingsStart  []int64
-	recordingsStop   []int64
 	videoQualityReqs []struct {
 		targetID uint16
 		quality  string
 	}
 	fileChatsSent []struct {
-		channelID, fileID, fileSize int64
-		fileName, message           string
+		channelID int64
+		fileID    string
+		fileSize  int64
+		fileName, message string
 	}
 
 	// Configurable error returns
@@ -80,7 +79,6 @@ type mockTransport struct {
 	deleteMessageErr    error
 	addReactionErr      error
 	removeReactionErr   error
-	sendTypingErr       error
 	kickUserErr         error
 	renameUserErr       error
 	renameServerErr     error
@@ -90,8 +88,6 @@ type mockTransport struct {
 	deleteChannelErr    error
 	moveUserErr         error
 	sendVideoStateErr   error
-	startRecordingErr   error
-	stopRecordingErr    error
 	requestVideoQualErr error
 	sendFileChatErr     error
 
@@ -101,8 +97,8 @@ type mockTransport struct {
 	onUserLeft           func(uint16)
 	onAudioReceived      func(uint16)
 	onDisconnected       func(reason string)
-	onChatMessage        func(uint64, uint16, string, string, int64, int64, string, int64, []uint16, uint64, *ReplyPreview)
-	onChannelChatMessage func(uint64, uint16, int64, string, string, int64, int64, string, int64, []uint16, uint64, *ReplyPreview)
+	onChatMessage        func(uint64, uint16, string, string, int64, string, string, int64, []uint16)
+	onChannelChatMessage func(uint64, uint16, int64, string, string, int64, string, string, int64, []uint16)
 	onLinkPreview        func(uint64, int64, string, string, string, string, string)
 	onServerInfo         func(string)
 	onKicked             func()
@@ -118,9 +114,7 @@ type mockTransport struct {
 	onUserTyping         func(uint16, string, int64)
 	onMessagePinned      func(uint64, int64, uint16)
 	onMessageUnpinned    func(uint64)
-	onRecordingState     func(int64, bool, string)
 	onVideoLayers        func(uint16, []VideoLayer)
-	onVideoQualityReq    func(uint16, string)
 
 	// Return values
 	myIDValue     uint16
@@ -201,10 +195,10 @@ func (m *mockTransport) SetOnUserJoined(fn func(uint16, string))  { m.onUserJoin
 func (m *mockTransport) SetOnUserLeft(fn func(uint16))            { m.onUserLeft = fn }
 func (m *mockTransport) SetOnAudioReceived(fn func(uint16))       { m.onAudioReceived = fn }
 func (m *mockTransport) SetOnDisconnected(fn func(reason string)) { m.onDisconnected = fn }
-func (m *mockTransport) SetOnChatMessage(fn func(uint64, uint16, string, string, int64, int64, string, int64, []uint16, uint64, *ReplyPreview)) {
+func (m *mockTransport) SetOnChatMessage(fn func(uint64, uint16, string, string, int64, string, string, int64, []uint16)) {
 	m.onChatMessage = fn
 }
-func (m *mockTransport) SetOnChannelChatMessage(fn func(uint64, uint16, int64, string, string, int64, int64, string, int64, []uint16, uint64, *ReplyPreview)) {
+func (m *mockTransport) SetOnChannelChatMessage(fn func(uint64, uint16, int64, string, string, int64, string, string, int64, []uint16)) {
 	m.onChannelChatMessage = fn
 }
 func (m *mockTransport) SetOnLinkPreview(fn func(uint64, int64, string, string, string, string, string)) {
@@ -228,9 +222,7 @@ func (m *mockTransport) SetOnReactionRemoved(fn func(uint64, string, uint16)) {
 func (m *mockTransport) SetOnUserTyping(fn func(uint16, string, int64))    { m.onUserTyping = fn }
 func (m *mockTransport) SetOnMessagePinned(fn func(uint64, int64, uint16)) { m.onMessagePinned = fn }
 func (m *mockTransport) SetOnMessageUnpinned(fn func(uint64))              { m.onMessageUnpinned = fn }
-func (m *mockTransport) SetOnRecordingState(fn func(int64, bool, string))  { m.onRecordingState = fn }
 func (m *mockTransport) SetOnVideoLayers(fn func(uint16, []VideoLayer))    { m.onVideoLayers = fn }
-func (m *mockTransport) SetOnVideoQualityRequest(fn func(uint16, string))  { m.onVideoQualityReq = fn }
 func (m *mockTransport) SetOnMessageHistory(fn func(int64, []ChatHistoryMessage)) {}
 func (m *mockTransport) SetOnUserVoiceFlags(fn func(uint16, bool, bool))          {}
 func (m *mockTransport) SendVoiceFlags(muted, deafened bool) error                { return nil }
@@ -257,15 +249,17 @@ func (m *mockTransport) SendChannelChat(channelID int64, message string) error {
 	}{channelID, message})
 	return nil
 }
-func (m *mockTransport) SendFileChat(channelID, fileID, fileSize int64, fileName, message string) error {
+func (m *mockTransport) SendFileChat(channelID int64, fileID string, fileSize int64, fileName, message string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.sendFileChatErr != nil {
 		return m.sendFileChatErr
 	}
 	m.fileChatsSent = append(m.fileChatsSent, struct {
-		channelID, fileID, fileSize int64
-		fileName, message           string
+		channelID int64
+		fileID    string
+		fileSize  int64
+		fileName, message string
 	}{channelID, fileID, fileSize, fileName, message})
 	return nil
 }
@@ -312,15 +306,6 @@ func (m *mockTransport) RemoveReaction(msgID uint64, emoji string) error {
 		msgID uint64
 		emoji string
 	}{msgID, emoji})
-	return nil
-}
-func (m *mockTransport) SendTyping(channelID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.sendTypingErr != nil {
-		return m.sendTypingErr
-	}
-	m.typingSent = append(m.typingSent, channelID)
 	return nil
 }
 func (m *mockTransport) KickUser(id uint16) error {
@@ -408,24 +393,6 @@ func (m *mockTransport) SendVideoState(active, screenShare bool) error {
 		return m.sendVideoStateErr
 	}
 	m.videoStates = append(m.videoStates, struct{ active, screenShare bool }{active, screenShare})
-	return nil
-}
-func (m *mockTransport) StartRecording(channelID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.startRecordingErr != nil {
-		return m.startRecordingErr
-	}
-	m.recordingsStart = append(m.recordingsStart, channelID)
-	return nil
-}
-func (m *mockTransport) StopRecording(channelID int64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopRecordingErr != nil {
-		return m.stopRecordingErr
-	}
-	m.recordingsStop = append(m.recordingsStop, channelID)
 	return nil
 }
 func (m *mockTransport) RequestVideoQuality(targetID uint16, quality string) error {
@@ -731,32 +698,6 @@ func TestRemoveReactionError(t *testing.T) {
 	result := app.RemoveReaction(10, "fire")
 	if result != "not found" {
 		t.Errorf("expected 'not found', got %q", result)
-	}
-}
-
-// ===========================================================================
-// SendTyping
-// ===========================================================================
-
-func TestSendTypingSuccess(t *testing.T) {
-	app, mt := newTestApp()
-	result := app.SendTyping(5)
-	if result != "" {
-		t.Errorf("expected empty result, got %q", result)
-	}
-	mt.mu.Lock()
-	defer mt.mu.Unlock()
-	if len(mt.typingSent) != 1 || mt.typingSent[0] != 5 {
-		t.Errorf("expected typing in channel 5, got %v", mt.typingSent)
-	}
-}
-
-func TestSendTypingError(t *testing.T) {
-	app, mt := newTestApp()
-	mt.sendTypingErr = errors.New("typing error")
-	result := app.SendTyping(1)
-	if result != "typing error" {
-		t.Errorf("expected 'typing error', got %q", result)
 	}
 }
 
@@ -1074,54 +1015,6 @@ func TestStopScreenShareError(t *testing.T) {
 }
 
 // ===========================================================================
-// Recording
-// ===========================================================================
-
-func TestStartRecordingSuccess(t *testing.T) {
-	app, mt := newTestApp()
-	result := app.StartRecording(3)
-	if result != "" {
-		t.Errorf("expected empty result, got %q", result)
-	}
-	mt.mu.Lock()
-	defer mt.mu.Unlock()
-	if len(mt.recordingsStart) != 1 || mt.recordingsStart[0] != 3 {
-		t.Errorf("expected start recording in channel 3, got %v", mt.recordingsStart)
-	}
-}
-
-func TestStartRecordingError(t *testing.T) {
-	app, mt := newTestApp()
-	mt.startRecordingErr = errors.New("not owner")
-	result := app.StartRecording(1)
-	if result != "not owner" {
-		t.Errorf("expected 'not owner', got %q", result)
-	}
-}
-
-func TestStopRecordingSuccess(t *testing.T) {
-	app, mt := newTestApp()
-	result := app.StopRecording(3)
-	if result != "" {
-		t.Errorf("expected empty result, got %q", result)
-	}
-	mt.mu.Lock()
-	defer mt.mu.Unlock()
-	if len(mt.recordingsStop) != 1 || mt.recordingsStop[0] != 3 {
-		t.Errorf("expected stop recording in channel 3, got %v", mt.recordingsStop)
-	}
-}
-
-func TestStopRecordingError(t *testing.T) {
-	app, mt := newTestApp()
-	mt.stopRecordingErr = errors.New("not recording")
-	result := app.StopRecording(1)
-	if result != "not recording" {
-		t.Errorf("expected 'not recording', got %q", result)
-	}
-}
-
-// ===========================================================================
 // RequestVideoQuality
 // ===========================================================================
 
@@ -1179,11 +1072,6 @@ func TestSetAGC(t *testing.T) {
 	app, _ := newTestApp()
 	app.SetAGC(true)
 	app.SetAGC(false)
-}
-
-func TestSetAGCLevel(t *testing.T) {
-	app, _ := newTestApp()
-	app.SetAGCLevel(75)
 }
 
 func TestSetPTTMode(t *testing.T) {
@@ -1389,15 +1277,15 @@ func TestGetMetricsReturnsCache(t *testing.T) {
 func TestFileURLWithBase(t *testing.T) {
 	app, mt := newTestApp()
 	mt.apiBaseURLVal = "http://localhost:8080"
-	url := app.fileURL(123)
-	if url != "http://localhost:8080/api/files/123" {
-		t.Errorf("expected 'http://localhost:8080/api/files/123', got %q", url)
+	url := app.fileURL("abc-123")
+	if url != "http://localhost:8080/api/blobs/abc-123" {
+		t.Errorf("expected 'http://localhost:8080/api/blobs/abc-123', got %q", url)
 	}
 }
 
 func TestFileURLNoBase(t *testing.T) {
 	app, _ := newTestApp()
-	url := app.fileURL(123)
+	url := app.fileURL("abc-123")
 	if url != "" {
 		t.Errorf("expected empty URL, got %q", url)
 	}
@@ -1466,7 +1354,7 @@ func TestDisconnectVoiceError(t *testing.T) {
 func TestWireCallbacksSetsAllCallbacks(t *testing.T) {
 	app, mt := newTestApp()
 	app.ctx = context.Background() // avoid nil panic in callback bodies
-	app.wireCallbacks()
+	app.wireSessionCallbacks("test", mt)
 
 	// Verify every callback was set on the mock transport.
 	if mt.onUserList == nil {
@@ -1535,14 +1423,8 @@ func TestWireCallbacksSetsAllCallbacks(t *testing.T) {
 	if mt.onMessageUnpinned == nil {
 		t.Error("onMessageUnpinned not set")
 	}
-	if mt.onRecordingState == nil {
-		t.Error("onRecordingState not set")
-	}
 	if mt.onVideoLayers == nil {
 		t.Error("onVideoLayers not set")
-	}
-	if mt.onVideoQualityReq == nil {
-		t.Error("onVideoQualityReq not set")
 	}
 }
 

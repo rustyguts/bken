@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import App from '../App.vue'
 import { emitWailsEvent, getGoMock } from './setup'
+import { useToast } from '../composables/useToast'
 
 describe('App', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     window.location.hash = '#/'
+    useToast().clearToasts()
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -246,15 +248,6 @@ describe('App', () => {
     expect(channel.props('videoStates')[1]).toBeUndefined()
   })
 
-  it('handles recording:state event', async () => {
-    const w = mount(App)
-    await flushPromises()
-    emitWailsEvent('recording:state', { channel_id: 1, recording: true, started_by: 'Admin' })
-    await flushPromises()
-    const channel = w.findComponent({ name: 'ChannelView' })
-    expect(channel.props('recordingChannels')[1]).toEqual({ recording: true, startedBy: 'Admin' })
-  })
-
   it('handles connection:kicked event', async () => {
     const w = mount(App)
     await flushPromises()
@@ -262,7 +255,8 @@ describe('App', () => {
     await flushPromises()
     const channel = w.findComponent({ name: 'ChannelView' })
     expect(channel.props('connected')).toBe(false)
-    expect(channel.props('connectError')).toContain('Disconnected by server owner')
+    const { toasts } = useToast()
+    expect(toasts.value.some(t => t.message.includes('Disconnected by server owner'))).toBe(true)
   })
 
   it('handles chat:message_edited event', async () => {
@@ -427,7 +421,8 @@ describe('App', () => {
     const updatedChannelView = w.findComponent({ name: 'ChannelView' })
     expect(updatedChannelView.props('connectedAddr')).toBe('localhost:4433')
     expect(updatedChannelView.props('channels')).toEqual([{ id: 1, name: 'General' }])
-    expect(updatedChannelView.props('connectError')).toContain('server not connected')
+    const { toasts } = useToast()
+    expect(toasts.value.some(t => t.message.includes('server not connected'))).toBe(true)
   })
 
   it('calls Disconnect when ChannelView emits disconnect', async () => {
@@ -458,7 +453,8 @@ describe('App', () => {
 
     // Voice state must be cleared even on error — audio is already stopped
     expect(channel.props('voiceConnected')).toBe(false)
-    expect(channel.props('connectError')).toContain('control websocket write failed')
+    const { toasts } = useToast()
+    expect(toasts.value.some(t => t.message.includes('control websocket write failed'))).toBe(true)
   })
 
   it('handles sendChat event', async () => {

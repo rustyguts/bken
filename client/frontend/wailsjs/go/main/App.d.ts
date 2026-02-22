@@ -83,13 +83,9 @@ export function SendChannelChat(arg1:number,arg2:string):Promise<string>;
 
 export function SendChat(arg1:string):Promise<string>;
 
-export function SendTyping(arg1:number):Promise<string>;
-
 export function SetAEC(arg1:boolean):Promise<void>;
 
 export function SetAGC(arg1:boolean):Promise<void>;
-
-export function SetAGCLevel(arg1:number):Promise<void>;
 
 export function SetAudioBitrate(arg1:number):Promise<void>;
 
@@ -101,8 +97,6 @@ export function SetMuted(arg1:boolean):Promise<void>;
 
 export function SetNoiseSuppression(arg1:boolean):Promise<void>;
 
-export function SetNoiseSuppressionLevel(arg1:number):Promise<void>;
-
 export function SetNotificationVolume(arg1:number):Promise<void>;
 
 export function SetOutputDevice(arg1:number):Promise<void>;
@@ -113,15 +107,11 @@ export function SetUserVolume(arg1:number,arg2:number):Promise<void>;
 
 export function SetVolume(arg1:number):Promise<void>;
 
-export function StartRecording(arg1:number):Promise<string>;
-
 export function StartScreenShare():Promise<string>;
 
 export function StartTest():Promise<string>;
 
 export function StartVideo():Promise<string>;
-
-export function StopRecording(arg1:number):Promise<string>;
 
 export function StopScreenShare():Promise<string>;
 

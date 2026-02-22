@@ -9,7 +9,7 @@ client/frontend/dist/
 # Server
 tmp
 server/server
-server/uploads
+server/blobs
 
 # OS
 .DS_Store

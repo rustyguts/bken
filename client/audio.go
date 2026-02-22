@@ -202,11 +202,6 @@ func (ae *AudioEngine) SetNoiseSuppression(enabled bool) {
 	ae.noiseSuppressionEnabled.Store(enabled)
 }
 
-// SetAGCLevel is a legacy no-op retained for backward compatibility.
-func (ae *AudioEngine) SetAGCLevel(level int) {
-	_ = level
-}
-
 // SetNotificationVolume sets the notification sound volume (0.0-1.0).
 func (ae *AudioEngine) SetNotificationVolume(vol float32) {
 	if vol < 0 {

@@ -9,7 +9,6 @@ describe('Sidebar', () => {
     connectedAddr: '',
     connected: false,
     voiceConnected: false,
-    connectError: '',
     startupAddr: '',
     globalUsername: 'TestUser',
   }
