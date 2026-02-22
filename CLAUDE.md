@@ -95,10 +95,16 @@ Tests use Vitest with jsdom. The setup file (`src/__tests__/setup.ts`) provides:
 
 Server Dockerfile: single file with `base`, `dev`, `build`, `prod` stages. Dev stage uses Air; prod stage is Alpine with non-root user and healthcheck.
 
+The server image is published to [`ghcr.io/rustyguts/bken`](https://ghcr.io/rustyguts/bken). Pull with:
+
+```bash
+docker pull ghcr.io/rustyguts/bken:latest
+```
+
 Client Dockerfile: Debian Bookworm base (`golang:1-bookworm`). Installs GTK3, WebKit2GTK 4.1, PortAudio, Opus, PipeWire. Build flag `-tags webkit2_41` required on Linux.
 
 ### CI
 
-GitHub Actions (`build.yml`) on push to main:
-- Server: standalone binary (`CGO_ENABLED=0`) + Docker image
-- Client: matrix build for Linux, macOS (brew deps), Windows (MSYS2/MINGW64)
+GitHub Actions on push to main:
+- `build.yml` — Server: standalone binary (`CGO_ENABLED=0`) + Docker image build. Client: matrix build for Linux, macOS (brew deps), Windows (MSYS2/MINGW64).
+- `docker.yml` — Pushes server Docker image to `ghcr.io/rustyguts/bken` with `latest` + commit SHA tags. On PRs, pushes commit SHA tag only.
