@@ -393,19 +393,16 @@ const stopGracePeriod = 50 * time.Millisecond
 
 // Stop halts audio capture and playback.
 //
-// Previously this method called Pa_StopStream then wg.Wait() with no timeout.
-// Pa_StopStream does not reliably unblock blocking Pa_ReadStream/Pa_WriteStream
-// on all backends (notably macOS CoreAudio), which caused Stop() to hang
-// indefinitely and block everything downstream (disconnect, UI, shutdown).
-//
-// The current implementation uses an escalating strategy that guarantees return
-// within ~100 ms worst-case, which resolves the blocking issue entirely:
+// The implementation uses an escalating strategy:
 //  1. Abort — immediate; most backends unblock Read/Write here.
 //  2. Brief grace period (50 ms) for goroutines to exit cleanly.
-//  3. Close — frees the native stream, which forces any stuck Read/Write to
-//     fault out. Goroutines are expected to exit immediately after this.
-//  4. Final short wait (50 ms). If goroutines still haven't exited, they are
-//     leaked (orphaned but harmless) rather than blocking the caller.
+//  3. If goroutines are still blocked (common on Linux/ALSA where Abort is
+//     slow), nil the stream fields so the loops exit on their next iteration,
+//     then hand the old stream pointers to a background goroutine that waits
+//     for the loops to finish and closes the streams safely.
+//
+// This avoids the SIGSEGV that occurred when Close was called while a
+// goroutine was still blocked inside Pa_WriteStream/Pa_ReadStream.
 func (ae *AudioEngine) Stop() {
 	if !ae.running.CompareAndSwap(true, false) {
 		return
@@ -433,46 +430,43 @@ func (ae *AudioEngine) Stop() {
 
 	select {
 	case <-wgDone:
-		goto cleanup
+		// Happy path: goroutines exited promptly (typical on macOS).
+		// Close streams inline.
+		ae.mu.Lock()
+		if ae.captureStream != nil {
+			ae.captureStream.Close()
+			ae.captureStream = nil
+		}
+		if ae.playbackStream != nil {
+			ae.playbackStream.Close()
+			ae.playbackStream = nil
+		}
+		ae.mu.Unlock()
 	case <-time.After(stopGracePeriod):
-	}
-
-	// Phase 3: Abort didn't unblock I/O. Force-close the streams to free the
-	// native objects. This will cause any blocked Read/Write to return (or
-	// fault), letting the goroutines exit.
-	slog.Warn("audio abort did not unblock I/O, escalating to close")
-	ae.mu.Lock()
-	if ae.captureStream != nil {
-		ae.captureStream.Close()
+		// Goroutines are still blocked in Read/Write. Nil the stream fields
+		// so the loops see nil on their next iteration and return, then hand
+		// the old pointers to a background closer. This is safe because
+		// Close is never called while a goroutine is inside Read/Write.
+		slog.Warn("audio abort did not unblock I/O, deferring stream close")
+		ae.mu.Lock()
+		oldCS := ae.captureStream
+		oldPS := ae.playbackStream
 		ae.captureStream = nil
-	}
-	if ae.playbackStream != nil {
-		ae.playbackStream.Close()
 		ae.playbackStream = nil
-	}
-	ae.mu.Unlock()
+		ae.mu.Unlock()
 
-	// Phase 4: Brief wait for goroutines to notice the close.
-	select {
-	case <-wgDone:
-		goto drain
-	case <-time.After(stopGracePeriod):
-		slog.Error("audio goroutines still stuck after close, leaking")
+		go func() {
+			ae.wg.Wait()
+			if oldCS != nil {
+				oldCS.Close()
+			}
+			if oldPS != nil {
+				oldPS.Close()
+			}
+			slog.Info("deferred audio stream close completed")
+		}()
 	}
 
-cleanup:
-	ae.mu.Lock()
-	if ae.captureStream != nil {
-		ae.captureStream.Close()
-		ae.captureStream = nil
-	}
-	if ae.playbackStream != nil {
-		ae.playbackStream.Close()
-		ae.playbackStream = nil
-	}
-	ae.mu.Unlock()
-
-drain:
 	// Drain stale tagged frames so they don't bleed into the next session.
 	for {
 		select {
@@ -521,7 +515,13 @@ func (ae *AudioEngine) captureLoop(buf []float32) {
 	var lastSpeakEmit time.Time
 
 	for ae.running.Load() {
-		if err := ae.captureStream.Read(); err != nil {
+		ae.mu.Lock()
+		cs := ae.captureStream
+		ae.mu.Unlock()
+		if cs == nil {
+			return
+		}
+		if err := cs.Read(); err != nil {
 			if ae.running.Load() {
 				slog.Error("capture read", "err", err)
 			}
@@ -679,7 +679,13 @@ func (ae *AudioEngine) playbackLoop(buf []float32) {
 		default:
 		}
 
-		if err := ae.playbackStream.Write(); err != nil {
+		ae.mu.Lock()
+		ps := ae.playbackStream
+		ae.mu.Unlock()
+		if ps == nil {
+			return
+		}
+		if err := ps.Write(); err != nil {
 			if ae.running.Load() {
 				slog.Error("playback write", "err", err)
 			}

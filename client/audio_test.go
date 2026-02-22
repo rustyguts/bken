@@ -162,8 +162,12 @@ func TestStopReturnsWhenStreamsUnblock(t *testing.T) {
 }
 
 // TestStopReturnsQuicklyWhenStreamBroken verifies that Stop() returns
-// promptly (via escalation to Close) even if Abort() does NOT unblock
-// Read()/Write(). Previously this would hang forever on wg.Wait().
+// promptly even if Abort() does NOT unblock Read()/Write(). The deferred-
+// close pattern nils the stream fields (so loops exit on their next
+// iteration) and hands the old pointers to a background goroutine that
+// waits for the loops to finish before calling Close. This avoids the
+// SIGSEGV that occurred when Close was called while a goroutine was still
+// blocked inside Pa_WriteStream.
 func TestStopReturnsQuicklyWhenStreamBroken(t *testing.T) {
 	ae := NewAudioEngine()
 	capture := newMockPAStream(true)  // broken: Abort() won't unblock Read()
@@ -179,24 +183,37 @@ func TestStopReturnsQuicklyWhenStreamBroken(t *testing.T) {
 		close(done)
 	}()
 
-	// Stop() should return within ~100 ms (two 50 ms grace periods), not hang.
+	// Stop() should return within ~100 ms (one 50 ms grace period), not hang.
 	select {
 	case <-done:
-		// Stop() returned — escalation worked.
+		// Stop() returned — deferred close pattern worked.
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Stop() blocked >500ms — escalation to Close failed")
+		t.Fatal("Stop() blocked >500ms — deferred close pattern failed")
 	}
 
-	// Clean up: unblock any leaked goroutines so they don't linger.
-	select {
-	case <-capture.unblockCh:
-	default:
-		close(capture.unblockCh)
+	// Streams must NOT be closed yet — goroutines are still blocked in
+	// Read()/Write(). Closing while blocked is what caused the SIGSEGV.
+	if capture.closed.Load() {
+		t.Error("capture stream was closed while goroutine still blocked — would SIGSEGV on real PortAudio")
 	}
-	select {
-	case <-playback.unblockCh:
-	default:
-		close(playback.unblockCh)
+	if playback.closed.Load() {
+		t.Error("playback stream was closed while goroutine still blocked — would SIGSEGV on real PortAudio")
+	}
+
+	// Unblock the goroutines (simulates the Read/Write eventually returning).
+	close(capture.unblockCh)
+	close(playback.unblockCh)
+
+	// The background closer should now close the streams.
+	deadline := time.After(2 * time.Second)
+	for !capture.closed.Load() || !playback.closed.Load() {
+		select {
+		case <-deadline:
+			t.Fatalf("streams not closed after unblock (capture=%v playback=%v)",
+				capture.closed.Load(), playback.closed.Load())
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 

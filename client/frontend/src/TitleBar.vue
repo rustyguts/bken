@@ -57,18 +57,12 @@ watch(() => props.serverName, () => { editing.value = false })
     style="--wails-draggable: drag"
   >
     <!-- Column 1: App name (over sidebar) -->
-    <div
-      class="px-2 flex items-center justify-center"
-      style="--wails-draggable: no-drag"
-    >
+    <div class="px-2 flex items-center justify-center">
       <span class="text-xs font-semibold tracking-widest opacity-40 pointer-events-none">bken</span>
     </div>
 
     <!-- Column 2: Server name + metrics (over channels list) -->
-    <div
-      class="flex items-center gap-1.5 px-2 min-w-0"
-      style="--wails-draggable: no-drag"
-    >
+    <div class="flex items-center gap-1.5 px-2 min-w-0">
       <template v-if="serverName">
         <!-- Editing: inline input + confirm button -->
         <template v-if="editing">
@@ -76,6 +70,7 @@ watch(() => props.serverName, () => { editing.value = false })
             ref="inputRef"
             v-model="draft"
             class="input input-ghost input-xs text-xs h-5 w-36 min-w-0 px-1 py-0 focus:outline-none bg-base-100/30 rounded"
+            style="--wails-draggable: no-drag"
             maxlength="50"
             @keydown="handleKeydown"
             @blur="cancelEdit"
@@ -83,6 +78,7 @@ watch(() => props.serverName, () => { editing.value = false })
           <!-- mousedown so it fires before blur cancels the edit -->
           <button
             class="btn btn-ghost btn-xs p-0 w-5 h-5 text-success opacity-70 hover:opacity-100 transition-opacity"
+            style="--wails-draggable: no-drag"
             title="Save name"
             tabindex="-1"
             @mousedown.prevent="confirmEdit"
@@ -99,6 +95,7 @@ watch(() => props.serverName, () => { editing.value = false })
             <button
               v-if="isOwner"
               class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity shrink-0"
+              style="--wails-draggable: no-drag"
               title="Rename server"
               @click="startEdit"
             >
@@ -108,6 +105,7 @@ watch(() => props.serverName, () => { editing.value = false })
             <button
               v-if="isOwner && serverAddr"
               class="btn btn-ghost btn-xs p-0 w-4 h-4 opacity-0 group-hover/name:opacity-50 hover:!opacity-100 transition-opacity shrink-0"
+              style="--wails-draggable: no-drag"
               :class="{ 'opacity-100 text-success': copied }"
               :title="copied ? 'Copied!' : 'Copy invite link'"
               @click="copyInvite"
@@ -125,14 +123,16 @@ watch(() => props.serverName, () => { editing.value = false })
         v-if="voiceConnected"
         mode="compact"
         class="shrink-0"
+        style="--wails-draggable: no-drag"
         @click="showMetricsModal = true"
       />
     </div>
 
     <!-- Column 3: Window controls (right-aligned, over chat area) -->
-    <div class="join flex justify-end" style="--wails-draggable: no-drag">
+    <div class="join flex justify-end">
       <button
         class="btn btn-ghost btn-sm btn-square join-item opacity-50 hover:opacity-100"
+        style="--wails-draggable: no-drag"
         aria-label="Minimise window"
         @click="WindowMinimise()"
       >
@@ -140,6 +140,7 @@ watch(() => props.serverName, () => { editing.value = false })
       </button>
       <button
         class="btn btn-ghost btn-sm btn-square join-item opacity-50 hover:opacity-100"
+        style="--wails-draggable: no-drag"
         aria-label="Maximise window"
         @click="WindowToggleMaximise()"
       >
@@ -147,6 +148,7 @@ watch(() => props.serverName, () => { editing.value = false })
       </button>
       <button
         class="btn btn-ghost btn-sm btn-square join-item opacity-50 hover:opacity-100 hover:btn-error"
+        style="--wails-draggable: no-drag"
         aria-label="Close window"
         @click="Quit()"
       >
