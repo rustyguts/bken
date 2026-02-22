@@ -77,6 +77,8 @@ No CGO. No TLS (plain HTTP). Alpine Docker build.
 - `interfaces.go` — `Transporter` interface covering all transport operations.
 - `internal/` — sub-packages: `config` (persisted user settings), `jitter`, `noisegate`, `vad`, `aec`, `agc`, `adapt`.
 
+The client builds with the `nolibopusfile` build tag to exclude the unused `opus.Stream` code from `gopkg.in/hraban/opus.v2`, avoiding a runtime dependency on `libopusfile`. Only `libopus` is required.
+
 **Frontend** (`client/frontend/src/`): Vue 3, Vite 6, Tailwind CSS v4, DaisyUI v5, TypeScript, Lucide icons. Package manager is `bun`.
 
 Wails runtime bindings are auto-generated under `wailsjs/` — do not edit manually; regenerate with `wails generate module` after changing Go method signatures.
@@ -101,7 +103,7 @@ The server image is published to [`ghcr.io/rustyguts/bken`](https://ghcr.io/rust
 docker pull ghcr.io/rustyguts/bken:latest
 ```
 
-Client Dockerfile: Debian Bookworm base (`golang:1-bookworm`). Installs GTK3, WebKit2GTK 4.1, PortAudio, Opus, PipeWire. Build flag `-tags webkit2_41` required on Linux.
+Client Dockerfile: Fedora 43 base. Installs GTK3, WebKit2GTK 4.1, PortAudio, Opus. Build flag `-tags webkit2_41` required on Linux.
 
 ### CI
 

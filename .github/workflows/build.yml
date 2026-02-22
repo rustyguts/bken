@@ -37,13 +37,12 @@ jobs:
             libwebkit2gtk-4.1-dev \
             portaudio19-dev \
             libopus-dev \
-            libopusfile-dev \
             pkg-config
       - name: Create frontend dist placeholder
         run: mkdir -p frontend/dist && echo '<html></html>' > frontend/dist/index.html
         working-directory: client
       - name: Run tests
-        run: go test -tags webkit2_41 ./...
+        run: go test -tags webkit2_41,nolibopusfile ./...
         working-directory: client
 
   test-frontend:
@@ -107,7 +106,7 @@ jobs:
         build:
           - name: linux
             os: ubuntu-latest
-            wails-flags: -tags webkit2_41
+            wails-flags: -tags webkit2_41,nolibopusfile
           - name: macos
             os: macos-latest
             wails-flags: ""
@@ -135,13 +134,12 @@ jobs:
             libwebkit2gtk-4.1-dev \
             portaudio19-dev \
             libopus-dev \
-            libopusfile-dev \
             pkg-config
 
       - name: Install macOS dependencies
         if: matrix.build.name == 'macos'
         run: |
-          brew install portaudio opus opusfile pkg-config
+          brew install portaudio opus pkg-config
 
       - name: Install Windows dependencies
         if: matrix.build.name == 'windows'
@@ -154,7 +152,6 @@ jobs:
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-portaudio
             mingw-w64-x86_64-opus
-            mingw-w64-x86_64-opusfile
 
       - name: Configure Windows CGO environment
         if: matrix.build.name == 'windows'

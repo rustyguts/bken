@@ -21,7 +21,6 @@ RUN dnf -y update && \
       xorg-x11-server-Xvfb \
       portaudio-devel \
       opus-devel \
-      opusfile-devel \
       curl \
       ca-certificates && \
     dnf clean all
@@ -49,4 +48,4 @@ COPY . .
 
 EXPOSE 5173
 
-ENTRYPOINT ["sh", "-lc", "mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root && export XDG_RUNTIME_DIR=/tmp/runtime-root && Xvfb :99 -screen 0 1280x720x24 -ac +render -noreset >/tmp/xvfb.log 2>&1 & exec wails dev -browser -noreload -nogorebuild -nosyncgomod -devserver 0.0.0.0:5173 -tags webkit2_41"]
+ENTRYPOINT ["sh", "-lc", "mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root && export XDG_RUNTIME_DIR=/tmp/runtime-root && Xvfb :99 -screen 0 1280x720x24 -ac +render -noreset >/tmp/xvfb.log 2>&1 & exec wails dev -browser -noreload -nogorebuild -nosyncgomod -devserver 0.0.0.0:5173 -tags webkit2_41,nolibopusfile"]

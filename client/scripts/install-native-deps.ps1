@@ -2,16 +2,14 @@ $ErrorActionPreference = "Stop"
 
 $requiredPkgConfigModules = @(
   "portaudio-2.0",
-  "opus",
-  "opusfile"
+  "opus"
 )
 
 $msysPackages = @(
   "mingw-w64-x86_64-gcc",
   "mingw-w64-x86_64-pkg-config",
   "mingw-w64-x86_64-portaudio",
-  "mingw-w64-x86_64-opus",
-  "mingw-w64-x86_64-opusfile"
+  "mingw-w64-x86_64-opus"
 )
 
 function Write-Info {

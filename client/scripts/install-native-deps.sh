@@ -4,7 +4,6 @@ set -euo pipefail
 readonly REQUIRED_PKG_CONFIG_MODULES=(
   portaudio-2.0
   opus
-  opusfile
 )
 
 log() {
@@ -43,7 +42,6 @@ install_macos() {
   local packages=(
     portaudio
     opus
-    opusfile
     pkg-config
   )
   brew install "${packages[@]}"
@@ -58,7 +56,6 @@ install_linux_apt() {
     libwebkit2gtk-4.1-dev
     portaudio19-dev
     libopus-dev
-    libopusfile-dev
   )
   run_root apt-get update
   run_root apt-get install -y "${packages[@]}"
@@ -75,7 +72,6 @@ install_linux_dnf() {
     webkit2gtk4.1-devel
     portaudio-devel
     opus-devel
-    opusfile-devel
   )
   run_root dnf install -y "${packages[@]}"
 }
@@ -89,7 +85,6 @@ install_linux_pacman() {
     webkit2gtk-4.1
     portaudio
     opus
-    opusfile
   )
   run_root pacman -Sy --noconfirm --needed "${packages[@]}"
 }
