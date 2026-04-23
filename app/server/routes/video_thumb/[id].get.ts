@@ -1,6 +1,5 @@
-import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
 import { db } from '~~/server/utils/db'
 import { THUMBS_DIR, resolveData } from '~~/server/utils/paths'
 
@@ -13,21 +12,22 @@ const PLACEHOLDER = Buffer.from([
 
 async function ensureVideoThumb(videoId: number): Promise<string | null> {
   const out = resolve(THUMBS_DIR, `video_${String(videoId).padStart(6, '0')}.jpg`)
-  if (existsSync(out) && statSync(out).size > 0) return out
+  const outFile = Bun.file(out)
+  if (await outFile.exists() && outFile.size > 0) return out
 
   const row = db()
     .prepare('SELECT path, duration_s FROM video WHERE id=?')
     .get(videoId) as { path: string | null; duration_s: number | null } | undefined
   if (!row || !row.path) return null
 
-  const videoFile = resolveData(row.path)
-  if (!existsSync(videoFile)) return null
+  const videoFile = await resolveData(row.path)
+  if (!await Bun.file(videoFile).exists()) return null
 
   // Extract at 10% of the duration or 5s, so we don't just get a black frame
   const dur = row.duration_s || 30
   const seek = Math.max(1.0, dur * 0.1)
 
-  mkdirSync(dirname(out), { recursive: true })
+  await mkdir(dirname(out), { recursive: true })
 
   const vf = [
     'setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv',
@@ -35,32 +35,29 @@ async function ensureVideoThumb(videoId: number): Promise<string | null> {
     'format=yuvj420p',
   ].join(',')
 
-  await new Promise<void>((res, rej) => {
-    const p = spawn('ffmpeg', [
-      '-y',
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-ss',
-      seek.toFixed(3),
-      '-i',
-      videoFile,
-      '-frames:v',
-      '1',
-      '-vf',
-      vf,
-      '-q:v',
-      '3',
-      out,
-    ])
-    let stderr = ''
-    p.stderr.on('data', (chunk) => (stderr += chunk))
-    p.on('error', rej)
-    p.on('exit', (code) => {
-      if (code === 0) res()
-      else rej(new Error(`ffmpeg exit ${code}: ${stderr.slice(0, 400)}`))
-    })
-  })
+  const proc = Bun.spawn(['ffmpeg',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-ss',
+    seek.toFixed(3),
+    '-i',
+    videoFile,
+    '-frames:v',
+    '1',
+    '-vf',
+    vf,
+    '-q:v',
+    '3',
+    out,
+  ])
+
+  const exitCode = await proc.exited
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text()
+    throw new Error(`ffmpeg exit ${exitCode}: ${stderr.slice(0, 400)}`)
+  }
 
   return out
 }
@@ -74,12 +71,16 @@ export default defineEventHandler(async (event) => {
   }
 
   const path = await ensureVideoThumb(id)
-  setHeader(event, 'content-type', 'image/jpeg')
   if (!path) {
+    setHeader(event, 'content-type', 'image/jpeg')
     return PLACEHOLDER
   }
-  const stat = statSync(path)
-  setHeader(event, 'content-length', String(stat.size))
-  setHeader(event, 'cache-control', 'public, max-age=3600')
-  return sendStream(event, createReadStream(path))
+
+  const file = Bun.file(path)
+  return new Response(file, {
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'public, max-age=3600',
+    },
+  })
 })

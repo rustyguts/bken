@@ -1,9 +1,8 @@
 // POST /api/moments/:id/clip
 //
-// Trigger ffmpeg cut for a single moment.
+// Enqueue an ffmpeg cut for a single moment; the cli worker picks it up
+// and runs `bken create-clip <id> --force`.
 
-import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
 import { db } from '~~/server/utils/db'
 
 export default defineEventHandler(async (event) => {
@@ -20,25 +19,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'moment not found' })
   }
 
-  // Insert job record
   db().prepare(
     `INSERT INTO job (video_id, type, status, target_id) VALUES (?, 'create_clip', 'pending', ?)`
   ).run(row.video_id, id)
 
-  // Optimistically clear the stale flag so the UI shows Download/Share
-  // as soon as the user clicks Update. The Python job runs asynchronously;
-  // if it fails, the existing clip_path is still pointing at the old cut.
+  // Optimistically clear the stale flag so the UI shows Download/Share as
+  // soon as the user clicks Update. If the worker job fails, the existing
+  // clip_path is still pointing at the old cut — that's acceptable for
+  // dev; prod would retry or surface the failure.
   db().prepare('UPDATE candidate_clip SET clip_stale = 0 WHERE id = ?').run(id)
-
-  // Spawn clip creation in background. --force overwrites the existing cut
-  // so start/end edits actually replace the previous clip.
-  const bkenPath = resolve(process.cwd(), '..', 'src', 'bken', 'cli.py')
-  const proc = spawn('python', [bkenPath, 'create-clip', String(id), '--force'], {
-    cwd: resolve(process.cwd(), '..'),
-    detached: true,
-    stdio: 'ignore',
-  })
-  proc.unref()
 
   return { ok: true, moment_id: id }
 })

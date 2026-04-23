@@ -1,11 +1,10 @@
-// Lazy thumbnail rendering — mirrors src/bken/thumbs.py line-for-line.
+// Lazy thumbnail rendering — mirrors cli/src/bken/thumbs.py line-for-line.
 //
 // ffmpeg is spawned as a subprocess; the output is cached to
 // data/thumbs/clip_<id>.jpg. Colour filter undoes the NTSC-era tags the
 // recorder stamps onto 1080p footage; without it JPEGs looked washed out.
 
-import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { db } from './db'
 import { DATA_DIR, THUMBS_DIR, resolveData } from './paths'
@@ -23,20 +22,21 @@ export function thumbPathFor(clipId: number): string {
  */
 export async function ensureThumb(clipId: number): Promise<string | null> {
   const out = thumbPathFor(clipId)
-  if (existsSync(out) && statSync(out).size > 0) return out
+  const outFile = Bun.file(out)
+  if (await outFile.exists() && outFile.size > 0) return out
 
   const row = db()
     .prepare('SELECT clip_path, start_s, end_s FROM candidate_clip WHERE id=?')
     .get(clipId) as { clip_path: string | null; start_s: number; end_s: number } | undefined
   if (!row || !row.clip_path) return null
 
-  const clipFile = resolveData(row.clip_path)
-  if (!existsSync(clipFile)) return null
+  const clipFile = await resolveData(row.clip_path)
+  if (!await Bun.file(clipFile).exists()) return null
 
   const dur = Math.max(0.5, row.end_s - row.start_s)
   const seek = Math.min(dur / 2, dur - 0.1)
 
-  mkdirSync(dirname(out), { recursive: true })
+  await mkdir(dirname(out), { recursive: true })
 
   // Colour pipeline: source is mis-tagged bt470m/smpte170m but actually
   // 1080p bt709. `setparams` fixes the label; `scale`'s matrix conversion
@@ -48,32 +48,29 @@ export async function ensureThumb(clipId: number): Promise<string | null> {
     'format=yuvj420p',
   ].join(',')
 
-  await new Promise<void>((res, rej) => {
-    const p = spawn('ffmpeg', [
-      '-y',
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-ss',
-      seek.toFixed(3),
-      '-i',
-      clipFile,
-      '-frames:v',
-      '1',
-      '-vf',
-      vf,
-      '-q:v',
-      '3',
-      out,
-    ])
-    let stderr = ''
-    p.stderr.on('data', (chunk) => (stderr += chunk))
-    p.on('error', rej)
-    p.on('exit', (code) => {
-      if (code === 0) res()
-      else rej(new Error(`ffmpeg exit ${code}: ${stderr.slice(0, 400)}`))
-    })
-  })
+  const proc = Bun.spawn(['ffmpeg',
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-ss',
+    seek.toFixed(3),
+    '-i',
+    clipFile,
+    '-frames:v',
+    '1',
+    '-vf',
+    vf,
+    '-q:v',
+    '3',
+    out,
+  ])
+
+  const exitCode = await proc.exited
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text()
+    throw new Error(`ffmpeg exit ${exitCode}: ${stderr.slice(0, 400)}`)
+  }
 
   // Store the thumbnail path relative to DATA_DIR so it travels with the DB.
   const rel = relative(DATA_DIR, out)

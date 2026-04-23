@@ -4,7 +4,6 @@
 // requests serve the cached file. If the underlying clip is missing we
 // return a tiny 1×1 gray jpeg so <img> doesn't show a broken icon.
 
-import { createReadStream, statSync } from 'node:fs'
 import { ensureThumb } from '~~/server/utils/thumbs'
 
 // Minimal valid JPEG header + nulls. Just enough to keep the browser happy.
@@ -16,20 +15,23 @@ const PLACEHOLDER = Buffer.from([
 export default defineEventHandler(async (event) => {
   const raw = event.context.params?.id ?? ''
   const id = Number(String(raw).replace(/\.jpg$/, ''))
-  console.warn(`[thumb] raw=${JSON.stringify(raw)} id=${id} url=${event.node.req.url}`)
   if (!Number.isFinite(id) || id <= 0) {
     throw createError({ statusCode: 400, statusMessage: 'invalid clip id' })
   }
 
   const path = await ensureThumb(id)
-  setHeader(event, 'content-type', 'image/jpeg')
   if (!path) {
     // eslint-disable-next-line no-console
     console.warn(`[thumb] no file for clip_id=${id} — returning placeholder`)
+    setHeader(event, 'content-type', 'image/jpeg')
     return PLACEHOLDER
   }
-  const stat = statSync(path)
-  setHeader(event, 'content-length', String(stat.size))
-  setHeader(event, 'cache-control', 'public, max-age=3600')
-  return sendStream(event, createReadStream(path))
+
+  const file = Bun.file(path)
+  return new Response(file, {
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'public, max-age=3600',
+    },
+  })
 })

@@ -14,9 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA = Path(os.environ.get("BKEN_DATA", ROOT / "data"))
 MODELS = Path(os.environ.get("BKEN_MODELS", ROOT / "models"))
 
-# `BKEN_DB_PATH` lets the SQLite file live in a named docker volume separate
-# from the host-bound DATA tree so `docker compose down -v` wipes just the DB.
-DB_PATH = Path(os.environ.get("BKEN_DB_PATH", DATA / "index.db"))
+DB_PATH = DATA / "index.db"
 AUDIO_DIR = DATA / "audio"
 CLIPS_DIR = DATA / "clips"
 ARTIFACTS_DIR = DATA / "artifacts"
@@ -28,6 +26,11 @@ AUDIO_CHANNELS = 1
 # ASR
 WHISPER_MODEL = os.environ.get("BKEN_WHISPER_MODEL", "large-v3")
 WHISPER_COMPUTE_TYPE = os.environ.get("BKEN_WHISPER_COMPUTE", "float16")
+
+# LLM ranking — small instruct-tuned model, weights cached under MODELS on
+# first use. Override via env if you want to swap in 0.5B for laptops or
+# 3B on a beefier box. Must be a chat-template model on HF Hub.
+RANK_MODEL = os.environ.get("BKEN_RANK_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
 
 # Scoring (density-based)
 #

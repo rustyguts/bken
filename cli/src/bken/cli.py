@@ -46,7 +46,7 @@ from rich.progress import (
 from rich.table import Table
 
 from . import audio as audio_mod
-from . import clipper, config, db, events, ingest, library, ranker, scoring, transcribe, vision
+from . import clipper, config, db, events, ingest, library, ranker, scoring, transcribe, vision, worker
 
 # ──────────────────────────────────────────────────────────────────────────
 # App + sub-apps
@@ -272,6 +272,18 @@ def cmd_init() -> None:
     config.ensure_dirs()
     db.init_db()
     console.print(f"[green]✓[/] DB initialized at [cyan]{config.DB_PATH}[/]")
+
+
+@app.command("worker")
+def cmd_worker() -> None:
+    """Run the job-queue worker (long-running).
+
+    The Nuxt app container enqueues rows in `job`; this process drains them
+    by shelling out to the matching `bken` subcommand. Used as the cli
+    container's main process under docker compose.
+    """
+    config.ensure_dirs()
+    worker.run_forever()
 
 
 @app.command("ingest")
@@ -546,15 +558,14 @@ def cmd_clip(
 
 @app.command("rank")
 def cmd_rank(force: bool = typer.Option(False, "--force")) -> None:
-    """Re-rank candidate clips with the Claude CLI (Claude Code).
+    """Summarize candidate clips with a small local LLM.
 
-    No API key needed — uses your existing Claude subscription auth.
-    Skipped silently if the `claude` CLI is not on PATH.
+    Uses `BKEN_RANK_MODEL` (default Qwen/Qwen2.5-1.5B-Instruct). Weights
+    auto-download to `BKEN_MODELS` on first run.
     """
-    with console.status("[cyan]Asking Claude to rank clips…[/]"):
-        r = ranker.rank_pending(force=force)
+    r = ranker.rank_pending(force=force)
     if not r:
-        console.print("[yellow]No videos ranked (missing CLI or none pending).[/]")
+        console.print("[yellow]No videos ranked (none pending).[/]")
         return
     for vid, n in r.items():
         console.print(f"  video_id={vid}: [green]{n}[/] clips LLM-ranked")
@@ -1290,8 +1301,7 @@ def cmd_config() -> None:
         ("VISION_MAX_FRAMES", config.VISION_MAX_FRAMES),
         ("VISION_BATCH_SIZE", config.VISION_BATCH_SIZE),
         ("VISION_SCORE_ENABLED", config.VISION_SCORE_ENABLED),
-        ("BKEN_CLAUDE_CLI", os.environ.get("BKEN_CLAUDE_CLI", "claude")),
-        ("BKEN_CLAUDE_MODEL", os.environ.get("BKEN_CLAUDE_MODEL", "sonnet")),
+        ("RANK_MODEL", config.RANK_MODEL),
     ]
     for k, val in rows:
         t.add_row(str(k), str(val))

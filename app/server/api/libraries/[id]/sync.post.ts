@@ -1,10 +1,8 @@
 // POST /api/libraries/:id/sync
 //
-// Trigger an immediate sync for a library.
+// Enqueue an immediate sync for a library; the cli worker picks it up.
 
 import { db } from '~~/server/utils/db'
-import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
 
 export default defineEventHandler(async (event) => {
   const raw = String(event.context.params?.id ?? '')
@@ -21,14 +19,6 @@ export default defineEventHandler(async (event) => {
   db().prepare(
     `INSERT INTO job (library_id, type, status) VALUES (?, ?, 'pending')`
   ).run(id, 'library_sync')
-
-  const bkenPath = resolve(process.cwd(), '..', 'src', 'bken', 'cli.py')
-  const proc = spawn('python', [bkenPath, 'library', 'sync', '--library-id', String(id)], {
-    cwd: resolve(process.cwd(), '..'),
-    detached: true,
-    stdio: 'ignore',
-  })
-  proc.unref()
 
   return { ok: true, library_id: id }
 })

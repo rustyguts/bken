@@ -17,6 +17,11 @@ services:
     build:
       context: ./app
       dockerfile: Dockerfile
+      # BuildKit's attestations add minutes to `up --build` on large images
+      # (the multi-GB cli image in particular stalls on "resolving provenance").
+      # None of this is useful for local dev images.
+      provenance: false
+      sbom: false
     image: bken-app:dev
     ports:
       - "3000:3000"
@@ -44,11 +49,15 @@ services:
     build:
       context: ./cli
       dockerfile: Dockerfile
+      provenance: false
+      sbom: false
     image: bken-cli:dev
-    # No ports — this service is used via `docker compose exec cli …`.
+    # No ports — the app container enqueues work via the `job` table and this
+    # worker process drains it. One-off commands still work via
+    # `docker compose exec cli uv run bken <cmd>`.
     tty: true
     stdin_open: true
-    command: ["sleep", "infinity"]
+    command: ["uv", "run", "bken", "worker"]
     volumes:
       - ./cli/src:/app/src:rw
       - ./cli/pyproject.toml:/app/pyproject.toml:ro

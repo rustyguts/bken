@@ -1,12 +1,10 @@
 // Nitro plugin that schedules periodic library syncs using node-cron.
 //
-// On startup it reads all active libraries and registers a cron job for each
-// that spawns `bken library sync --library-id <id>`.  The interval is
-// configurable per library (default 60 minutes).
+// On each tick we enqueue a `library_sync` row — the cli container's worker
+// (`bken worker`) picks it up and runs the actual sync. The app container
+// has no python and can't run the pipeline directly.
 
 import { createRequire } from 'node:module'
-import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
 import { db } from '~~/server/utils/db'
 
 // node-cron ships a broken "esm" entry (CJS output served under the
@@ -17,14 +15,22 @@ const cron = createRequire(import.meta.url)('node-cron') as typeof import('node-
 
 const scheduled = new Map<number, cron.ScheduledTask>()
 
-function spawnSync(libraryId: number) {
-  const bkenPath = resolve(process.cwd(), '..', 'src', 'bken', 'cli.py')
-  const proc = spawn('python', [bkenPath, 'library', 'sync', '--library-id', String(libraryId)], {
-    cwd: resolve(process.cwd(), '..'),
-    detached: true,
-    stdio: 'ignore',
-  })
-  proc.unref()
+function enqueueSync(libraryId: number) {
+  // Skip if there's already pending/running work for this library — no
+  // point stacking duplicates while the worker is busy.
+  const pending = db()
+    .prepare(
+      `SELECT id FROM job
+        WHERE library_id = ? AND type = 'library_sync'
+          AND status IN ('pending', 'running')
+        LIMIT 1`,
+    )
+    .get(libraryId) as { id: number } | undefined
+  if (pending) return
+
+  db().prepare(
+    `INSERT INTO job (library_id, type, status) VALUES (?, 'library_sync', 'pending')`,
+  ).run(libraryId)
 }
 
 function scheduleLibrary(library: {
@@ -47,16 +53,21 @@ function scheduleLibrary(library: {
   const expression = `*/${Math.min(interval, 59)} * * * *`
 
   const task = cron.schedule(expression, () => {
-    // Double-check the library is still active before spawning
+    // Double-check the library is still active before enqueuing
     const row = db()
       .prepare('SELECT active FROM library WHERE id = ?')
       .get(library.id) as { active: number } | undefined
     if (row?.active) {
-      spawnSync(library.id)
+      enqueueSync(library.id)
     }
   }, { scheduled: true })
 
   scheduled.set(library.id, task)
+
+  // Also kick off an initial sync at registration time so fresh dev
+  // (or a new library) doesn't sit empty until the first cron tick.
+  // enqueueSync is a no-op if a sync is already pending/running.
+  enqueueSync(library.id)
 }
 
 function seedDefaultLibrary(): void {

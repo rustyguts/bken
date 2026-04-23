@@ -1,10 +1,6 @@
-// POST /api/libraries
-//
-// Create a new library and enqueue an initial sync.
-
-import { db } from '~~/server/utils/db'
-import { spawn } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { db } from '~~/server/utils/db'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
@@ -18,8 +14,8 @@ export default defineEventHandler(async (event) => {
 
   // Check path exists
   try {
-    const stat = await import('node:fs').then((fs) => fs.promises.stat(path))
-    if (!stat.isDirectory()) {
+    const s = await stat(path)
+    if (!s.isDirectory()) {
       throw createError({ statusCode: 400, statusMessage: 'path must be a directory' })
     }
   } catch {
@@ -40,19 +36,10 @@ export default defineEventHandler(async (event) => {
 
   const libraryId = Number(result.lastInsertRowid)
 
-  // Insert sync job
+  // Enqueue the initial sync — the cli container's worker picks it up.
   db().prepare(
     `INSERT INTO job (library_id, type, status) VALUES (?, ?, 'pending')`
   ).run(libraryId, 'library_sync')
-
-  // Spawn sync in background
-  const bkenPath = resolve(process.cwd(), '..', 'src', 'bken', 'cli.py')
-  const proc = spawn('python', [bkenPath, 'library', 'sync', '--library-id', String(libraryId)], {
-    cwd: resolve(process.cwd(), '..'),
-    detached: true,
-    stdio: 'ignore',
-  })
-  proc.unref()
 
   return { ok: true, id: libraryId }
 })

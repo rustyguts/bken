@@ -2,11 +2,11 @@
 //
 // Delete a moment and unlink its clip file if present.
 
-import { existsSync, unlinkSync } from 'node:fs'
+import { unlink } from 'node:fs/promises'
 import { db } from '~~/server/utils/db'
 import { resolveData } from '~~/server/utils/paths'
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const raw = String(event.context.params?.id ?? '')
   const id = Number(raw)
   if (!Number.isFinite(id) || id <= 0) {
@@ -22,10 +22,10 @@ export default defineEventHandler((event) => {
   }
 
   if (row.clip_path) {
-    const path = resolveData(row.clip_path)
-    if (existsSync(path)) {
+    const path = await resolveData(row.clip_path)
+    if (await Bun.file(path).exists()) {
       try {
-        unlinkSync(path)
+        await unlink(path)
       } catch {
         // ignore
       }

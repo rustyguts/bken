@@ -43,7 +43,10 @@ const MIGRATIONS: Array<[table: string, column: string, ddl: string]> = [
 ]
 
 function migrate(conn: DatabaseType): void {
-  // Ensure the library table exists
+  // Full schema — mirrors cli/src/bken/db.py::SCHEMA. All statements are
+  // idempotent, so this runs safely on both fresh and existing DBs. Having
+  // the Nuxt side own the full bootstrap means `docker compose up` on a
+  // fresh `./data/` works without having to run `bken db init` first.
   conn.exec(`
     CREATE TABLE IF NOT EXISTS library (
       id                   INTEGER PRIMARY KEY,
@@ -54,14 +57,125 @@ function migrate(conn: DatabaseType): void {
       next_scan_at         TEXT,
       active               INTEGER NOT NULL DEFAULT 1,
       created_at           TEXT DEFAULT (datetime('now'))
-    )
-  `)
-  conn.exec('CREATE INDEX IF NOT EXISTS idx_library_path ON library(path)')
-  conn.exec('CREATE INDEX IF NOT EXISTS idx_library_active ON library(active)')
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_path ON library(path);
+    CREATE INDEX IF NOT EXISTS idx_library_active ON library(active);
 
-  // Ensure the job table exists — older DBs created before the job queue
-  // was introduced won't have it, and `ALTER TABLE job ...` below would fail.
-  conn.exec(`
+    CREATE TABLE IF NOT EXISTS video (
+      id              INTEGER PRIMARY KEY,
+      path            TEXT NOT NULL UNIQUE,
+      size_bytes      INTEGER NOT NULL,
+      mtime           REAL NOT NULL,
+      sha1_prefix     TEXT,
+      sha1_full       TEXT,
+      duration_s      REAL,
+      width           INTEGER,
+      height          INTEGER,
+      fps             REAL,
+      video_codec     TEXT,
+      audio_codec     TEXT,
+      audio_channels  INTEGER,
+      audio_rate      INTEGER,
+      game            TEXT,
+      recorded_at     TEXT,
+      library_id      INTEGER REFERENCES library(id) ON DELETE SET NULL,
+      missing         INTEGER NOT NULL DEFAULT 0,
+      audio_done      INTEGER NOT NULL DEFAULT 0,
+      transcribe_done INTEGER NOT NULL DEFAULT 0,
+      events_done     INTEGER NOT NULL DEFAULT 0,
+      vision_done     INTEGER NOT NULL DEFAULT 0,
+      score_done      INTEGER NOT NULL DEFAULT 0,
+      rank_done       INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT DEFAULT (datetime('now')),
+      updated_at      TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_video_path ON video(path);
+
+    CREATE TABLE IF NOT EXISTS transcript_segment (
+      id          INTEGER PRIMARY KEY,
+      video_id    INTEGER NOT NULL REFERENCES video(id) ON DELETE CASCADE,
+      start_s     REAL NOT NULL,
+      end_s       REAL NOT NULL,
+      text        TEXT NOT NULL,
+      avg_logprob REAL,
+      no_speech   REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_seg_video ON transcript_segment(video_id, start_s);
+
+    CREATE TABLE IF NOT EXISTS audio_event (
+      id          INTEGER PRIMARY KEY,
+      video_id    INTEGER NOT NULL REFERENCES video(id) ON DELETE CASCADE,
+      start_s     REAL NOT NULL,
+      end_s       REAL NOT NULL,
+      label       TEXT NOT NULL,
+      score       REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_evt_video ON audio_event(video_id, start_s);
+    CREATE INDEX IF NOT EXISTS idx_evt_label ON audio_event(video_id, label);
+
+    CREATE TABLE IF NOT EXISTS candidate_clip (
+      id           INTEGER PRIMARY KEY,
+      video_id     INTEGER NOT NULL REFERENCES video(id) ON DELETE CASCADE,
+      start_s      REAL NOT NULL,
+      end_s        REAL NOT NULL,
+      score        REAL NOT NULL,
+      features     TEXT,
+      transcript   TEXT,
+      llm_rank     INTEGER,
+      llm_title    TEXT,
+      llm_desc     TEXT,
+      llm_contents TEXT,
+      llm_tags     TEXT,
+      clip_path    TEXT,
+      thumb_path   TEXT,
+      user_rating  INTEGER,
+      active       INTEGER NOT NULL DEFAULT 1,
+      title        TEXT,
+      source       TEXT NOT NULL DEFAULT 'auto',
+      clip_stale   INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_clip_video ON candidate_clip(video_id, start_s);
+    CREATE INDEX IF NOT EXISTS idx_clip_score ON candidate_clip(video_id, score DESC);
+
+    CREATE TABLE IF NOT EXISTS vision_frame (
+      id        INTEGER PRIMARY KEY,
+      video_id  INTEGER NOT NULL REFERENCES video(id) ON DELETE CASCADE,
+      ts_s      REAL    NOT NULL,
+      sampled   TEXT    NOT NULL DEFAULT 'fixed',
+      caption   TEXT,
+      n_objs    INTEGER NOT NULL DEFAULT 0,
+      n_ocr     INTEGER NOT NULL DEFAULT 0,
+      raw_json  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_vf_video_ts ON vision_frame(video_id, ts_s);
+
+    CREATE TABLE IF NOT EXISTS vision_detection (
+      id        INTEGER PRIMARY KEY,
+      frame_id  INTEGER NOT NULL REFERENCES vision_frame(id) ON DELETE CASCADE,
+      video_id  INTEGER NOT NULL REFERENCES video(id) ON DELETE CASCADE,
+      ts_s      REAL    NOT NULL,
+      label     TEXT    NOT NULL,
+      conf      REAL    NOT NULL,
+      bbox_x1   REAL, bbox_y1 REAL, bbox_x2 REAL, bbox_y2 REAL,
+      area_frac REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_vd_video_ts    ON vision_detection(video_id, ts_s);
+    CREATE INDEX IF NOT EXISTS idx_vd_video_label ON vision_detection(video_id, label);
+
+    CREATE TABLE IF NOT EXISTS vision_ocr (
+      id         INTEGER PRIMARY KEY,
+      frame_id   INTEGER NOT NULL REFERENCES vision_frame(id) ON DELETE CASCADE,
+      video_id   INTEGER NOT NULL REFERENCES video(id) ON DELETE CASCADE,
+      ts_s       REAL    NOT NULL,
+      text       TEXT    NOT NULL,
+      text_upper TEXT    NOT NULL,
+      conf       REAL,
+      bbox_x1    REAL, bbox_y1 REAL, bbox_x2 REAL, bbox_y2 REAL,
+      area_frac  REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_vo_video_ts ON vision_ocr(video_id, ts_s);
+    CREATE INDEX IF NOT EXISTS idx_vo_text     ON vision_ocr(text_upper);
+
     CREATE TABLE IF NOT EXISTS job (
       id          INTEGER PRIMARY KEY,
       video_id    INTEGER REFERENCES video(id) ON DELETE CASCADE,
@@ -72,7 +186,7 @@ function migrate(conn: DatabaseType): void {
       error_message TEXT,
       created_at  TEXT DEFAULT (datetime('now')),
       updated_at  TEXT DEFAULT (datetime('now'))
-    )
+    );
   `)
 
   for (const [table, column, ddl] of MIGRATIONS) {

@@ -4,7 +4,6 @@
 // scrub without downloading the whole file. `?download=1` tacks on a
 // Content-Disposition header with a friendlier filename.
 
-import { createReadStream, existsSync, statSync } from 'node:fs'
 import { db } from '~~/server/utils/db'
 import { resolveData } from '~~/server/utils/paths'
 
@@ -24,7 +23,7 @@ function downloadFilename(r: Row): string {
   return `${game}_${date}_${mmss}_clip${r.id}.mp4`.replace(/[^A-Za-z0-9._-]+/g, '_')
 }
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   // File-based route captures `4.mp4` from `/clip/4.mp4` — strip the ext.
   const raw = String(event.context.params?.id ?? '')
   const id = Number(raw.replace(/\.mp4$/, ''))
@@ -42,47 +41,22 @@ export default defineEventHandler((event) => {
   if (!row || !row.clip_path) {
     throw createError({ statusCode: 404, statusMessage: 'clip not found' })
   }
-  const path = resolveData(row.clip_path)
-  if (!existsSync(path)) {
+  const path = await resolveData(row.clip_path)
+  const file = Bun.file(path)
+  if (!await file.exists()) {
     throw createError({ statusCode: 404, statusMessage: 'clip file missing' })
   }
 
-  const stat = statSync(path)
-  const total = stat.size
-
-  setHeader(event, 'content-type', 'video/mp4')
-  setHeader(event, 'accept-ranges', 'bytes')
+  const headers: Record<string, string> = {
+    'Content-Type': 'video/mp4',
+    'Accept-Ranges': 'bytes',
+  }
 
   if (getQuery(event).download) {
-    setHeader(
-      event,
-      'content-disposition',
-      `attachment; filename="${downloadFilename(row)}"`,
-    )
+    headers['Content-Disposition'] = `attachment; filename="${downloadFilename(row)}"`
   }
 
-  const range = getRequestHeader(event, 'range')
-  if (range) {
-    // Spec is `bytes=START-END` (END optional). We clamp to the file size.
-    const m = /^bytes=(\d*)-(\d*)$/.exec(range)
-    if (m) {
-      const CHUNK_SIZE = 10 ** 6 // 1MB
-      const start = m[1] === '' ? Math.max(total - Number(m[2]), 0) : Number(m[1])
-      let end = m[2] === '' || m[1] === '' ? total - 1 : Number(m[2])
-      end = Math.min(end, start + CHUNK_SIZE - 1, total - 1)
-      if (start >= 0 && start <= end && end < total) {
-        setResponseStatus(event, 206)
-        setHeader(event, 'content-range', `bytes ${start}-${end}/${total}`)
-        setHeader(event, 'content-length', String(end - start + 1))
-        return sendStream(event, createReadStream(path, { start, end }))
-      }
-      // Unsatisfiable range → 416.
-      setResponseStatus(event, 416)
-      setHeader(event, 'content-range', `bytes */${total}`)
-      return ''
-    }
-  }
-
-  setHeader(event, 'content-length', String(total))
-  return sendStream(event, createReadStream(path))
+  // Returning a Response directly to Nitro. Bun's Response constructor
+  // automatically handles the 'Range' request header if the body is a BunFile.
+  return new Response(file, { headers })
 })

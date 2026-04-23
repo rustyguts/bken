@@ -5,7 +5,6 @@
 // inline playable video preview. The page itself is a simple branded video
 // player with a download link.
 
-import { existsSync } from 'node:fs'
 import { db, type ClipRow } from '~~/server/utils/db'
 import { resolveData } from '~~/server/utils/paths'
 
@@ -38,7 +37,7 @@ function truncate(text: string | null | undefined, max: number): string {
   return text.length > max ? text.slice(0, max - 1) + '…' : text
 }
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const raw = String(event.context.params?.id ?? '')
   const id = Number(raw.replace(/\.mp4$/, ''))
   if (!Number.isFinite(id) || id <= 0) {
@@ -59,10 +58,11 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 404, statusMessage: 'clip not found' })
   }
 
-  const path = resolveData(row.clip_path)
-  if (!existsSync(path)) {
+  const path = await resolveData(row.clip_path)
+  if (!await Bun.file(path).exists()) {
     throw createError({ statusCode: 404, statusMessage: 'clip file missing' })
   }
+
 
   const origin = baseUrl(event)
   const shareUrl = `${origin}/share/${id}`
