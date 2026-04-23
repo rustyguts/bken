@@ -1,22 +1,19 @@
 # Don't ship host state into the build context.
 
 # Python local env
+cli/.venv/
+cli/__pycache__/
+cli/*.pyc
+cli/.pytest_cache/
+cli/.ruff_cache/
+cli/.mypy_cache/
 .venv/
 __pycache__/
-*.pyc
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
 
-# Nuxt build + modules (installed inside image)
-nuxt/node_modules/
-nuxt/.nuxt/
-nuxt/.output/
-
-# (legacy) old Vite/Vue frontend if still on disk
-frontend/node_modules/
-frontend/dist/
-src/vidpipe/static/app/
+# App build + modules (installed inside image)
+app/node_modules/
+app/.nuxt/
+app/.output/
 
 # Persistent data (mounted at runtime, not baked)
 data/

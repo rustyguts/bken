@@ -1,3 +1,5 @@
+# Monorepo
+node_modules/
 .venv/
 __pycache__/
 *.pyc
@@ -5,6 +7,17 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# App
+app/node_modules/
+app/.nuxt/
+app/.output/
+app/dist/
+
+# CLI
+cli/.venv/
+cli/__pycache__/
+cli/.pytest_cache/
 
 # Data and artifacts (derived, large)
 data/
@@ -15,3 +28,9 @@ models/
 
 # Local env
 .env
+.env.local
+.env.*.local
+
+# Misc
+.DS_Store
+Thumbs.db

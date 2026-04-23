@@ -8,7 +8,7 @@
 # or set COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml in .env.
 
 services:
-  backend:
+  cli:
     deploy:
       resources:
         reservations:

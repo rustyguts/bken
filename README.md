@@ -1,4 +1,4 @@
-# vidpipe
+# bken
 
 Extract funny / memorable moments from gameplay recordings by combining
 speech-to-text, laughter & audio-event detection, and (optionally)
@@ -49,70 +49,71 @@ Requires:
 - [`uv`](https://docs.astral.sh/uv/) for dep management
 
 ```bash
+cd cli
 uv sync              # installs everything including torch+cu124
-uv pip install -e .  # make the `vidpipe` CLI importable/installable
+uv pip install -e .  # make the `bken` CLI importable/installable
 ```
 
 The LLM reranker shells out to the `claude` CLI (Claude Code). If that's
-on your `PATH` and you're logged in, `vidpipe rank` just works — no API
+on your `PATH` and you're logged in, `bken rank` just works — no API
 key required. If `claude` is missing, the stage is skipped.
 
 ---
 
 ## CLI
 
-`vidpipe` is a Typer CLI. Top-level help is `vidpipe --help`; every
+`bken` is a Typer CLI. Top-level help is `bken --help`; every
 subcommand has its own `-h`. Output is colourful and uses live progress
 bars + spinners — quiet it with `-q`, crank up logs with `-v`.
 
 ```text
-vidpipe init           Initialize the SQLite schema
-vidpipe ingest         Ingest a file or recursively scan a folder (parallel)
-vidpipe extract-audio  Decode each pending video to 16 kHz mono WAV
-vidpipe transcribe     Run faster-whisper on every audio-extracted video
-vidpipe detect-events  Run PANNs + RMS spike detection
-vidpipe score          Sliding-window scoring → top-N candidate clips
-vidpipe clip           Cut candidate clips into mp4s
-vidpipe rank           Re-rank clips with the Claude CLI
-vidpipe pipeline       Run every stage end-to-end
-vidpipe stats          Pipeline-wide overview
-vidpipe config         Dump effective configuration
-vidpipe web            Launch the FastAPI + Datastar browse UI
-vidpipe videos ...     list / show / reset / delete indexed videos
-vidpipe clips  ...     show / open / top / rate candidate clips
-vidpipe db     ...     init / vacuum / reset
+bken init           Initialize the SQLite schema
+bken ingest         Ingest a file or recursively scan a folder (parallel)
+bken extract-audio  Decode each pending video to 16 kHz mono WAV
+bken transcribe     Run faster-whisper on every audio-extracted video
+bken detect-events  Run PANNs + RMS spike detection
+bken score          Sliding-window scoring → top-N candidate clips
+bken clip           Cut candidate clips into mp4s
+bken rank           Re-rank clips with the Claude CLI
+bken pipeline       Run every stage end-to-end
+bken stats          Pipeline-wide overview
+bken config         Dump effective configuration
+bken web                     Launch the Nuxt admin panel (shortcut for docker compose up)
+bken videos ...     list / show / reset / delete indexed videos
+bken clips  ...     show / open / top / rate candidate clips
+bken db     ...     init / vacuum / reset
 ```
 
 ### Quick start
 
 ```bash
 # Whole pipeline, one file
-uv run vidpipe pipeline /mnt/shack/media/gaming/archive/Grand_Theft_Auto_V/2020-01-13_03-07-51.mp4 --single-file
+uv run bken pipeline /mnt/shack/media/gaming/archive/Grand_Theft_Auto_V/2020-01-13_03-07-51.mp4 --single-file
 
 # Browse results
-uv run vidpipe stats
-uv run vidpipe clips show 1
-uv run vidpipe web                       # http://127.0.0.1:8000
+uv run bken stats
+uv run bken clips show 1
+docker compose up                        # http://127.0.0.1:3000
 ```
 
 ### Bulk ingest (the headline feature)
 
-`vidpipe ingest` walks a folder recursively and farms out `ffprobe` +
+`bken ingest` walks a folder recursively and farms out `ffprobe` +
 SHA1-prefix hashing to a thread pool. With the default `--workers 8` you
 can chew through tens of thousands of recordings in a single command:
 
 ```bash
 # 8 ffprobes at once, recursive walk
-uv run vidpipe ingest /mnt/shack/media/gaming/archive --workers 8
+uv run bken ingest /mnt/shack/media/gaming/archive --workers 8
 
 # Just one file
-uv run vidpipe ingest /path/to/one.mp4 --single-file
+uv run bken ingest /path/to/one.mp4 --single-file
 
 # Filter the walk
-uv run vidpipe ingest /archive -p '2024-*.mp4' --workers 16
+uv run bken ingest /archive -p '2024-*.mp4' --workers 16
 
 # Preview without touching the DB
-uv run vidpipe ingest /archive --dry-run --limit 100
+uv run bken ingest /archive --dry-run --limit 100
 ```
 
 Re-running `ingest` on the same folder is a no-op for unchanged files
@@ -125,12 +126,12 @@ their downstream stage flags. The summary table at the end breaks down
 Useful while iterating on scoring weights or after a fresh ingest:
 
 ```bash
-uv run vidpipe extract-audio --workers 4   # parallel ffmpeg decode
-uv run vidpipe transcribe                  # GPU; sequential
-uv run vidpipe detect-events               # GPU; sequential
-uv run vidpipe score
-uv run vidpipe clip --workers 4            # parallel ffmpeg cuts
-uv run vidpipe rank                        # shells out to `claude -p`
+uv run bken extract-audio --workers 4   # parallel ffmpeg decode
+uv run bken transcribe                  # GPU; sequential
+uv run bken detect-events               # GPU; sequential
+uv run bken score
+uv run bken clip --workers 4            # parallel ffmpeg cuts
+uv run bken rank                        # shells out to `claude -p`
 ```
 
 GPU-bound stages (`transcribe`, `detect-events`) intentionally stay
@@ -140,7 +141,7 @@ GPU on their own.
 ### Pipeline mode for a whole archive
 
 ```bash
-uv run vidpipe pipeline /mnt/shack/media/gaming/archive --workers 8
+uv run bken pipeline /mnt/shack/media/gaming/archive --workers 8
 ```
 
 This runs ingest first (parallel), then audio / transcribe / events /
@@ -151,22 +152,22 @@ re-encoding on the cut step.
 ### Browsing results
 
 ```bash
-uv run vidpipe videos list                 # dashboard with stage flags
-uv run vidpipe videos show 1               # full metadata for video_id=1
-uv run vidpipe clips show 1                # ranked clip list for one video
-uv run vidpipe clips top -n 20             # top 20 across the archive
-uv run vidpipe clips rate 42 5             # 5-star a clip
-uv run vidpipe clips open 42               # xdg-open the mp4
-uv run vidpipe web                         # interactive grid in a browser
+uv run bken videos list                 # dashboard with stage flags
+uv run bken videos show 1               # full metadata for video_id=1
+uv run bken clips show 1                # ranked clip list for one video
+uv run bken clips top -n 20             # top 20 across the archive
+uv run bken clips rate 42 5             # 5-star a clip
+uv run bken clips open 42               # xdg-open the mp4
+docker compose up                          # interactive grid in a browser
 ```
 
 ### Maintenance
 
 ```bash
-uv run vidpipe videos reset 1 transcribe score   # re-run those stages
-uv run vidpipe videos delete 1                   # row + cached audio + cut mp4s
-uv run vidpipe db vacuum
-uv run vidpipe db reset --yes                    # nuke index.db
+uv run bken videos reset 1 transcribe score   # re-run those stages
+uv run bken videos delete 1                   # row + cached audio + cut mp4s
+uv run bken db vacuum
+uv run bken db reset --yes                    # nuke index.db
 ```
 
 ### Outputs
@@ -180,7 +181,7 @@ uv run vidpipe db reset --yes                    # nuke index.db
 
 ## Web UI
 
-A Nuxt 3 app in `nuxt/`. Vue 3 client, Nitro server routes (JSON API
+A Nuxt 4 app in `nuxt/`. Vue 3 client using `@nuxt/ui`, Nitro server routes (JSON API
 + media streaming), Vidstack for inline playback, IBM Plex Sans, dark
 archive-tape aesthetic. Runs under Bun with the built-in `bun:sqlite`
 driver — no native addons to build.
@@ -206,7 +207,7 @@ clips, and clicking a thumbnail mounts Vidstack for inline playback.
 cd nuxt && bun install && bun run dev       # → http://localhost:3000
 
 # terminal 2 — pipeline work
-uv run vidpipe pipeline /path/to/video.mp4 --single-file
+uv run bken pipeline /path/to/video.mp4 --single-file
 ```
 
 Everything a browser hits lives behind `:3000`. The Vite dev HMR, the
@@ -216,9 +217,9 @@ same port.
 ### Pipeline stages in the `cli` container
 
 ```bash
-docker compose exec cli uv run vidpipe ingest /archive/Grand_Theft_Auto_V --workers 8
-docker compose exec cli uv run vidpipe pipeline /archive/file.mp4 --single-file
-docker compose exec cli uv run vidpipe rank
+docker compose exec cli uv run bken ingest /archive/Grand_Theft_Auto_V --workers 8
+docker compose exec cli uv run bken pipeline /archive/file.mp4 --single-file
+docker compose exec cli uv run bken rank
 ```
 
 GPU-bound stages (`transcribe`, `detect-events`) need
@@ -234,19 +235,17 @@ as long as `CLAUDE_HOME` in `.env` points at your host's `~/.claude`.
 ### Project layout
 
 ```
-nuxt/
-  app.vue                        root component
-  components/{Sidebar,Toolbar,ClipCard,StarRating}.vue
-  composables/useClipStore.ts    shared reactive filter/sort state
-  plugins/vidstack.client.ts     register <media-*> elements on client
-  server/
-    api/clips.get.ts             GET /api/clips
-    api/games.get.ts             GET /api/games
-    api/rate/[id].post.ts        POST /api/rate/:id?rating=N
-    routes/thumb/[id].get.ts     GET /thumb/:id.jpg  (lazy ffmpeg)
-    routes/clip/[id].get.ts      GET /clip/:id.mp4   (Range support)
-    utils/{db,paths,thumbs}.ts
-  assets/css/styles.css
+cli/                             Python pipeline
+  src/bken/                   Source code
+  tests/                         Pytest suite
+  pyproject.toml                 uv / dependencies
+  Dockerfile                     Backend image
+
+app/                             Nuxt 4 admin panel
+  app/                           Frontend code
+  server/                        Nitro API routes
+  package.json                   Dependencies (Bun)
+  Dockerfile                     Frontend image
 ```
 
 ### JSON API
@@ -263,17 +262,17 @@ nuxt/
 
 ## Configuration
 
-All tunables live in `src/vidpipe/config.py`; the common ones can also be
+All tunables live in `cli/src/bken/config.py`; the common ones can also be
 overridden with env vars:
 
 | Env var                   | Default       | Notes                                                 |
 |---------------------------|---------------|-------------------------------------------------------|
-| `VIDPIPE_DATA`            | `./data`      | Where DB + artifacts go                               |
-| `VIDPIPE_MODELS`          | `./models`    | Whisper model cache                                   |
-| `VIDPIPE_WHISPER_MODEL`   | `large-v3`    | Try `turbo` for faster-lower-quality, `small` on CPU  |
-| `VIDPIPE_WHISPER_COMPUTE` | `float16`     | Use `int8` to fit on small GPUs                       |
-| `VIDPIPE_CLAUDE_CLI`      | `claude`      | Path / name of the Claude Code CLI                    |
-| `VIDPIPE_CLAUDE_MODEL`    | `sonnet`      | Forwarded as `--model` to the CLI; set to `haiku` for speed |
+| `BKEN_DATA`            | `./data`      | Where DB + artifacts go                               |
+| `BKEN_MODELS`          | `./models`    | Whisper model cache                                   |
+| `BKEN_WHISPER_MODEL`   | `large-v3`    | Try `turbo` for faster-lower-quality, `small` on CPU  |
+| `BKEN_WHISPER_COMPUTE` | `float16`     | Use `int8` to fit on small GPUs                       |
+| `BKEN_CLAUDE_CLI`      | `claude`      | Path / name of the Claude Code CLI                    |
+| `BKEN_CLAUDE_MODEL`    | `sonnet`      | Forwarded as `--model` to the CLI; set to `haiku` for speed |
 
 Scoring weights, thresholds, window size, and stride are constants at
 the top of `scoring.py` / `events.py` — edit in place.
@@ -331,8 +330,8 @@ real video; the unit tests cover scoring/NMS math and DB schema.
 
 | Concern            | Lives in       | Runtime            |
 |--------------------|----------------|--------------------|
-| Pipeline stages    | `src/vidpipe/` | Python 3.12 + uv   |
-| Web UI + JSON API  | `nuxt/`        | Bun + Nitro        |
+| Pipeline stages    | `cli/`         | Python 3.12 + uv   |
+| Web UI + JSON API  | `app/`         | Bun + Nitro        |
 | Shared state       | `data/`        | SQLite WAL + mp4s  |
 
 The two sides agree only on: **SQLite schema**, **path layout**, and
