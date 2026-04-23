@@ -1,0 +1,18 @@
+# Optional override — merges NVIDIA GPU passthrough into the backend
+# service. Requires `nvidia-container-toolkit` on the host.
+#
+# Use with:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# or set COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml in .env.
+
+services:
+  backend:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

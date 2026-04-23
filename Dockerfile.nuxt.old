@@ -1,0 +1,20 @@
+# Frontend image: Bun + Vite dev server with HMR.
+#
+# Build installs node_modules into /app/node_modules; the compose file
+# bind-mounts only the source files so the installed modules stay put.
+
+FROM oven/bun:1.3
+
+WORKDIR /app
+
+# Dep layer — cached across source edits.
+COPY frontend/package.json frontend/bun.lock ./
+RUN bun install --frozen-lockfile
+
+# Source layer
+COPY frontend/ ./
+
+EXPOSE 5173
+
+# `--host` binds Vite to 0.0.0.0 so docker's port mapping reaches it.
+CMD ["bun", "run", "dev", "--host", "0.0.0.0"]

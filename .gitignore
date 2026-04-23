@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Data and artifacts (derived, large)
+data/
+!data/.gitkeep
+
+# Models cache
+models/
+
+# Local env
+.env

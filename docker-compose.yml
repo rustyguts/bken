@@ -1,0 +1,67 @@
+# Dev compose for vidpipe (Nuxt edition).
+#
+# `docker compose up` starts two services:
+#
+#   nuxt   — Nuxt 3 dev server on :3000 (serves UI + JSON API + media routes)
+#   cli    — Python 3.12 + CUDA torch + ffmpeg, used exclusively via
+#            `docker compose exec cli uv run vidpipe …` to run pipeline
+#            stages (ingest, transcribe, events, score, clip, rank).
+#
+# Both services mount the same `./data` so they see the same SQLite DB and
+# clip files. Open http://localhost:3000 for the admin panel.
+
+name: vidpipe
+
+services:
+  nuxt:
+    build:
+      context: .
+      dockerfile: Dockerfile.nuxt
+    image: vidpipe-nuxt:dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Nuxt sources — hot reload. node_modules stays in the image so the
+      # host doesn't need bun installed to `docker compose up`.
+      - ./nuxt/server:/app/server:rw
+      - ./nuxt/components:/app/components:rw
+      - ./nuxt/composables:/app/composables:rw
+      - ./nuxt/pages:/app/pages:rw
+      - ./nuxt/plugins:/app/plugins:rw
+      - ./nuxt/assets:/app/assets:rw
+      - ./nuxt/public:/app/public:rw
+      - ./nuxt/app.vue:/app/app.vue:ro
+      - ./nuxt/nuxt.config.ts:/app/nuxt.config.ts:ro
+      - ./nuxt/tsconfig.json:/app/tsconfig.json:ro
+      # Shared data: SQLite DB + cached audio + cut clips + thumbnails.
+      - ./data:/app/data:rw
+      # Archive — source videos live here; mount read-only so the UI can stream them.
+      - /mnt/shack:/mnt/shack:ro
+    environment:
+      VIDPIPE_DATA: /app/data
+      # Prevents bun's port picker from hopping off 3000 when re-running.
+      HOST: 0.0.0.0
+    # Everything the UI does is SQL reads + ffmpeg-for-thumbs. No GPU needed.
+
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: vidpipe-backend:dev
+    # No ports — this service is used via `docker compose exec cli …`.
+    tty: true
+    stdin_open: true
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./src:/app/src:rw
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./data:/app/data:rw
+      - ./models:/app/models:rw
+      - ${ARCHIVE_DIR:-./.archive-stub}:/archive:ro
+      - ${CLAUDE_HOME:-~/.claude}:/root/.claude:rw
+    environment:
+      PYTHONUNBUFFERED: "1"
+      VIDPIPE_DATA: /app/data
+      VIDPIPE_MODELS: /app/models
+      PATH: /root/.claude/local:/usr/local/bin:/usr/bin:/bin
+    # See docker-compose.gpu.yml for the nvidia-container-toolkit override.

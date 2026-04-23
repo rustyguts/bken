@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* Brand palette — primary, centred on #ffcc00. */
+@theme static {
+  --color-brand-50:  #fffbe5;
+  --color-brand-100: #fff4b8;
+  --color-brand-200: #ffea80;
+  --color-brand-300: #ffdd47;
+  --color-brand-400: #ffd31f;
+  --color-brand-500: #ffcc00;
+  --color-brand-600: #d9a800;
+  --color-brand-700: #b38600;
+  --color-brand-800: #8c6700;
+  --color-brand-900: #664a00;
+  --color-brand-950: #3d2d00;
+}
+
+/* Light mode: clean white surfaces, pure-black text. */
+:root {
+  --ui-bg:          #ffffff;
+  --ui-bg-muted:    #fafafa;
+  --ui-bg-elevated: #f4f4f5;
+  --ui-bg-accented: #e4e4e7;
+  --ui-bg-inverted: #000000;
+
+  --ui-text-dimmed:      #9ca3af;
+  --ui-text-muted:       #6b7280;
+  --ui-text-toned:       #3f3f46;
+  --ui-text:             #18181b;
+  --ui-text-highlighted: #000000;
+  --ui-text-inverted:    #ffffff;
+
+  --ui-border:          #e4e4e7;
+  --ui-border-muted:    #f4f4f5;
+  --ui-border-accented: #d4d4d8;
+  --ui-border-inverted: #000000;
+}
+
+/* Dark mode: pitch black surfaces, white accents. */
+.dark {
+  --ui-bg:          #000000;
+  --ui-bg-muted:    #050505;
+  --ui-bg-elevated: #0a0a0a;
+  --ui-bg-accented: #141414;
+  --ui-bg-inverted: #ffffff;
+
+  --ui-text-dimmed:      #525252;
+  --ui-text-muted:       #a3a3a3;
+  --ui-text-toned:       #d4d4d4;
+  --ui-text:             #f5f5f5;
+  --ui-text-highlighted: #ffffff;
+  --ui-text-inverted:    #000000;
+
+  --ui-border:          #1f1f1f;
+  --ui-border-muted:    #141414;
+  --ui-border-accented: #2a2a2a;
+  --ui-border-inverted: #ffffff;
+}
