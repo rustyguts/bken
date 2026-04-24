@@ -1,0 +1,79 @@
+{{define "stage_panel"}}
+<section id="stage-panel" class="card bg-base-100 border border-base-300 mt-4">
+  <div class="card-body p-3">
+    <div class="flex items-center justify-between">
+      <h3 class="card-title text-base flex items-center gap-2">
+        Pipeline status
+        {{$running := false}}{{range .Stages}}{{if eq .State "running"}}{{$running = true}}{{end}}{{end}}
+        {{if $running}}<span class="loading loading-spinner loading-xs text-warning" title="pipeline running"></span>{{end}}
+      </h3>
+      <div class="flex items-center gap-2">
+        <button
+          class="btn btn-xs btn-ghost gap-1"
+          data-on-click="@post('/api/videos/{{.Video.ID}}/reprocess', {body: JSON.stringify({stage: 'score'})})"
+          data-indicator="$reprocessing_score">
+          <span data-class="{'loading loading-spinner loading-xs': $reprocessing_score}"></span>
+          <i data-lucide="refresh-cw" class="w-3 h-3"></i> Re-score
+        </button>
+        <button
+          class="btn btn-xs btn-primary gap-1"
+          data-on-click="@post('/api/videos/{{.Video.ID}}/reprocess', {body: JSON.stringify({stage: 'full'})})"
+          data-indicator="$reprocessing_full">
+          <span data-class="{'loading loading-spinner loading-xs': $reprocessing_full}"></span>
+          <i data-lucide="play" class="w-3 h-3"></i> Run full pipeline
+        </button>
+      </div>
+    </div>
+    <div class="overflow-x-auto mt-2">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th style="width:2rem"></th>
+            <th>Stage</th>
+            <th>Status</th>
+            <th>Detail</th>
+            <th class="text-right"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Stages}}
+            <tr>
+              <td>
+                {{if eq .State "ok"}}
+                  <i data-lucide="check-circle-2" class="w-4 h-4 text-success" title="ok"></i>
+                {{else if eq .State "fail"}}
+                  <i data-lucide="x-circle" class="w-4 h-4 text-error" title="failed"></i>
+                {{else if eq .State "partial"}}
+                  <i data-lucide="alert-circle" class="w-4 h-4 text-warning" title="partial"></i>
+                {{else if eq .State "running"}}
+                  <span class="loading loading-spinner loading-xs text-warning" title="running"></span>
+                {{else}}
+                  <i data-lucide="help-circle" class="w-4 h-4 text-base-content/40" title="unknown"></i>
+                {{end}}
+              </td>
+              <td class="font-medium">{{.Label}}</td>
+              <td>
+                <span class="badge badge-sm {{if eq .State "ok"}}badge-success{{else if eq .State "fail"}}badge-error{{else if eq .State "partial"}}badge-warning{{else if eq .State "running"}}badge-warning{{else}}badge-ghost{{end}}">
+                  {{.State}}
+                </span>
+              </td>
+              <td class="text-xs text-base-content/70 truncate max-w-xs" title="{{.Detail}}">{{.Detail}}</td>
+              <td class="text-right">
+                {{if .Trigger}}
+                  <button
+                    class="btn btn-xs btn-ghost gap-1"
+                    data-on-click="@post('/api/videos/{{$.Video.ID}}/reprocess', {body: JSON.stringify({stage: '{{.Trigger}}'})})"
+                    title="Re-run from {{.Key}}"><i data-lucide="play-circle" class="w-3 h-3"></i> Run</button>
+                {{end}}
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-base-content/50 mt-1">
+      Green = stage completed with artifacts. Red = most recent job failed (see Jobs). ? = not yet attempted.
+    </p>
+  </div>
+</section>
+{{end}}

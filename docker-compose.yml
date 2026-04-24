@@ -1,73 +1,114 @@
-# Dev compose for bken (Nuxt edition).
+# Dev compose for bken (Go edition).
 #
-# `docker compose up` starts two services:
+# `docker compose up` starts:
 #
-#   nuxt   — Nuxt 4 dev server on :3000 (serves UI + JSON API + media routes)
-#   cli    — Python 3.12 + CUDA torch + ffmpeg, used exclusively via
-#            `docker compose exec cli uv run bken …` to run pipeline
-#            stages (ingest, transcribe, events, score, clip, rank).
+#   bken       — single Go binary on :3000. Serves UI + JSON API + media,
+#                and runs the asynq worker in-process.
+#   worker     — optional extra worker replica (profile: scale).
+#   dragonfly  — asynq broker (Redis-compatible). DragonflyDB is a drop-in
+#                Redis replacement with lower memory overhead and no AOF fsync
+#                tax; asynq talks plain RESP so no code changes needed.
+#   ollama     — local LLM runtime. Auto-pulls qwen2.5:1.5b-instruct on first
+#                rank call (~1 GB on disk, ~1.5 GB RAM at inference).
+#   whisper    — faster-whisper ASR HTTP service. `small` model by default
+#                (~500 MB, CPU-usable). Override via ASR_MODEL env in .env.
 #
-# Both services mount the same `./data` so they see the same SQLite DB and
-# clip files. Open http://localhost:3000 for the admin panel.
+# All services mount the same `./data` so SQLite + cached audio + clips stay
+# consistent. Archive mount is read-only.
 
 name: bken
 
 services:
-  app:
+  bken:
     build:
-      context: ./app
+      context: .
       dockerfile: Dockerfile
-      # BuildKit's attestations add minutes to `up --build` on large images
-      # (the multi-GB cli image in particular stalls on "resolving provenance").
-      # None of this is useful for local dev images.
-      provenance: false
-      sbom: false
-    image: bken-app:dev
+      target: dev
+    image: bken:dev
+    depends_on:
+      - dragonfly
+      - ollama
+      - whisper
+    restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
-      # Nuxt sources — hot reload. node_modules stays in the image so the
-      # host doesn't need bun installed to `docker compose up`.
-      - ./app/app:/app/app:rw
-      - ./app/server:/app/server:rw
-      - ./app/nuxt.config.ts:/app/nuxt.config.ts:ro
-      - ./app/tsconfig.json:/app/tsconfig.json:ro
-      # Shared data: SQLite DB + cached audio + cut clips + thumbnails.
-      # Also holds `libraries/test` — sample clips auto-seeded as the
-      # default library at startup (see BKEN_DEFAULT_LIBRARY).
-      - ./data:/app/data:rw
-      # Archive — source videos live here; mount read-only so the UI can stream them.
-      - /mnt/shack:/mnt/shack:ro
-    environment:
-      BKEN_DATA: /app/data
-      BKEN_DEFAULT_LIBRARY: /app/data/libraries/test
-      # Prevents bun's port picker from hopping off 3000 when re-running.
-      HOST: 0.0.0.0
-    # Everything the UI does is SQL reads + ffmpeg-for-thumbs. No GPU needed.
-
-  cli:
-    build:
-      context: ./cli
-      dockerfile: Dockerfile
-      provenance: false
-      sbom: false
-    image: bken-cli:dev
-    # No ports — the app container enqueues work via the `job` table and this
-    # worker process drains it. One-off commands still work via
-    # `docker compose exec cli uv run bken <cmd>`.
-    tty: true
-    stdin_open: true
-    command: ["uv", "run", "bken", "worker"]
-    volumes:
-      - ./cli/src:/app/src:rw
-      - ./cli/pyproject.toml:/app/pyproject.toml:ro
+      - .:/app:rw
       - ./data:/app/data:rw
       - ./models:/app/models:rw
+      - /mnt/shack:/mnt/shack:ro
       - ${ARCHIVE_DIR:-./.archive-stub}:/archive:ro
-      - ${CLAUDE_HOME:-~/.claude}:/root/.claude:rw
     environment:
-      PYTHONUNBUFFERED: "1"
       BKEN_DATA: /app/data
       BKEN_MODELS: /app/models
-      PATH: /root/.claude/local:/usr/local/bin:/usr/bin:/bin
-    # See docker-compose.gpu.yml for the nvidia-container-toolkit override.
+      BKEN_HTTP: :3000
+      BKEN_REDIS: dragonfly:6379
+      BKEN_LLM_BASE_URL: http://ollama:11434
+      BKEN_LLM_MODEL: qwen2.5:1.5b-instruct
+      BKEN_ASR_BASE_URL: http://whisper:9000
+      BKEN_ASR_LANGUAGE: en
+
+  worker:
+    image: bken:dev
+    depends_on:
+      - bken
+      - dragonfly
+      - ollama
+      - whisper
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data:rw
+      - ./models:/app/models:rw
+      - /mnt/shack:/mnt/shack:ro
+      - ${ARCHIVE_DIR:-./.archive-stub}:/archive:ro
+    environment:
+      BKEN_DATA: /app/data
+      BKEN_MODELS: /app/models
+      BKEN_REDIS: dragonfly:6379
+      BKEN_LLM_BASE_URL: http://ollama:11434
+      BKEN_LLM_MODEL: qwen2.5:1.5b-instruct
+      BKEN_ASR_BASE_URL: http://whisper:9000
+      BKEN_ASR_LANGUAGE: en
+    command: ["worker", "--concurrency", "2"]
+    profiles: ["scale"]
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    restart: unless-stopped
+    ulimits:
+      memlock: -1
+    volumes:
+      - ./data/dragonfly:/data
+    # `default_lua_flags=allow-undeclared-keys` is required for asynq — its
+    # Lua scripts access keys computed at runtime, which Dragonfly's sandbox
+    # rejects by default.
+    command:
+      - "--logtostderr"
+      - "--dir=/data"
+      - "--snapshot_cron=*/15 * * * *"
+      - "--default_lua_flags=allow-undeclared-keys"
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ./data/ollama:/root/.ollama
+    # CPU-only by default. For GPU acceleration see docker-compose.gpu.yml.
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+
+  whisper:
+    # faster-whisper HTTP service. `small` model downloads on first boot
+    # (~500 MB cached under ./data/whisper). Override with ASR_MODEL in .env
+    # for base/medium/large-v3. CPU by default; GPU image is the
+    # `onerahmet/openai-whisper-asr-webservice:latest-gpu` tag.
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    restart: unless-stopped
+    environment:
+      ASR_MODEL: ${ASR_MODEL:-large-v3-turbo}
+      ASR_ENGINE: faster_whisper
+      # Cache downloaded weights on the host so restarts are instant.
+      HF_HUB_CACHE: /root/.cache/huggingface
+    volumes:
+      - ./data/whisper:/root/.cache

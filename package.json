@@ -1,0 +1,15 @@
+{
+  "name": "bken-ui-build",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tailwind + DaisyUI CSS build for the bken Go UI. Outputs internal/web/ui/static/dist/app.css which is embedded into the Go binary.",
+  "scripts": {
+    "build:css": "tailwindcss -i internal/web/ui/static/input.css -o internal/web/ui/static/dist/app.css --minify",
+    "watch:css": "tailwindcss -i internal/web/ui/static/input.css -o internal/web/ui/static/dist/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

@@ -15,6 +15,12 @@ app/node_modules/
 app/.nuxt/
 app/.output/
 
+# Go build
+node_modules/
+*.test
+bken
+cmd/*/bken
+
 # Persistent data (mounted at runtime, not baked)
 data/
 models/

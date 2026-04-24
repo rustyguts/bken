@@ -1,0 +1,71 @@
+{{define "index"}}{{template "base" .}}{{end}}
+
+{{define "header_actions"}}
+  <form method="GET" action="/" class="flex items-center gap-2">
+    <label class="input input-sm input-bordered flex items-center gap-2 w-48">
+      <i data-lucide="search" class="w-4 h-4 opacity-70"></i>
+      <input type="text" name="q" placeholder="Search path" value="{{.Filters.Q}}" class="grow">
+    </label>
+    <select name="library_id" class="select select-sm select-bordered w-40">
+      <option value="">All libraries</option>
+      {{range .Libraries}}
+        <option value="{{.ID}}" {{if eq $.Filters.LibraryID .ID}}selected{{end}}>{{.Name}}</option>
+      {{end}}
+    </select>
+    <select name="game" class="select select-sm select-bordered w-40">
+      <option value="">All games</option>
+      {{range .Games}}
+        <option value="{{.}}" {{if eq $.Filters.Game .}}selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+    <label class="label cursor-pointer gap-2 text-sm">
+      <input type="checkbox" name="missing" value="1" class="checkbox checkbox-sm" {{if .Filters.Missing}}checked{{end}}>
+      <span>Show missing</span>
+    </label>
+    <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+    <a href="/" class="btn btn-sm btn-ghost">Reset</a>
+  </form>
+{{end}}
+
+{{define "page"}}
+  {{if .Error}}
+    <div class="alert alert-error mb-4">
+      <span>API error: {{.Error}}</span>
+    </div>
+  {{end}}
+
+  {{if not .Videos}}
+    <div class="card bg-base-100 border border-base-300">
+      <div class="card-body items-center text-center">
+        <i data-lucide="video-off" class="w-12 h-12 opacity-20 mb-2"></i>
+        <h2 class="card-title">No videos ingested yet.</h2>
+        <p class="text-base-content/60">Add a library and run a sync to start.</p>
+        <a href="/libraries" class="btn btn-primary mt-2">Manage libraries</a>
+      </div>
+    </div>
+  {{else}}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {{range .Videos}}
+        <a href="/video/{{.ID}}" class="card bg-base-100 border border-base-300 hover:border-primary transition-colors">
+          <figure class="aspect-video overflow-hidden bg-base-200">
+            <img src="{{.ThumbURL}}" alt="" class="size-full object-cover" loading="lazy">
+          </figure>
+          <div class="card-body p-3 gap-2">
+            <h3 class="font-medium text-sm truncate" title="{{.Name}}">{{.Name}}</h3>
+            <div class="flex flex-wrap items-center gap-1">
+              {{if .Missing}}<span class="badge badge-error badge-sm">missing</span>{{end}}
+              <span class="badge badge-ghost badge-sm gap-1"><i data-lucide="gamepad-2" class="w-3 h-3"></i> {{default "Unknown" .Game}}</span>
+              <span class="badge badge-outline badge-sm gap-1"><i data-lucide="clock" class="w-3 h-3"></i> {{fmtDuration .DurationS}}</span>
+              <span class="badge badge-primary badge-sm gap-1"><i data-lucide="sparkles" class="w-3 h-3"></i> {{.MomentCount}} moments</span>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              {{range .Stages}}
+                <span class="badge badge-sm {{if .Done}}badge-success{{else}}badge-ghost{{end}}">{{.Name}}</span>
+              {{end}}
+            </div>
+          </div>
+        </a>
+      {{end}}
+    </div>
+  {{end}}
+{{end}}

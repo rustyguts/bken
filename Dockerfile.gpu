@@ -1,0 +1,117 @@
+# Multi-stage build for the Go `bken` binary with ML support (GPU/CPU).
+# Requires NVIDIA libraries or ONNX/Whisper runtimes at runtime.
+
+# ---- css build ----------------------------------------------------------
+FROM oven/bun:1 AS cssbuild
+WORKDIR /build
+COPY package.json ./
+RUN bun install
+COPY internal/web/ui/static/input.css internal/web/ui/static/input.css
+COPY internal/web/ui/templates internal/web/ui/templates
+RUN bunx tailwindcss \
+      -i internal/web/ui/static/input.css \
+      -o internal/web/ui/static/dist/app.css \
+      --minify
+
+# ---- go build -----------------------------------------------------------
+FROM golang:1.25-bookworm AS gobuild
+WORKDIR /src
+
+# Install build dependencies for whisper.cpp and ONNX Runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    cmake \
+    ca-certificates \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1. Build whisper.cpp shared library
+RUN git clone https://github.com/ggerganov/whisper.cpp.git /whisper.cpp && \
+    cd /whisper.cpp && \
+    cmake -B build -DBUILD_SHARED_LIBS=ON -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF && \
+    cmake --build build --config Release && \
+    cp build/libwhisper.so /usr/local/lib/ && \
+    cp whisper.h /usr/local/include/ && \
+    ldconfig
+
+# 2. Download ONNX Runtime shared library
+RUN wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz && \
+    tar -xzf onnxruntime-linux-x64-1.20.1.tgz && \
+    cp onnxruntime-linux-x64-1.20.1/lib/libonnxruntime.so* /usr/local/lib/ && \
+    cp -r onnxruntime-linux-x64-1.20.1/include/* /usr/local/include/ && \
+    ldconfig
+
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=cssbuild /build/internal/web/ui/static/dist/app.css internal/web/ui/static/dist/app.css
+
+# Build with ML tags enabled
+RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -tags "whisper onnx" -o /out/bken ./cmd/bken
+
+# ---- dev ----------------------------------------------------------------
+FROM golang:1.25-bookworm AS dev
+WORKDIR /app
+
+# Install build dependencies for whisper.cpp and ONNX Runtime + air
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    cmake \
+    ca-certificates \
+    wget \
+    ffmpeg \
+    tzdata \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN go install github.com/air-verse/air@latest
+
+# 1. Build whisper.cpp shared library
+RUN git clone https://github.com/ggerganov/whisper.cpp.git /whisper.cpp && \
+    cd /whisper.cpp && \
+    cmake -B build -DBUILD_SHARED_LIBS=ON -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF && \
+    cmake --build build --config Release && \
+    cp build/libwhisper.so /usr/local/lib/ && \
+    cp whisper.h /usr/local/include/ && \
+    ldconfig
+
+# 2. Download ONNX Runtime shared library
+RUN wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz && \
+    tar -xzf onnxruntime-linux-x64-1.20.1.tgz && \
+    cp onnxruntime-linux-x64-1.20.1/lib/libonnxruntime.so* /usr/local/lib/ && \
+    cp -r onnxruntime-linux-x64-1.20.1/include/* /usr/local/include/ && \
+    ldconfig
+
+COPY . .
+COPY --from=cssbuild /build/internal/web/ui/static/dist/app.css internal/web/ui/static/dist/app.css
+
+ENV BKEN_DATA=/app/data \
+    BKEN_MODELS=/app/models \
+    BKEN_HTTP=:3000
+ENTRYPOINT ["air"]
+
+# ---- runtime ------------------------------------------------------------
+# Use Debian for easier library management (matches gobuild base)
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    ca-certificates \
+    tzdata \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy libraries from build stage
+COPY --from=gobuild /usr/local/lib/libwhisper.so /usr/local/lib/
+COPY --from=gobuild /usr/local/lib/libonnxruntime.so* /usr/local/lib/
+RUN ldconfig
+
+WORKDIR /app
+COPY --from=gobuild /out/bken /usr/local/bin/bken
+ENV BKEN_DATA=/app/data \
+    BKEN_MODELS=/app/models \
+    BKEN_HTTP=:3000
+EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/bken"]
+CMD ["serve"]

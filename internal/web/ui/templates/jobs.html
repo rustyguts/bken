@@ -1,0 +1,30 @@
+{{define "jobs"}}{{template "base" .}}{{end}}
+
+{{define "header_actions"}}{{end}}
+
+{{define "page"}}
+<div class="card bg-base-100 border border-base-300">
+  <div class="card-body p-0">
+    <div class="flex items-center justify-between p-3 border-b border-base-300">
+      <h2 class="card-title text-base">Job queue</h2>
+      <div class="flex items-center gap-2 text-sm text-base-content/60" data-on-load="@get('/sse/jobs')">
+        <span class="loading loading-ring loading-xs"></span>
+        <span>Live via SSE</span>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>ID</th><th>Type</th><th>Status</th><th>Progress</th><th>Video</th><th>Target</th><th>Updated</th><th>Error</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-body">
+          {{range .Jobs}}{{template "job_row" .}}{{end}}
+          {{if not .Jobs}}<tr><td colspan="8" class="text-center text-base-content/60 py-6">No jobs yet.</td></tr>{{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}

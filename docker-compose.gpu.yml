@@ -1,14 +1,69 @@
-# Optional override — merges NVIDIA GPU passthrough into the backend
-# service. Requires `nvidia-container-toolkit` on the host.
+# Optional override — adds NVIDIA GPU passthrough to the Go services for the
+# `whisper` and `onnx` build-tagged ML stages. Requires the
+# `nvidia-container-toolkit` on the host.
 #
 # Use with:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 #
 # or set COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml in .env.
+#
+# NOTE: the default Dockerfile builds the binary without -tags whisper,onnx.
+# Build an image with `Dockerfile.gpu` (or add a build-arg) to include those
+# stages — omitted here to keep the default image small.
 
 services:
-  cli:
+  bken:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+      target: dev
+    volumes:
+      - .:/app:rw
+      - ./data:/app/data:rw
+      - ./models:/app/models:rw
+      - /mnt/shack:/mnt/shack:ro
+      - ${ARCHIVE_DIR:-./.archive-stub}:/archive:ro
+      - ${CLAUDE_HOME:-~/.claude}:/root/.claude:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+      target: dev
+    volumes:
+      - .:/app:rw
+      - ./data:/app/data:rw
+      - ./models:/app/models:rw
+      - /mnt/shack:/mnt/shack:ro
+      - ${ARCHIVE_DIR:-./.archive-stub}:/archive:ro
+      - ${CLAUDE_HOME:-~/.claude}:/root/.claude:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest-gpu
     deploy:
       resources:
         reservations:

@@ -1,0 +1,64 @@
+{{define "libraries"}}{{template "base" .}}{{end}}
+
+{{define "header_actions"}}{{end}}
+
+{{define "page"}}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+  <section class="lg:col-span-2 card bg-base-100 border border-base-300">
+    <div class="card-body p-0">
+      <div class="p-3 border-b border-base-300">
+        <h2 class="card-title text-base">Registered libraries</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr><th>ID</th><th>Name</th><th>Path</th><th>Interval</th><th>Next scan</th><th></th></tr>
+          </thead>
+          <tbody>
+            {{range .Libraries}}
+              <tr>
+                <td class="font-mono text-xs">{{.ID}}</td>
+                <td>{{.Name}}</td>
+                <td class="font-mono text-xs text-base-content/70">{{.Path}}</td>
+                <td class="text-xs">{{.ScanIntervalMinutes}} min</td>
+                <td class="text-xs">{{default "—" .NextScanAt}}</td>
+                <td class="text-right flex items-center justify-end gap-1">
+                  <button class="btn btn-xs btn-primary gap-1" data-on-click="@post('/api/libraries/{{.ID}}/sync')">
+                    <i data-lucide="refresh-cw" class="w-3 h-3"></i> Sync
+                  </button>
+                  <button class="btn btn-xs btn-ghost text-error" data-on-click="@delete('/api/libraries/{{.ID}}')" title="Delete library">
+                    <i data-lucide="trash-2" class="w-3 h-3"></i>
+                  </button>
+                </td>
+              </tr>
+            {{end}}
+            {{if not .Libraries}}<tr><td colspan="6" class="text-center text-base-content/60 py-6">No libraries yet.</td></tr>{{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  <section class="card bg-base-100 border border-base-300">
+    <div class="card-body p-3">
+      <h2 class="card-title text-base">Add library</h2>
+      <form method="POST" action="/libraries" class="flex flex-col gap-2">
+        <label class="form-control">
+          <div class="label"><span class="label-text">Name</span></div>
+          <input type="text" name="name" required class="input input-sm input-bordered">
+        </label>
+        <label class="form-control">
+          <div class="label"><span class="label-text">Path</span></div>
+          <input type="text" name="path" required class="input input-sm input-bordered font-mono">
+        </label>
+        <label class="form-control">
+          <div class="label"><span class="label-text">Scan interval (min)</span></div>
+          <input type="number" name="scan_interval_minutes" value="60" min="1" class="input input-sm input-bordered">
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm mt-2 gap-1">
+          <i data-lucide="plus" class="w-4 h-4"></i> Create
+        </button>
+      </form>
+    </div>
+  </section>
+</div>
+{{end}}

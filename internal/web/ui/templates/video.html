@@ -1,0 +1,54 @@
+{{define "video"}}{{template "base" .}}{{end}}
+
+{{define "header_actions"}}
+  <a href="/" class="btn btn-sm btn-ghost gap-1">
+    <i data-lucide="arrow-left" class="w-4 h-4"></i> Back
+  </a>
+{{end}}
+
+{{define "page"}}
+  <div
+    class="grid grid-cols-1 lg:grid-cols-3 gap-4"
+    data-on-load="@get('/sse/video/{{.Video.ID}}/stages')">
+
+    <section class="lg:col-span-2 card bg-base-100 border border-base-300">
+      <div class="card-body p-3">
+        <h2 class="card-title text-lg truncate" title="{{.Video.Name}}">{{.Video.Name}}</h2>
+        <div class="text-sm text-base-content/60 flex flex-wrap gap-2">
+          <span class="badge badge-ghost badge-sm gap-1"><i data-lucide="gamepad-2" class="w-3 h-3"></i> {{default "Unknown" .Video.Game}}</span>
+          <span class="badge badge-outline badge-sm gap-1"><i data-lucide="clock" class="w-3 h-3"></i> {{fmtDuration .Video.DurationS}}</span>
+          <span class="badge badge-outline badge-sm gap-1"><i data-lucide="monitor" class="w-3 h-3"></i> {{.Video.Width}}×{{.Video.Height}}</span>
+        </div>
+        <video
+          id="player"
+          class="w-full aspect-video bg-black rounded mt-2"
+          controls
+          preload="metadata"
+          data-ref="player"
+          src="/stream/video/{{.Video.ID}}"></video>
+      </div>
+      {{template "stage_panel" .}}
+    </section>
+
+    <aside class="card bg-base-100 border border-base-300">
+      <div class="card-body p-3">
+        <div class="flex items-center justify-between">
+          <h3 class="card-title text-base flex items-center gap-2">
+            <i data-lucide="sparkles" class="w-4 h-4 text-primary"></i>
+            Moments
+          </h3>
+          <span class="badge badge-primary">{{len .Moments}}</span>
+        </div>
+        <p class="text-xs text-base-content/60">Click a row to seek. Edit title or boundaries inline, then Save.</p>
+        <div class="divide-y divide-base-300 max-h-[70vh] overflow-y-auto -mx-3">
+          {{range .Moments}}
+            {{template "moment_row" .}}
+          {{end}}
+          {{if not .Moments}}
+            <div class="px-3 py-6 text-center text-base-content/60 text-sm">No moments yet. Run <code>score</code>.</div>
+          {{end}}
+        </div>
+      </div>
+    </aside>
+  </div>
+{{end}}

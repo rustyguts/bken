@@ -1,0 +1,53 @@
+{{define "moment_row"}}
+<div class="px-3 py-2 hover:bg-base-200 group" data-signals="{busy_{{.ID}}: false}">
+  <div class="flex items-start gap-2">
+    <button
+      type="button"
+      class="btn btn-xs btn-ghost"
+      title="Seek to {{fmtDuration .StartS}}"
+      onclick="document.getElementById('player').currentTime={{.StartS}}; document.getElementById('player').play()">
+      <i data-lucide="play" class="w-3 h-3"></i>
+    </button>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center justify-between gap-2">
+        <input
+          type="text"
+          class="input input-xs input-ghost w-full"
+          value="{{default "" .Title}}"
+          placeholder="Clip @ {{fmtDuration .StartS}}"
+          data-bind-title>
+        <div class="flex items-center gap-1 text-xs text-base-content/60 shrink-0">
+          <span>{{fmtDuration .StartS}} → {{fmtDuration .EndS}}</span>
+          {{if .Source}}<span class="badge badge-ghost badge-xs uppercase">{{.Source}}</span>{{end}}
+        </div>
+      </div>
+      {{if .Reason}}<p class="text-xs text-base-content/60 mt-1 truncate" title="{{.Reason}}">{{.Reason}}</p>{{end}}
+      <div class="flex items-center gap-2 mt-1">
+        {{range $i := seq 1 5}}
+          <button
+            type="button"
+            class="text-sm {{if ge $.Rating $i}}text-warning{{else}}text-base-content/30{{end}}"
+            data-on-click="@post('/api/rate/{{$.ID}}', {body: JSON.stringify({rating: {{$i}}})})"
+            title="Rate {{$i}}">★</button>
+        {{end}}
+        <div class="flex-1"></div>
+        <button
+          type="button"
+          class="btn btn-xs btn-primary gap-1"
+          data-on-click="@post('/api/moments/{{.ID}}/clip')"
+          data-indicator="$busy_{{.ID}}">
+          <span data-class="{'loading loading-spinner loading-xs': $busy_{{.ID}}}"></span>
+          <i data-lucide="scissors" class="w-3 h-3"></i> Clip
+        </button>
+        <button
+          type="button"
+          class="btn btn-xs btn-ghost text-error"
+          data-on-click="@delete('/api/moments/{{.ID}}')"
+          title="Delete moment">
+          <i data-lucide="trash-2" class="w-3 h-3"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

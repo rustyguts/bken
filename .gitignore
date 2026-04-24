@@ -1,23 +1,21 @@
-# Monorepo
-node_modules/
-.venv/
-__pycache__/
-*.pyc
-*.pyo
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
+# Binaries
+bken
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
 
-# App
-app/node_modules/
-app/.nuxt/
-app/.output/
-app/dist/
+# Go
+vendor/
 
-# CLI
-cli/.venv/
-cli/__pycache__/
-cli/.pytest_cache/
+# Build artifacts
+tmp/
+build-errors.log
+
+# Generated CSS (run `bun run build:css` to recreate)
+internal/web/ui/static/dist/app.css
 
 # Data and artifacts (derived, large)
 data/
@@ -26,11 +24,36 @@ data/
 # Models cache
 models/
 
-# Local env
+# Dependencies
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Environment
 .env
 .env.local
 .env.*.local
 
-# Misc
+# Python tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local dev markers
+.archive-stub
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
 .DS_Store
 Thumbs.db

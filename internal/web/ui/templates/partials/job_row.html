@@ -1,0 +1,25 @@
+{{define "job_row"}}
+<tr>
+  <td class="font-mono text-xs">{{.ID}}</td>
+  <td>{{.Type}}</td>
+  <td>
+    <span class="badge badge-sm {{if eq .Status "done"}}badge-success{{else if eq .Status "failed"}}badge-error{{else if eq .Status "running"}}badge-warning{{else}}badge-ghost{{end}}">
+      {{.Status}}
+    </span>
+  </td>
+  <td>
+    {{if and (gt .Progress 0) (lt .Progress 100)}}
+      <div class="flex items-center gap-2 min-w-[100px]">
+        <progress class="progress progress-primary w-20" value="{{.Progress}}" max="100"></progress>
+        <span class="text-[10px] font-mono">{{.Progress}}%</span>
+      </div>
+    {{else}}
+      —
+    {{end}}
+  </td>
+  <td class="text-xs text-base-content/60">{{if .VideoID}}v{{.VideoID}}{{else}}—{{end}}</td>
+  <td class="text-xs text-base-content/60">{{if .TargetID}}c{{.TargetID}}{{else}}—{{end}}</td>
+  <td class="text-xs font-mono" title="Created: {{fmtTimeLong .CreatedAt}}">{{fmtTimeLong .UpdatedAt}}</td>
+  <td class="text-xs text-error truncate max-w-xs" title="{{.ErrorMessage}}">{{.ErrorMessage}}</td>
+</tr>
+{{end}}
